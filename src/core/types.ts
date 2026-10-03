@@ -16,7 +16,7 @@ export interface LevelDef {
   id: number;
   /** 顯示名稱。 */
   name: string;
-  /** `public/assets/sprites/` 底下的檔名。 */
+  /** 相對於 `public/assets/` 的路徑，例如 `character/萊萬汀_img.webp`。 */
   sprite: string;
   /** 碰撞圓半徑，虛擬單位。 */
   radius: number;

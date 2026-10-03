@@ -71,7 +71,7 @@ Every successful drop banks **1.0 SP**. The gauge doubles as the unlock gate —
 ## <span style="color:#569CD6">✨ Features</span>
 - ✅ **Real physics**: driven by Matter.js — gravity, collision and stacking all follow genuine mechanics, with tunable parameters
 - ✅ **Config-driven**: levels, skills, container frame and branding all live in `public/config/`, editable without a rebuild
-- ✅ **Hand-drawn vector art**: dumplings are hand-authored SVG, so they scale losslessly and the white outline hugs the character silhouette rather than the image bounds
+- ✅ **Hand-drawn art**: dumplings are authored as vector art and exported as lossless 512×512 WebP; the white outline hugs the character silhouette rather than the image bounds
 - ✅ **Landscape 16:9 responsive**: the container has no fixed pixel size; it scales proportionally and fills the space available
 - ✅ **Fallback first**: missing art or config degrades gracefully and never leaves a blank screen
 - ✅ **Free and open source**: MIT licensed. Play it, fork it, change it
@@ -119,7 +119,7 @@ EndchiMerge
 │  │  ├─container.json          # Decorative 3D frame parameters
 │  │  └─branding.json           # Game name, notices, repo link
 │  └─assets                     # Art and audio
-│     ├─sprites                 # Character SVG (the dumplings)
+│     ├─character               # Dumpling assets (<name>_img.webp)
 │     ├─icons                   # Toolbar icons
 │     ├─ui                      # Panel decoration
 │     └─audio                   # Sound effects
@@ -146,7 +146,7 @@ EndchiMerge
 ## <span style="color:#569CD6">🚦 Progress</span>
 | Phase | Scope | Status |
 |:--|:--|:--:|
-| M0 | Scaffold, config system, SVG loading and collision-radius calibration | 🚧 In progress |
+| M0 | Scaffold, config system, WebP asset loading and collision-radius calibration | 🚧 In progress |
 | M1–M2 | Layout skeleton, visual system, snake roster and silhouette outline | ⏳ Pending |
 | M3–M4 | Container rendering, drop input, merge core and combo | ⏳ Pending |
 | M5–M6 | SP and skills, unlock system and codex | ⏳ Pending |
@@ -156,7 +156,7 @@ EndchiMerge
 ## 🙏 Credits
 - Gameplay inspired by the "山團團" mini-game in *Arknights: Endfield*, all rights reserved by **Hypergryph / Gryphline**
 - Character designs remain the property of **Hypergryph / Gryphline**; this project exists as a technical demonstration and fan work only
-- AI usage: most of the code and documentation in this project is AI-assisted; the character SVG artwork is hand-drawn:
+- AI usage: most of the code and documentation in this project is AI-assisted; the character artwork is hand-drawn:
   - Code: Claude, CodeBuddy
   - Text: Claude
 

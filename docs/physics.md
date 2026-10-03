@@ -60,5 +60,5 @@ Lv1 只能靠掉落產生，永遠不會是合成的結果，所以 0。實際�
 
 1. `radius` 與 `spawnWeight` 高度耦合。改半徑而不改權重，難度曲線會靜默走樣。
 2. `mergeResult` 形成單鏈，最後一級必須是 `null`。斷鏈會讓合成靜默失敗。
-3. 新增等級時，`sprite` 檔名必須與 `public/assets/sprites/` 完全一致（含中文）。
+3. 新增等級時，`sprite` 必須是**相對於 `public/assets/`** 的路徑（例如 `character/萊萬汀_img.webp`），且檔名與磁碟上的檔案完全一致（含中文）。素材一律 512×512、body 304×304、body 中心 (256, 328)——詳見 `public/assets/character/README.md`。
 4. 半徑不得使 `2 × radius > VIRTUAL_WIDTH`，否則該等級一出現就會卡在兩牆之間。

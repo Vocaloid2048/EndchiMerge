@@ -17,7 +17,7 @@
     {
       "id": 1,
       "name": "萊萬汀",
-      "sprite": "萊萬汀.svg",
+      "sprite": "character/萊萬汀_img.webp",
       "radius": 13.5,
       "density": 0.001,
       "restitution": 0.2,
@@ -31,7 +31,7 @@
     {
       "id": 2,
       "name": "潔爾佩塔",
-      "sprite": "潔爾佩塔.svg",
+      "sprite": "character/潔爾佩塔_img.webp",
       "radius": 17.3,
       "density": 0.001,
       "restitution": 0.18,
@@ -45,7 +45,7 @@
     {
       "id": 3,
       "name": "伊馮",
-      "sprite": "伊馮.svg",
+      "sprite": "character/伊馮_img.webp",
       "radius": 22.1,
       "density": 0.001,
       "restitution": 0.17,
@@ -59,7 +59,7 @@
     {
       "id": 4,
       "name": "湯湯",
-      "sprite": "湯湯.svg",
+      "sprite": "character/湯湯_img.webp",
       "radius": 28.3,
       "density": 0.001,
       "restitution": 0.15,
@@ -73,7 +73,7 @@
     {
       "id": 5,
       "name": "洛茜",
-      "sprite": "洛茜.svg",
+      "sprite": "character/洛茜_img.webp",
       "radius": 36.2,
       "density": 0.001,
       "restitution": 0.14,
@@ -87,7 +87,7 @@
     {
       "id": 6,
       "name": "莊方宜",
-      "sprite": "莊方宜.svg",
+      "sprite": "character/莊方宜_img.webp",
       "radius": 46.4,
       "density": 0.001,
       "restitution": 0.12,
@@ -101,7 +101,7 @@
     {
       "id": 7,
       "name": "弭弗",
-      "sprite": "弭弗.svg",
+      "sprite": "character/弭弗_img.webp",
       "radius": 59.4,
       "density": 0.001,
       "restitution": 0.11,
@@ -115,7 +115,7 @@
     {
       "id": 8,
       "name": "卡繆",
-      "sprite": "卡繆.svg",
+      "sprite": "character/卡繆_img.webp",
       "radius": 76.0,
       "density": 0.001,
       "restitution": 0.09,
@@ -129,7 +129,7 @@
     {
       "id": 9,
       "name": "訣",
-      "sprite": "訣.svg",
+      "sprite": "character/訣_img.webp",
       "radius": 97.3,
       "density": 0.001,
       "restitution": 0.08,
@@ -143,7 +143,7 @@
     {
       "id": 10,
       "name": "梨諾",
-      "sprite": "梨諾.svg",
+      "sprite": "character/梨諾_img.webp",
       "radius": 124.5,
       "density": 0.001,
       "restitution": 0.06,
