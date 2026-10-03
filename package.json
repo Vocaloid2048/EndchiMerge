@@ -1,0 +1,16 @@
+{
+  "name": "endchimerge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "EndchiMerge（團圓大作戰）— a browser-based physics merge puzzle game. Unofficial fan project.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.2",
+    "vite": "^7.1.3"
+  }
+}
