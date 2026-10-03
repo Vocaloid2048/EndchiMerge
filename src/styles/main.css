@@ -1,0 +1,57 @@
+/*
+ * 全域樣式骨架。
+ * Global style scaffold.
+ *
+ * 此處僅提供最小可用的重設與版面容器。完整視覺系統（深色主題、面板、
+ * 琥珀金強調色）與背景美術待 design.md §3 定案後再補上。
+ * This file only provides a minimal reset and the layout container. The full
+ * visual system (dark theme, panels, amber accent) and background art will be
+ * added after design.md §3 is finalised.
+ */
+
+:root {
+  color-scheme: dark;
+
+  --color-bg: #1b1c20;
+  --color-fg: #f2f2f4;
+  --color-fg-muted: #a5a5ad;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: system-ui, -apple-system, 'Segoe UI', 'Noto Sans TC',
+    'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * 根容器：填滿視窗並置中內容，作為後續版面骨架的 flex 宿主。
+ * Root container: fills the viewport and centres its content, acting as the
+ * flex host for the upcoming layout skeleton.
+ */
+#app {
+  display: flex;
+  min-height: 100%;
+  align-items: center;
+  justify-content: center;
+}
+
+.boot-placeholder {
+  margin: 0;
+  color: var(--color-fg-muted);
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+}
