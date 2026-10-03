@@ -1,0 +1,36 @@
+name: Verify Asset Signatures
+
+# 方團團素材簽名的「後備防線」/ Backstop for character asset signatures.
+#
+# 第一防線是 .githooks/pre-commit：它在 commit 物件產生「之前」補上簽名。
+# 這裡負責擋下 pre-commit 沒有生效的情況——最常見的是 `git commit --no-verify`，
+# 其次是貢獻者尚未安裝 hook（clone 後未跑 npm install）。
+#
+# ⚠️ 這裡刻意只「驗證並失敗」，不自動補簽 commit。原因見 docs/asset-signatures.md：
+#    Action 在 push 之後才執行，未簽名的 commit 早已進入遠端且可被 fetch；
+#    事後再補一個簽名 commit 並不能讓那個未簽名版本消失。
+
+on:
+  push:
+    paths:
+      - 'public/assets/character/**'
+      - 'scripts/sign-assets.mjs'
+      - '.github/workflows/verify-asset-signatures.yml'
+  pull_request:
+    paths:
+      - 'public/assets/character/**'
+      - 'scripts/sign-assets.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check character asset metadata signatures
+        run: node scripts/sign-assets.mjs --check public/assets/character
