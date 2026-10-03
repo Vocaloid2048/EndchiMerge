@@ -1,0 +1,19 @@
+{
+  "_meta": {
+    "provisional": true,
+    "note": "透視偏移與染色值為目視暫定值。3D 外框是純裝飾，遊戲區永遠是前表面矩形，物理不套用透視。"
+  },
+
+  "cornerRadius": 28,
+  "strokeWidth": 3,
+  "strokeColor": "#E8C07A",
+
+  "perspectiveDx": 26,
+  "perspectiveDy": -18,
+
+  "frontTint": "rgba(255, 255, 255, 0.04)",
+  "backTint": "rgba(255, 255, 255, 0.02)",
+
+  "aspectMin": 0.62,
+  "aspectMax": 1.45
+}

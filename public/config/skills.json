@@ -1,0 +1,57 @@
+{
+  "_meta": {
+    "provisional": true,
+    "note": "sp.max 目前為 3.0，但「命運互換」消耗 4，因此該技能在預設值下永遠無法解鎖。design.md D12 的預設上限需要重新確認。技能參數（forceY、impulse 等）全部待調。",
+    "skillOrder": "先按消耗技力遞增，其次一般技能在前、特殊條件技能在後；可用 sortOrder 覆寫。"
+  },
+
+  "sp": {
+    "max": 3.0,
+    "initial": 0.0,
+    "gainPerDrop": 1.0,
+    "overflowAllowed": false
+  },
+
+  "skills": [
+    {
+      "id": "discard",
+      "name": "捨棄",
+      "cost": 1,
+      "targeting": "user_pick",
+      "pickCount": 1,
+      "params": {}
+    },
+    {
+      "id": "protocol_float",
+      "name": "協議：浮動",
+      "cost": 2,
+      "targeting": "immediate",
+      "pickCount": 0,
+      "params": {
+        "durationMs": 1500,
+        "forceY": null
+      }
+    },
+    {
+      "id": "shake",
+      "name": "搖晃！",
+      "cost": 3,
+      "targeting": "immediate",
+      "pickCount": 0,
+      "params": {
+        "impulse": null,
+        "durationMs": 600
+      }
+    },
+    {
+      "id": "fate_swap",
+      "name": "命運互換",
+      "cost": 4,
+      "targeting": "user_pick",
+      "pickCount": 2,
+      "params": {
+        "disturbance": null
+      }
+    }
+  ]
+}
