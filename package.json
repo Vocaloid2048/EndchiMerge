@@ -6,7 +6,8 @@
   "description": "EndchiMerge（團圓大作戰）— a browser-based physics merge puzzle game. Unofficial fan project.",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc -b",
+    "build": "npm run typecheck && vite build",
     "preview": "vite preview"
   },
   "devDependencies": {
