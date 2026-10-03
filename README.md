@@ -111,6 +111,7 @@ npm run typecheck  # 只跑型別檢查
 EndchiMerge
 ├─docs                          # 說明文件
 │  ├─physics.md                 # 物理參數的推導與暫定數值說明
+│  ├─asset-signatures.md        # 素材元數據簽名機制
 │  └─design-main-screen.jpg     # 主畫面設計稿
 ├─public                        # 原樣 serve，不經打包器
 │  ├─config                     # 遊戲配置（外部化，改完不需重新 build）
@@ -134,6 +135,13 @@ EndchiMerge
 │  │  └─panels.css              # 面板共用樣式
 │  ├─main.ts                    # 應用入口
 │  └─vite-env.d.ts
+├─scripts
+│  ├─sign-assets.mjs            # 角色素材元數據簽名（SVG / PNG / WebP）
+│  └─install-git-hooks.mjs      # 設定 core.hooksPath（npm install 後自動執行）
+├─.githooks
+│  └─pre-commit                 # commit 前自動補上素材簽名
+├─.github
+│  └─workflows                  # CI（素材簽名後備驗證）
 ├─index.html
 ├─package.json
 ├─tsconfig.json / tsconfig.app.json / tsconfig.node.json

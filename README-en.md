@@ -111,6 +111,7 @@ Requires Node.js 20 or newer.
 EndchiMerge
 ├─docs                          # Documentation
 │  ├─physics.md                 # Derivation of the physics numbers and why they are provisional
+│  ├─asset-signatures.md        # How character asset metadata signing works
 │  └─design-main-screen.jpg     # Main screen design
 ├─public                        # Served verbatim, never bundled
 │  ├─config                     # Game configuration (externalised, no rebuild needed)
@@ -134,6 +135,13 @@ EndchiMerge
 │  │  └─panels.css              # Shared panel styles
 │  ├─main.ts                    # Application entry point
 │  └─vite-env.d.ts
+├─scripts
+│  ├─sign-assets.mjs            # Signs character assets (SVG / PNG / WebP)
+│  └─install-git-hooks.mjs      # Sets core.hooksPath (runs after npm install)
+├─.githooks
+│  └─pre-commit                 # Signs staged character assets before committing
+├─.github
+│  └─workflows                  # CI (asset signature backstop)
 ├─index.html
 ├─package.json
 ├─tsconfig.json / tsconfig.app.json / tsconfig.node.json
