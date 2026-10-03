@@ -10,3 +10,7 @@
 *.webp binary
 *.woff binary
 *.woff2 binary
+
+# Git hooks 必須保持 LF，否則在 Linux / macOS 上會無法執行。
+# Git hooks must stay LF or they will not run on Linux / macOS.
+/.githooks/** text eol=lf

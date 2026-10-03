@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+#
+# 方團團素材簽名護欄 / Character asset signature guard.
+#
+# 只處理 public/assets/character/ 底下、本次已 staged 的圖片（svg / png / webp）：
+# 就地補上不可見的元數據簽名，再把結果重新加入 index，確保 commit 內容一定帶簽名。
+#
+# 為什麼是 pre-commit 而不是 CI：
+#   GitHub Action 只能在 push「之後」執行，未簽名的 commit 已經進入遠端、可被任何人 fetch。
+#   只有在 commit 物件產生之前攔截，未簽名的內容才不會進入歷史。
+#   CI 只作後備防線（擋 --no-verify 或未安裝 hook 的情況）。
+#
+# 略過 / Bypass: git commit --no-verify
+#
+# 安裝 / Install: npm install（由 package.json 的 prepare 自動設定 core.hooksPath）
+
+set -eo pipefail
+
+TARGET='public/assets/character'
+
+[ -d "$TARGET" ] || exit 0
+
+imgs=()
+while IFS= read -r -d '' f; do
+  # 用小寫比對以兼容不區分大小寫的副檔名（不使用 ${f,,}，macOS 的 bash 3.2 不支援）
+  lower=$(printf '%s' "$f" | tr '[:upper:]' '[:lower:]')
+  case "$lower" in
+    *.svg|*.png|*.webp) imgs+=("$f") ;;
+  esac
+done < <(git diff --cached --name-only --diff-filter=ACM -z -- "$TARGET")
+
+[ "${#imgs[@]}" -gt 0 ] || exit 0
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "pre-commit: 找不到 node，無法為方團團素材加上元數據簽名。" >&2
+  echo "            請安裝 Node.js；或改用 git commit --no-verify（CI 仍會檢查）。" >&2
+  exit 1
+fi
+
+node scripts/sign-assets.mjs "${imgs[@]}"
+git add -- "${imgs[@]}"
