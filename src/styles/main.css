@@ -1,21 +1,17 @@
 /*
- * 全域樣式骨架。
- * Global style scaffold.
+ * 全域樣式入口。
+ * Global stylesheet entry.
  *
- * 此處僅提供最小可用的重設與版面容器。完整視覺系統（深色主題、面板、
- * 琥珀金強調色）與背景美術待 design.md §3 定案後再補上。
- * This file only provides a minimal reset and the layout container. The full
- * visual system (dark theme, panels, amber accent) and background art will be
- * added after design.md §3 is finalised.
+ * 這支檔案只負責「重設 + 版面宿主」。設計 token 在 tokens.css，面板外觀在
+ * panels.css。七個區域的實際版面（Row / Col 切換）會在 M1 建立 ui/layout.ts
+ * 時一併補上。
+ * This file owns only the reset and the layout host. Design tokens live in
+ * tokens.css and panel appearance in panels.css. The real seven-region layout,
+ * including the Row-to-Col switch, arrives with ui/layout.ts in M1.
  */
 
-:root {
-  color-scheme: dark;
-
-  --color-bg: #1b1c20;
-  --color-fg: #f2f2f4;
-  --color-fg-muted: #a5a5ad;
-}
+@import './tokens.css';
+@import './panels.css';
 
 *,
 *::before,
@@ -32,15 +28,16 @@ body {
 body {
   background: var(--color-bg);
   color: var(--color-fg);
-  font-family: system-ui, -apple-system, 'Segoe UI', 'Noto Sans TC',
-    'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
 
 /*
- * 根容器：填滿視窗並置中內容，作為後續版面骨架的 flex 宿主。
- * Root container: fills the viewport and centres its content, acting as the
- * flex host for the upcoming layout skeleton.
+ * 根容器：填滿視窗，作為版面骨架的 flex 宿主。置中只是為了讓開發期的佔位文字
+ * 好讀，M1 會改為七個區域的實際排列。
+ * Root container: fills the viewport and acts as the flex host for the layout
+ * skeleton. The centring is only so the development placeholder is readable; M1
+ * replaces it with the real seven-region arrangement.
  */
 #app {
   display: flex;
@@ -52,6 +49,6 @@ body {
 .boot-placeholder {
   margin: 0;
   color: var(--color-fg-muted);
-  font-size: 0.95rem;
+  font-size: var(--text-sm);
   letter-spacing: 0.02em;
 }

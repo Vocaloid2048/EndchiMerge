@@ -1,0 +1,84 @@
+/*
+ * 設計 token。
+ * Design tokens.
+ *
+ * 顏色的來源是 design.md §3：深色主題、半透明面板、琥珀金強調色。背景美術尚未提供
+ * （§9 Q1），因此面板的對比度是在純深色底上調的，背景圖加入後需要重新檢核。
+ * Colours follow design.md §3: a dark theme with translucent panels and an amber
+ * accent. The background art is still outstanding (§9 Q1), so panel contrast was
+ * tuned against a flat dark surface and must be re-checked once art lands.
+ *
+ * 數值刻意以 CSS 變數集中，避免各處硬寫。新增顏色前先問「這是不是既有語意之一」。
+ * Values are centralised deliberately. Before adding a colour, ask whether it is
+ * really one of the existing semantic roles.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* 表面 Surfaces */
+  --color-bg: #1b1c20;
+  --color-bg-deep: #15161a;
+  --color-panel: rgba(255, 255, 255, 0.06);
+  --color-panel-strong: rgba(255, 255, 255, 0.1);
+  --color-border: rgba(255, 255, 255, 0.14);
+  --color-border-strong: rgba(255, 255, 255, 0.3);
+
+  /* 文字 Text */
+  --color-fg: #f2f2f4;
+  --color-fg-muted: #a5a5ad;
+  --color-fg-dim: #6f7078;
+
+  /* 強調色：琥珀金。與 container.json 的 strokeColor 一致。 */
+  --color-accent: #e8c07a;
+  --color-accent-soft: rgba(232, 192, 122, 0.22);
+  --color-accent-ink: #1b1c20;
+
+  /* 語意色 Semantic */
+  --color-danger: #e2645f;
+  --color-success: #7ec97e;
+
+  /* 間距 Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* 圓角 Radii */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-pill: 999px;
+
+  /* 字體 Typography */
+  --font-sans: system-ui, -apple-system, 'Segoe UI', 'Noto Sans TC', 'PingFang TC',
+    'Microsoft JhengHei', sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Mono', Menlo, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.75rem;
+
+  /* 版面 Layout */
+  --panel-gap: 12px;
+
+  /* 動態 Motion */
+  --transition-fast: 120ms ease-out;
+  --transition-base: 200ms ease-out;
+}
+
+/*
+ * 尊重系統的減少動態偏好。合成動畫與脈動都是非必要的裝飾，關掉不影響玩法。
+ * Respect the reduced-motion preference. Merge pops and selection pulses are
+ * decorative; disabling them costs no gameplay information.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --transition-fast: 0ms;
+    --transition-base: 0ms;
+  }
+}
