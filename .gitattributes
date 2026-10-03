@@ -1,0 +1,12 @@
+# 統一換行符號，避免跨平台（Windows / macOS / Linux）產生無意義的 diff 雜訊。
+# Normalise line endings so cross-platform checkouts (Windows / macOS / Linux)
+# do not produce meaningless diff churn.
+* text=auto eol=lf
+
+*.svg text
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.woff binary
+*.woff2 binary
