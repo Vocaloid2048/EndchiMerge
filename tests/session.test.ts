@@ -271,6 +271,39 @@ describe('GameSession — 物理推進 / stepping', () => {
   });
 });
 
+describe('GameSession — sprite 保持直立 / sprites stay upright', () => {
+  it('keeps every dumpling at zero angle after a busy pile-up', () => {
+    const session = makeSession();
+
+    /* 故意交錯投放，製造大量碰撞與擠壓。 */
+    for (const x of [200, 260, 220, 240, 280, 210]) {
+      session.setAim(x);
+      session.drop();
+      for (let frame = 0; frame < 20; frame += 1) session.step(1000 / 60);
+    }
+    for (let frame = 0; frame < 600; frame += 1) session.step(1000 / 60);
+
+    /* design.md §4.1：方團團「平面、直立，不旋轉或僅小幅旋轉」。
+     * 碰撞體是圓、畫面是方，一旦旋轉就會把兩者不一致演給玩家看。 */
+    for (const body of session.bodies) {
+      expect(body.angle).toBe(0);
+    }
+  });
+
+  it('does not let the pile-up leave anyone spinning', () => {
+    const session = makeSession();
+
+    session.drop();
+    session.drop();
+
+    for (let frame = 0; frame < 300; frame += 1) {
+      session.step(1000 / 60);
+    }
+
+    expect(session.bodies.every((body) => body.angle === 0)).toBe(true);
+  });
+});
+
 describe('GameSession — 尚未實作的部分 / not yet implemented', () => {
   it('reports zero score until M4 wires merging up', () => {
     const session = makeSession();
