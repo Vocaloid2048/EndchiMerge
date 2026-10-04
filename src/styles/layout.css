@@ -119,6 +119,31 @@
   height: 56px;
 }
 
+/*
+ * NEXT 的方團團。整張 512² 素材等比縮進格子，**不裁切** —— 與名冊一致，
+ * 這樣輪廓白框描的是真正的剪影而不是裁切線（design.md §3.2／D26）。
+ * The full 512² asset is scaled into the box without cropping, matching the roster, so
+ * the outline traces the real silhouette rather than a crop line.
+ */
+.card__preview-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* 素材不可用時的等級色塊；刻意與名冊的 `.roster-cell__fallback` 用同一組值。 */
+.card__preview-fallback {
+  display: grid;
+  place-items: center;
+  width: 62%;
+  aspect-ratio: 1;
+  border-radius: 24%;
+  background: var(--fallback-tint, var(--color-panel-strong));
+  color: rgba(17, 18, 22, 0.88);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
 .card__multiplier {
   margin: 0;
   color: var(--color-accent);
