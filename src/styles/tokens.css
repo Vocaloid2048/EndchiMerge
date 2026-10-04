@@ -2,98 +2,94 @@
  * 設計 token。
  * Design tokens.
  *
- * 顏色的來源是 design.md §3：深色主題、半透明面板、琥珀金強調色。背景美術尚未提供
- * （§9 Q1），因此面板的對比度是在純深色底上調的，背景圖加入後需要重新檢核。
- * Colours follow design.md §3: a dark theme with translucent panels and an amber
- * accent. The background art is still outstanding (§9 Q1), so panel contrast was
- * tuned against a flat dark surface and must be re-checked once art lands.
+ * 顏色與玻璃配方全部取自 Figma frame `Group 445`（`方團團.fig`）：
+ * 面板填色 `rgba(34,34,34,.8)`、描邊 `rgba(60,60,67,.8)`、背景模糊 20、
+ * 圓角 32、標題白 `#FFFFFF`、副文字 `#D7D7D7`、技力滿格 `#F9FF51`。
+ * Colours and the glass recipe come from the Figma frame `Group 445`: panel fill
+ * `rgba(34,34,34,.8)`, stroke `rgba(60,60,67,.8)`, 20px backdrop blur, radius 32, white
+ * titles, `#D7D7D7` secondary text and `#F9FF51` for a full SP pip.
  *
- * 數值刻意以 CSS 變數集中，避免各處硬寫。新增顏色前先問「這是不是既有語意之一」。
- * Values are centralised deliberately. Before adding a colour, ask whether it is
- * really one of the existing semantic roles.
+ * **幾何不在這裡**：面板位置、尺寸、格距、字級由 `core/design.ts` 供應，經
+ * `ui/designTokens.ts` 寫成 `--design-*` / `--type-*` / `--melting-*` 等自訂屬性。
+ * Geometry is not here: positions, sizes, pitches and type sizes come from
+ * `core/design.ts` through `ui/designTokens.ts`.
  */
 
 :root {
   color-scheme: dark;
 
-  /* 表面 Surfaces */
-  --color-bg: #1b1c20;
-  --color-bg-deep: #15161a;
-  /*
-   * 面板底色。來源是設計稿的 `#222222`，但**刻意降為 72%**：截圖上的 80% 幾乎不透光，
-   * 會讓下面的玻璃模糊白做。真正決定「透多少」的是 backdrop blur，這裡只提供染色。
-   * Sourced from the mock-up's `#222222` but deliberately dropped to 72%: at the
-   * mock-up's 80% almost nothing shows through and the backdrop blur is wasted.
-   */
-  --color-panel: rgba(34, 34, 34, 0.72);
-  --color-panel-strong: rgba(255, 255, 255, 0.1);
-  --color-border: rgba(255, 255, 255, 0.14);
-  --color-border-strong: rgba(255, 255, 255, 0.3);
+  /* 背景 Background */
+  --color-bg: #14151a;
+  --bg-image: url('/assets/ui/background.webp');
 
   /*
    * 玻璃面板 Glass。
-   * 這是 Apple Liquid Glass 的近似值。真正的 Liquid Glass 會取樣背景做折射與位移，
-   * 需要 shader，純 CSS 做不到；這裡用「背景模糊 + 飽和提升 + 邊緣高光 + 內外陰影」
-   * 模擬玻璃的透光與厚度。不理想時退回設計稿原值即可（fill #222222 @80%、
-   * stroke #3C3C43 @80%、drop shadow 0/4/4 rgba(0,0,0,.25)）。
-   * An approximation of Apple's Liquid Glass. The real thing refracts and displaces
-   * the backdrop, which needs a shader and is out of reach for plain CSS; this
-   * approximates transmission and thickness with blur, saturation, a rim highlight
-   * and inner shadows.
+   * 這是 Apple Liquid Glass 的**近似**。真品會取樣背景做折射與位移，需要 shader，
+   * 純 CSS 做不到；這裡用「背景模糊 + 飽和提升 + 邊緣高光 + 內外陰影」模擬透光與
+   * 厚度。設計稿原值就是上面那組填色／描邊／陰影，所以兩者是同一個設計的兩種表現。
+   * An approximation of Apple's Liquid Glass: the genuine effect refracts the backdrop
+   * and needs a shader. The mock's own values are the fill, stroke and shadow above, so
+   * the two are two renderings of one design rather than two designs.
    */
+  --glass-fill: rgba(34, 34, 34, 0.8);
+  --glass-stroke: rgba(60, 60, 67, 0.8);
   --glass-blur: 20px;
   --glass-saturate: 180%;
   --glass-rim: rgba(255, 255, 255, 0.16);
-  --glass-highlight: rgba(255, 255, 255, 0.26);
+  --glass-highlight: rgba(255, 255, 255, 0.14);
   --glass-shadow: 0 4px 4px rgba(0, 0, 0, 0.25);
   /* backdrop-filter 不可用時的替代不透明度，避免面板與背景糊在一起。 */
-  --glass-tint-fallback: rgba(30, 31, 36, 0.94);
+  --glass-tint-fallback: rgba(24, 25, 30, 0.94);
 
   /* 文字 Text */
-  --color-fg: #f2f2f4;
-  --color-fg-muted: #a5a5ad;
-  --color-fg-dim: #6f7078;
+  --color-fg: #ffffff;
+  --color-fg-muted: #d7d7d7;
+  --color-fg-dim: rgba(215, 215, 215, 0.66);
+  --color-rule: rgba(255, 255, 255, 0.35);
+  /*
+   * 名冊走線的白色。設計稿的 `Arrow 1`（`1408:2184`）是 `SOLID` 純白、完全不透明。
+   * The roster track's white. The mock's `Arrow 1` is a fully opaque `SOLID` white.
+   */
+  --color-track: #ffffff;
 
-  /* 強調色：琥珀金。與 container.json 的 strokeColor 一致。 */
-  --color-accent: #e8c07a;
-  --color-accent-soft: rgba(232, 192, 122, 0.22);
+  /* 物件 Surfaces */
+  --color-object: rgba(255, 255, 255, 0.1);
+  --color-border: rgba(255, 255, 255, 0.14);
+
+  /* 資料色 Data（設計稿的技能卡與技力條配色） */
+  --color-sp-full: #f9ff51;
+  --color-sp-empty: #d7d7d7;
+  --color-badge-1: #9cff9f;
+  --color-badge-2: #ffe066;
+  --color-badge-3: #ff8f8f;
+  --color-skill-card: #d2aeae;
+  --color-skill-band: #d7d7d7;
+
+  /* 強調色：設計稿的技力黃。 */
+  --color-accent: #f9ff51;
+  --color-accent-soft: rgba(249, 255, 81, 0.22);
   --color-accent-ink: #1b1c20;
 
   /* 語意色 Semantic */
   --color-danger: #e2645f;
   --color-success: #7ec97e;
 
-  /* 間距 Spacing */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
-
-  /* 圓角 Radii */
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 18px;
-  --radius-pill: 999px;
-
   /* 字體 Typography */
-  --font-sans: system-ui, -apple-system, 'Segoe UI', 'Noto Sans TC', 'PingFang TC',
-    'Microsoft JhengHei', sans-serif;
+  --font-sans: 'MiSans TC', system-ui, -apple-system, 'Segoe UI', 'Noto Sans TC',
+    'PingFang TC', 'Microsoft JhengHei', sans-serif;
   --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Mono', Menlo, monospace;
-
-  --text-xs: 0.75rem;
-  --text-sm: 0.875rem;
-  --text-md: 1rem;
-  --text-lg: 1.25rem;
-  --text-xl: 1.75rem;
-
-  /* 版面 Layout */
-  --panel-gap: 12px;
 
   /* 動態 Motion */
   --transition-fast: 120ms ease-out;
   --transition-base: 200ms ease-out;
+
+  /*
+   * 名冊素材的對位常數。CSS 無法 import TS，這兩個值與 `src/core/constants.ts` 的
+   * `SPRITE_ANCHOR.y / SPRITE_SIZE`（＝328/512）互為鏡像；改一邊務必同步另一邊。
+   * Mirrors SPRITE_ANCHOR.y / SPRITE_SIZE in src/core/constants.ts (328/512).
+   */
+  --sprite-anchor-y: 0.640625;
+  --art-scale: 1.05;
 }
 
 /*

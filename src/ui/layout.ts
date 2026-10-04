@@ -1,23 +1,34 @@
 /**
- * 七區域版面骨架。
- * The seven-region layout skeleton.
+ * 主畫面版面。
+ * The main-screen layout.
  *
- * 依 design.md §2.2 建立七個區域，順序與位置對齊設計稿：
- * 左上 SCORE 卡；右上工具列（五圖示群組 + 獨立音符）與其下的 NEXT／COMBO 卡；
- * 主列由左至右為 SKILL LIST、中央容器、MELTING LIST。
- * Builds the seven regions from design.md §2.2 in the order the design shows:
- * SCORE top-left; a five-icon toolbar plus a standalone music toggle top-right
- * with NEXT/COMBO beneath; and a main row of SKILL LIST, the centre container and
- * MELTING LIST.
+ * 這一版把版面從「跟著視窗跑的彈性排版」改成**固定設計畫布上的絕對定位**，座標全部
+ * 取自 `core/design.ts`（＝ Figma frame `Group 445`）。整個畫布再由 `ui/scale.ts` 等比
+ * 縮放，所以瀏覽器縮放不會改變任何兩件東西之間的相對大小。
+ * This replaces a fluid, viewport-following layout with **absolute positioning on a fixed
+ * design canvas** whose coordinates come from `core/design.ts` (the Figma frame
+ * `Group 445`). `ui/scale.ts` then scales the canvas uniformly, so browser zoom cannot
+ * change the size of anything relative to anything else.
  *
- * 這一版**只建結構與佔位內容**：容器是空的 canvas、名冊是空的捲動區。M2 會把名冊
- * 填滿、M3 會接手容器、投放與 NEXT。建構子回傳各區域節點，後續模組以 `data-hook`
- * 取用內部槽位，不必回頭改這支檔案。
- * This version builds structure and placeholder content only. M2 fills the roster,
- * M3 takes over the container, dropping and NEXT. The returned region nodes let
- * later modules mount into `data-hook` slots without editing this file.
+ * 分工 / Division of labour:
+ *
+ * - **位置與尺寸**由這裡用 inline style 寫入，值來自 `LAYOUT_RECTS`。
+ *   Position and size are written here as inline styles from `LAYOUT_RECTS`.
+ * - **外觀**（玻璃、顏色、字級、圓角）在 `styles/`。
+ *   Appearance lives in `styles/`.
+ * - **面板內部的格距**（技能格、名冊格、技力條）由 `ui/designTokens.ts` 寫成 CSS 變數，
+ *   CSS 只讀 `var(--…)`，兩邊不會各抄一份數字。
+ *   Intra-panel pitches are written as CSS variables by `ui/designTokens.ts` so no number
+ *   is duplicated between TypeScript and CSS.
+ *
+ * 建構子回傳各區域節點，後續模組以 `data-hook` 取用內部槽位，不必回頭改這支檔案。
+ * The returned region nodes let later modules mount into `data-hook` slots without
+ * editing this file.
  */
 
+import { DESIGN_HEIGHT, DESIGN_WIDTH, LAYOUT_RECTS } from '../core/design';
+import type { Rect } from '../core/types';
+import { applyDesignTokens } from './designTokens';
 import { appendChildren, el } from './dom';
 import { createIcon, type IconName } from './icons';
 
@@ -26,11 +37,18 @@ export const REGION_NAMES = ['score', 'toolbar', 'next', 'combo', 'skill', 'cont
 export type RegionName = (typeof REGION_NAMES)[number];
 
 export interface Layout {
-  /** 版面根節點，掛在 `#app` 之下。 */
+  /** 設計畫布的內層版面根節點。 */
   root: HTMLElement;
+  /** 固定 1920×1080、被整體縮放的畫布節點。 */
+  stage: HTMLElement;
   /** 七個區域節點，供後續模組掛載內容。 */
   regions: Record<RegionName, HTMLElement>;
-  /** 非官方聲明的宿主；內容由 `ui/notice.ts` 在配置載入後填入。 */
+  /** 不屬七區域的常駐介面。 */
+  chrome: {
+    /** 音樂開關，獨立於工具列膠囊之外（design.md D23）。 */
+    music: HTMLButtonElement;
+  };
+  /** 非官方聲明的宿主；內容由配置載入後填入。 */
   notice: HTMLElement;
 }
 
@@ -43,13 +61,28 @@ const TOOLBAR_ITEMS: readonly { icon: IconName; label: string; action: string; d
   { icon: 'settings', label: '設定', action: 'settings' },
 ];
 
+/**
+ * 把節點放到設計稿座標上。
+ * Place a node at a design-space rectangle.
+ *
+ * 用 inline style 而非 CSS class：座標只有一份（`core/design.ts`），產生 CSS class 反而
+ * 需要在 CSS 裡再寫一次數字。
+ * Inline styles rather than generated classes: the coordinates exist once, in
+ * `core/design.ts`, and a class would mean writing them a second time in CSS.
+ */
+function place(node: HTMLElement, rect: Rect): void {
+  node.style.left = `${String(rect.x)}px`;
+  node.style.top = `${String(rect.y)}px`;
+  node.style.width = `${String(rect.width)}px`;
+  node.style.height = `${String(rect.height)}px`;
+}
+
 function buildScoreCard(): HTMLElement {
   const card = el('section', 'panel card card--score');
   card.dataset['region'] = 'score';
 
   const value = el('p', 'card__value', '0');
   value.dataset['hook'] = 'score-value';
-  appendChildren(card, el('h2', 'card__label', 'SCORE'), value, el('hr', 'card__rule'));
 
   const stats = el('dl', 'card__stats');
   for (const [label, hookName] of [
@@ -57,22 +90,23 @@ function buildScoreCard(): HTMLElement {
     ['MERGED', 'merged'],
   ] as const) {
     const row = el('div', 'card__stat');
-    appendChildren(row, el('dt', 'card__stat-label', label));
-    const value = el('dd', 'card__stat-value', '0');
-    value.dataset['hook'] = hookName;
-    row.append(value);
+    const term = el('dt', 'card__stat-label', `${label}:`);
+    const definition = el('dd', 'card__stat-value', '0');
+    definition.dataset['hook'] = hookName;
+    appendChildren(row, term, definition);
     stats.append(row);
   }
-  card.append(stats);
+
+  appendChildren(card, el('h2', 'card__label', 'SCORE'), value, el('hr', 'card__rule'), stats);
   return card;
 }
 
+/** 工具列：五圖示共用一個膠囊群組（design.md D23）。 */
 function buildToolbar(): HTMLElement {
-  const nav = el('nav', 'toolbar');
+  const nav = el('nav', 'panel panel--pill toolbar');
   nav.dataset['region'] = 'toolbar';
   nav.setAttribute('aria-label', '工具列');
 
-  const group = el('div', 'toolbar__group');
   for (const item of TOOLBAR_ITEMS) {
     const button = el('button', 'toolbar__button');
     button.type = 'button';
@@ -81,20 +115,22 @@ function buildToolbar(): HTMLElement {
     button.setAttribute('aria-label', item.label);
     if (item.disabled === true) button.disabled = true;
     button.append(createIcon(item.icon));
-    group.append(button);
+    nav.append(button);
   }
 
-  /* 音符是獨立開關，不與上面五個共用選中態（design.md D23）。 */
-  const music = el('button', 'toolbar__button toolbar__music');
+  return nav;
+}
+
+/** 音樂開關：獨立，不與工具列共用選中態（design.md D23）。 */
+function buildMusicButton(): HTMLButtonElement {
+  const music = el('button', 'panel panel--pill music');
   music.type = 'button';
   music.dataset['action'] = 'music';
   music.title = '音樂開關';
   music.setAttribute('aria-label', '音樂開關');
   music.setAttribute('aria-pressed', 'false');
   music.append(createIcon('music'));
-
-  appendChildren(nav, group, music);
-  return nav;
+  return music;
 }
 
 function buildNextCard(): HTMLElement {
@@ -121,21 +157,21 @@ function buildSkillList(): HTMLElement {
   const panel = el('aside', 'panel panel--skill');
   panel.dataset['region'] = 'skill';
 
-  /* 技力條：位於技能欄頂部（design.md §5.3），滿格對應 sp.max。 */
-  const spBar = el('div', 'sp-bar');
-  spBar.setAttribute('role', 'meter');
-  spBar.setAttribute('aria-label', '技力');
-  spBar.setAttribute('aria-valuemin', '0');
-  spBar.setAttribute('aria-valuemax', '1');
-  spBar.setAttribute('aria-valuenow', '0');
-  const spFill = el('div', 'sp-bar__fill');
-  spFill.dataset['hook'] = 'sp-fill';
-  spBar.append(spFill);
+  /*
+   * 技力條的**段數**由 `sp.max` 決定（設計稿是一點一條），所以配置載入前不建任何
+   * 段數；載入後由 `ui/hud.ts` 的 `renderSpMeter()` 填。這裡只提供容器與 hook。
+   * The segment count follows `sp.max` (one pill per point), so nothing is built before
+   * the config loads; `renderSpMeter()` in `ui/hud.ts` fills it afterwards.
+   */
+  const meter = el('div', 'sp-meter');
+  meter.dataset['hook'] = 'sp-meter';
+  meter.setAttribute('role', 'meter');
+  meter.setAttribute('aria-label', '技力');
 
-  const grid = el('div', 'panel__scroll skill-grid');
+  const grid = el('div', 'skill-grid');
   grid.dataset['hook'] = 'skill-grid';
 
-  appendChildren(panel, el('h2', 'panel__title', 'SKILL LIST'), spBar, grid);
+  appendChildren(panel, el('h2', 'panel__title', 'Skill List'), meter, grid);
   return panel;
 }
 
@@ -166,7 +202,7 @@ function buildStage(): HTMLElement {
 function buildMeltingList(): HTMLElement {
   const panel = el('aside', 'panel panel--melting');
   panel.dataset['region'] = 'melting';
-  const body = el('div', 'panel__scroll melting__body');
+  const body = el('div', 'melting__body');
   body.dataset['hook'] = 'melting-body';
   appendChildren(panel, el('h2', 'panel__title', 'MELTING LIST'), body);
   return panel;
@@ -179,36 +215,53 @@ function buildMeltingList(): HTMLElement {
  * @param host 版面宿主，通常是 `#app` / Layout host, normally `#app`.
  */
 export function createLayout(host: HTMLElement): Layout {
+  /* 畫布：固定 1920×1080，倍率由 `ui/scale.ts` 設定。 */
+  const stage = el('div', 'stage-scale');
+  applyDesignTokens(stage);
+  stage.style.width = `${String(DESIGN_WIDTH)}px`;
+  stage.style.height = `${String(DESIGN_HEIGHT)}px`;
+
   const root = el('div', 'layout');
 
-  const top = el('header', 'layout__top');
-  const topRight = el('div', 'layout__top-right');
-  const topCards = el('div', 'layout__top-cards');
   const score = buildScoreCard();
   const toolbar = buildToolbar();
+  const music = buildMusicButton();
   const next = buildNextCard();
   const combo = buildComboCard();
-
-  appendChildren(topCards, next, combo);
-  appendChildren(topRight, toolbar, topCards);
-  appendChildren(top, score, topRight);
-
-  const main = el('div', 'layout__main');
   const skill = buildSkillList();
   const container = buildStage();
   const melting = buildMeltingList();
-  appendChildren(main, skill, container, melting);
 
-  /* 非官方聲明常駐頁尾：內容稍後由配置填入，但宿主永遠存在。 */
+  place(score, LAYOUT_RECTS.score);
+  place(toolbar, LAYOUT_RECTS.toolGroup);
+  place(music, LAYOUT_RECTS.music);
+  place(next, LAYOUT_RECTS.next);
+  place(combo, LAYOUT_RECTS.combo);
+  place(skill, LAYOUT_RECTS.skill);
+  place(container, LAYOUT_RECTS.container);
+  place(melting, LAYOUT_RECTS.melting);
+
+  /*
+   * 設計稿把返回鍵放在 (64,64)，與 SCORE 面板完全重疊而在設計稿中根本看不到；
+   * 依裁定「照設計稿」不渲染它。座標仍留在 `LAYOUT_RECTS.back` 作紀錄。
+   * The mock puts the back button at (64,64), fully under the SCORE panel so the mock
+   * never renders it; per the decision it is not drawn, and its rect stays in
+   * `LAYOUT_RECTS.back` as a record.
+   */
+
+  /* 非官方聲明：放在安全區之下的下緣留白，不佔任何 UI 空間。 */
   const notice = el('footer', 'layout__notice');
   notice.dataset['hook'] = 'notice';
 
-  appendChildren(root, top, main, notice);
-  host.append(root);
+  appendChildren(root, score, toolbar, music, next, combo, skill, container, melting, notice);
+  stage.append(root);
+  host.append(stage);
 
   return {
     root,
+    stage,
     regions: { score, toolbar, next, combo, skill, container, melting },
+    chrome: { music },
     notice,
   };
 }

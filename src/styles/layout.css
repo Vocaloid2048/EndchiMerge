@@ -1,188 +1,235 @@
 /*
- * 七區域版面的幾何。
- * Geometry for the seven-region layout.
+ * 主畫面的幾何與面板內部排版。
+ * Main-screen geometry and intra-panel layout.
  *
- * 這一支只管**位置與尺寸**，面板的玻璃外觀在 panels.css，顏色在 tokens.css。
- * 分開的理由是版面幾乎不會變，而外觀會隨背景美術（design.md Q1）反覆調整。
- * This file owns position and size only. Panel appearance lives in panels.css and
- * colours in tokens.css, because layout barely changes while appearance will be
- * revised repeatedly once the background art (design.md Q1) lands.
+ * **座標來源**：面板本身的位置與尺寸不在這裡 —— `ui/layout.ts` 會從 `core/design.ts`
+ * 的 `LAYOUT_RECTS`（＝ Figma `Group 445`）寫成 inline style。這一支只管「面板裡面長
+ * 怎樣」，而所有數字都標了對應的 Figma 節點。
+ * Panel position and size are **not** here: `ui/layout.ts` writes them as inline styles
+ * from `LAYOUT_RECTS`. This file only describes what is inside a panel, and every number
+ * names the Figma node it came from.
  *
- * 區域編號對照 design.md §2.2：① SCORE ② 工具列 ③ NEXT ④ COMBO
- * ⑤ SKILL LIST ⑥ 容器 ⑦ MELTING LIST。
- * Region numbers follow design.md §2.2.
+ * 之所以把面板內部留在 CSS：那些值只有 CSS 會讀。搬進 TypeScript 只會多一份沒有程式
+ * 在讀、卻會各自漂移的副本。
+ * Intra-panel values stay in CSS because only CSS reads them; moving them into TypeScript
+ * would create a second copy that nothing reads and that can drift.
  */
 
+/* ── 畫布 / Canvas ──────────────────────────────────────────────────────── */
+
+/*
+ * 固定 1920×1080 的設計畫布。倍率由 `ui/scale.ts` 設成 inline transform。
+ * transform-origin 置中，配合 #app 的 grid 居中，非 16:9 的視窗會均勻留黑邊。
+ * The fixed 1920×1080 design canvas. `ui/scale.ts` sets the scale as an inline transform;
+ * a centred origin plus the grid on #app letterboxes evenly on non-16:9 viewports.
+ */
+.stage-scale {
+  position: relative;
+  flex: none;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+/* 設計畫布內的絕對座標系，原點就是 frame 左上角。 */
 .layout {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  width: 100%;
-  min-height: 100dvh;
-  padding: var(--space-3) var(--space-4);
+  position: absolute;
+  inset: 0;
 }
 
-/* ── ① SCORE 卡 ／ ② 工具列 ＋ ③ NEXT ／ ④ COMBO ─────────────────────── */
+/* ── ① SCORE 卡 / SCORE card（`1408:2246`，435×287）────────────────────── */
 
-.layout__top {
-  display: flex;
-  gap: var(--space-4);
-  align-items: flex-start;
-  justify-content: space-between;
-}
-
-.layout__top-right {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  align-items: flex-end;
-}
-
-.layout__top-cards {
-  display: flex;
-  gap: var(--space-3);
-  align-items: stretch;
-}
-
-.card--score {
-  width: clamp(150px, 22%, 260px);
-  padding: var(--space-3) var(--space-4);
-  gap: var(--space-1);
-}
-
+/*
+ * 面板內的三塊文字各自絕對定位，座標直接照抄設計稿：標題盒 y=22（節點 `1408:2238`）、
+ * 大數字 y=73（`1408:2240`）、分隔線 y=170（`1408:2247`）、統計兩行 y=182（`1408:2242`）。
+ * 用絕對定位而非流式排版，是因為設計稿的盒子互相重疊（COMBO 卡最明顯），流式排版只能
+ * 靠負 margin 硬湊，之後沒人看得懂那些負值從哪來。
+ * Each block is absolutely positioned at the mock's own coordinates. Absolute rather than
+ * flow because the mock's boxes overlap (most visibly in the COMBO card), and flow would
+ * need negative margins whose origin nobody could trace later.
+ */
 .card__label {
+  position: absolute;
+  top: 22px;
+  left: 0;
+  width: 100%;
   margin: 0;
-  color: var(--color-fg-muted);
-  font-size: var(--text-xs);
+  color: var(--color-fg);
+  font-size: 32px;
   font-weight: 500;
-  letter-spacing: 0.14em;
+  line-height: 42px;
+  text-align: center;
 }
 
 .card__value {
+  position: absolute;
+  top: 73px;
+  left: 0;
+  width: 100%;
   margin: 0;
   color: var(--color-fg);
-  font-size: var(--text-xl);
-  font-weight: 700;
+  font-size: 64px;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
-  line-height: 1.1;
+  line-height: 85px;
+  text-align: center;
 }
 
+/*
+ * 分隔線。設計稿是純白 1px（`1408:2247`）；這裡降到 40% 白，因為設計稿畫在純色底上，
+ * 而實際背景是有紋理的漸層圖 —— 全白細線在漸層上會比在設計稿上搶眼得多。
+ * The mock draws a solid white hairline; it is dropped to 40% because the mock was drawn
+ * on a flat fill while the real backdrop is a textured gradient, where a full-white 1px
+ * line reads far louder than it did in the mock.
+ */
 .card__rule {
-  width: 100%;
-  margin: var(--space-2) 0;
+  position: absolute;
+  top: 170px;
+  left: 29px;
+  width: 376px;
+  height: 0;
+  margin: 0;
   border: 0;
-  border-top: 1px dashed var(--color-border);
+  border-top: 1px solid var(--color-rule);
 }
 
 .card__stats {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+  position: absolute;
+  top: 182px;
+  left: 28px;
+  width: 370px;
   margin: 0;
 }
 
 .card__stat {
   display: flex;
-  justify-content: space-between;
-  gap: var(--space-3);
+  gap: 8px;
+  height: 42px;
+  align-items: center;
+  color: var(--color-fg-muted);
+  font-size: 32px;
+  line-height: 42px;
 }
 
-.card__stat-label {
-  color: var(--color-fg-dim);
-  font-size: var(--text-xs);
-  letter-spacing: 0.08em;
+.card__stat-label,
+.card__stat-value {
+  margin: 0;
+  font: inherit;
 }
 
 .card__stat-value {
-  margin: 0;
-  color: var(--color-fg-muted);
-  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
 }
 
-.card--next {
-  min-width: 96px;
-  align-items: center;
-  padding: var(--space-2) var(--space-3) var(--space-3);
-}
+/* ── ③ NEXT 卡 / NEXT card（`1408:2236`，163×171）─────────────────────── */
 
-.card--combo {
-  min-width: 118px;
-  align-items: center;
-  padding: var(--space-2) var(--space-4) var(--space-3);
+/* 標題盒 y=12（`1408:2117`）；預覽框 y=66，設計稿的素材是 63×80（`1408:2173`）。 */
+.card--next .card__label {
+  top: 12px;
 }
 
 .card__preview {
+  position: absolute;
+  top: 66px;
+  left: 41.5px;
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 56px;
+  width: 80px;
+  height: 80px;
 }
 
 /*
- * NEXT 的方團團。整張 512² 素材等比縮進格子，**不裁切** —— 與名冊一致，
- * 這樣輪廓白框描的是真正的剪影而不是裁切線（design.md §3.2／D26）。
- * The full 512² asset is scaled into the box without cropping, matching the roster, so
- * the outline traces the real silhouette rather than a crop line.
+ * NEXT 的方團團。整張 512² 素材等比縮進格子、**不裁切** —— 與名冊一致，這樣輪廓白框描
+ * 的是真正的剪影而不是裁切線（design.md §3.2／D26），並把 body 中心對到框中心。
+ * The full 512² asset is contained rather than cropped, matching the roster so the outline
+ * traces the real silhouette (D26), with the body centre aligned to the box centre.
  */
 .card__preview-img {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: calc(100% * var(--art-scale));
+  height: calc(100% * var(--art-scale));
   object-fit: contain;
+  transform: translate(-50%, calc(100% / (2 * var(--art-scale)) - var(--sprite-anchor-y) * 100%));
 }
 
-/* 素材不可用時的等級色塊；刻意與名冊的 `.roster-cell__fallback` 用同一組值。 */
+/* 素材不可用時的等級色塊，配色與名冊的 `.roster-cell__fallback` 一致。 */
 .card__preview-fallback {
   display: grid;
   place-items: center;
   width: 62%;
   aspect-ratio: 1;
   border-radius: 24%;
-  background: var(--fallback-tint, var(--color-panel-strong));
+  background: var(--fallback-tint, var(--color-object));
   color: rgba(17, 18, 22, 0.88);
-  font-size: var(--text-sm);
+  font-size: 22px;
   font-weight: 600;
 }
 
-.card__multiplier {
-  margin: 0;
-  color: var(--color-accent);
-  font-size: var(--text-sm);
-  font-variant-numeric: tabular-nums;
+/* ── ④ COMBO 卡 / COMBO card（`1408:2237`，255×171）───────────────────── */
+
+/* 標題 y=12；數字 y=45（`1408:2180`）；倍率 y=121（`1408:2181`）。 */
+.card--combo .card__label {
+  top: 12px;
 }
 
-/* 工具列：五圖示共用一個膠囊群組，音符獨立在外（design.md D23）。 */
+.card--combo .card__value {
+  top: 45px;
+}
+
+.card__multiplier {
+  position: absolute;
+  top: 121px;
+  left: 0;
+  width: 100%;
+  margin: 0;
+  color: var(--color-fg-muted);
+  font-size: 32px;
+  line-height: 32px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* ── ② 工具列 / Toolbar（`1408:2064`，450×96）────────────────────────── */
+
+/*
+ * 五顆 72×72 的圓鈕，間距 16，膠囊內距左 13 上 12：
+ * 13 + 72×5 + 16×4 + 13 = 450 ✓
+ * Five 72×72 round buttons, 16 apart, in a capsule with 13/12 padding.
+ *
+ * `flex-direction: row` 一定要寫。膠囊同時有 `panel` 類別，而 `.panel` 是
+ * `flex-direction: column`（面板內容一般都是直向堆疊）。少了這一行，五顆鈕會縱向疊起來，
+ * 而且因為總高超出膠囊，`flex-shrink` 會把它們壓到剩 48px —— 圖示看起來像爆出面板。
+ * `flex-direction: row` is load-bearing: the capsule also carries the `panel` class, and
+ * `.panel` is a column flex because panels normally stack vertically. Without this line the
+ * five buttons stack and, because their total height overflows the capsule, `flex-shrink`
+ * squeezes them down to 48px — which reads as icons bursting out of the panel.
+ */
 .toolbar {
   display: flex;
-  gap: var(--space-3);
+  flex-direction: row;
   align-items: center;
-}
-
-/* 工具列的膠囊幾何；玻璃表面（底色、描邊、模糊）在 panels.css。 */
-.toolbar__group {
-  display: flex;
-  gap: 2px;
-  padding: 6px;
-  border-radius: var(--radius-pill);
+  gap: 16px;
+  padding: 12px 13px;
 }
 
 .toolbar__button {
   display: grid;
   place-items: center;
-  width: 44px;
-  height: 44px;
+  flex: none;
+  width: 72px;
+  height: 72px;
   padding: 0;
   border: 0;
-  border-radius: var(--radius-pill);
+  border-radius: var(--pill-radius, 360px);
   background: transparent;
-  color: var(--color-fg-muted);
+  color: var(--color-fg);
   cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
+  transition: background var(--transition-fast), opacity var(--transition-fast);
 }
 
 .toolbar__button:hover:not(:disabled) {
-  background: var(--color-panel-strong);
-  color: var(--color-fg);
+  background: var(--color-object);
 }
 
 .toolbar__button:disabled {
@@ -194,9 +241,24 @@
   color: var(--color-accent);
 }
 
+/* 音樂開關（`1408:2086`，96×96）：獨立於膠囊之外，圖示比工具列大一點。 */
+.music {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--color-fg);
+  cursor: pointer;
+}
+
+/*
+ * 線稿圖示。設計稿的工具列字形約 51 寬（`1408:2069`），縮到 24 單位 viewBox 上約等於
+ * 48px 的顯示尺寸；stroke-width 1.6 在 24 單位裡等於 3.2 設計像素的線寬。
+ * The mock's glyph is about 51 wide, which maps to roughly a 48px render of the 24-unit
+ * viewBox; 1.6 units is a 3.2 design-pixel stroke.
+ */
 .icon {
-  width: 22px;
-  height: 22px;
+  width: 48px;
+  height: 48px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.6;
@@ -204,33 +266,17 @@
   stroke-linejoin: round;
 }
 
-/* ── ⑤ SKILL LIST ／ ⑥ 容器 ／ ⑦ MELTING LIST ────────────────────────── */
-
-.layout__main {
-  display: flex;
-  flex: 1 1 auto;
-  gap: var(--space-3);
-  min-height: 0;
+.music .icon {
+  width: 56px;
+  height: 56px;
 }
 
-/*
- * 左右欄不對稱是刻意的（design.md §2.3）：左欄放技能格，右欄放較小的名冊格。
- * 兩者都用 clamp 依視窗縮放，但設下下限，避免窄視窗把格子壓到看不清。
- */
-.panel--skill {
-  flex: 0 0 clamp(176px, 23%, 300px);
-}
-
-.panel--melting {
-  flex: 0 0 clamp(150px, 18%, 300px);
-}
+/* ── ⑥ 容器 / Container（`1408:2110`）────────────────────────────────── */
 
 .stage {
+  position: absolute;
   display: grid;
-  flex: 1 1 auto;
   place-items: center;
-  min-width: 0;
-  min-height: 0;
 }
 
 .stage__canvas {
@@ -246,115 +292,121 @@
 
 /* 畫布可聚焦（鍵盤瞄準與投放），所以需要一個看得見的焦點框。 */
 .stage__canvas:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+  outline: 3px solid var(--color-accent);
+  outline-offset: 3px;
 }
 
-/* 技力條：技能欄頂部那條黃色橫條（design.md §5.3）。 */
-.sp-bar {
-  flex: none;
-  height: 8px;
-  margin: 0 var(--space-3) var(--space-3);
+/* ── ⑤ SKILL LIST 面板（`1408:2694`，435×641）────────────────────────── */
+
+/* 標題盒 y=20（`1408:2244`）。 */
+.panel--skill .panel__title {
+  position: absolute;
+  top: 20px;
+  left: 0;
+  width: 100%;
+}
+
+/*
+ * 技力條（`1408:2301` / `1408:2304` / `1408:2306`）：三顆 120×16 的膠囊，y=82，
+ * 欄距 16。**一條代表一點技力**，所以段數由 `sp.max` 決定而不是寫死三條 ——
+ * 設計稿剛好三條只是因為當下的 `sp.max` 是 3。
+ * Three 120×16 pills at y=82, 16 apart. **One pill is one point of SP**, so the count
+ * follows `sp.max`; the mock happens to show three because `sp.max` was 3.
+ */
+.sp-meter {
+  position: absolute;
+  top: 82px;
+  left: 21px;
+  display: flex;
+  gap: 16px;
+}
+
+.sp-meter__segment {
+  width: 120px;
+  height: 16px;
   overflow: hidden;
-  border-radius: var(--radius-pill);
-  background: var(--color-panel-strong);
+  border-radius: var(--pill-radius, 360px);
+  background: var(--color-sp-empty);
 }
 
-.sp-bar__fill {
+.sp-meter__fill {
   width: 0;
   height: 100%;
   border-radius: inherit;
-  background: var(--color-accent);
+  background: var(--color-sp-full);
   transition: width var(--transition-base);
 }
 
-/* 技能格網格；平板會退成 2 欄（design.md §2.6）。 */
+/*
+ * 技能格網（`1408:2333` 等）：3 欄、單格 120×150、欄距 16、列距 13，
+ * 由面板 y=113（x=21）起算。設計稿畫了 4 列，但第 4 列底緣 739 已超出 643 高的面板 ——
+ * 技能數量由 `skills.json` 決定（design.md D11），所以做成可捲動的格網。
+ * The skill grid: 3 columns of 120×150 cells, 16 across and 13 down, from panel y=113.
+ * The mock draws four rows but the fourth ends at 739 inside a 643-tall panel, and the
+ * skill count comes from `skills.json` (D11), so this scrolls.
+ */
 .skill-grid {
+  position: absolute;
+  top: 113px;
+  left: 21px;
+  right: 21px;
+  bottom: 21px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-2);
-  padding: 0 var(--space-3) var(--space-3);
+  grid-template-columns: repeat(3, 120px);
+  gap: 13px 16px;
   align-content: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
+/* ── ⑦ MELTING LIST 面板（`1408:2235`，435×644）──────────────────────── */
+
+/* 標題盒 y=23（`1408:2182`）。 */
+.panel--melting .panel__title {
+  position: absolute;
+  top: 23px;
+  left: 0;
+  width: 100%;
+}
+
+/* 格網內容區：x=21、y=104、367×472（`1408:2234` `Group 451`）。 */
 .melting__body {
-  padding: 0 var(--space-2) var(--space-3);
+  position: absolute;
+  left: var(--melting-content-x);
+  top: var(--melting-content-y);
+  width: var(--melting-content-w);
+  height: var(--melting-content-h);
 }
 
 /* ── 非官方聲明 / Unofficial notice ──────────────────────────────────── */
 
-/* `margin-top: auto` 讓聲明永遠貼在頁面底部，即使內容不滿一屏。 */
+/*
+ * 聲明放在安全區**之下**的下緣留白（安全區止於 y=1016，畫布高 1080），
+ * 所以它不佔用任何 UI 空間，也不會與面板互相擠壓。
+ * The notice sits in the margin below the safe area (which ends at y=1016 on a 1080
+ * canvas), so it takes no UI space and never competes with a panel.
+ */
 .layout__notice {
-  flex: none;
-  margin-top: auto;
+  position: absolute;
+  right: var(--safe-inset);
+  bottom: 6px;
+  left: var(--safe-inset);
+  text-align: center;
 }
 
 .notice {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  text-align: center;
+  gap: 0;
 }
 
 .notice__line {
   margin: 0;
   color: var(--color-fg-dim);
-  font-size: var(--text-xs);
-  line-height: 1.45;
+  font-size: 17px;
+  line-height: 1.35;
 }
 
 .notice__line--muted {
-  opacity: 0.75;
-}
-
-/* ── 響應式 / Responsive ─────────────────────────────────────────────── */
-
-@media (max-width: 1023px) {
-  .panel--skill {
-    flex-basis: clamp(150px, 26%, 240px);
-  }
-
-  .panel--melting {
-    flex-basis: clamp(132px, 22%, 200px);
-  }
-
-  .skill-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-/*
- * 手機直向：改為單欄堆疊，容器在最上。design.md §2.6 的「提示橫向」方案尚未定案
- * （Q6），這裡先給一個可用的直向排列，等方案確定再收斂。
- * Portrait phones stack into one column with the board on top. The "please rotate"
- * proposal in design.md §2.6 (Q6) is still open, so this is a usable stopgap.
- */
-@media (max-width: 767px) {
-  .layout {
-    padding: var(--space-2);
-  }
-
-  .layout__top {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .layout__top-right {
-    align-items: stretch;
-  }
-
-  .layout__main {
-    flex-direction: column;
-  }
-
-  .panel--skill,
-  .panel--melting {
-    flex: 0 0 auto;
-    max-height: 32dvh;
-  }
-
-  .stage {
-    order: -1;
-    min-height: 48dvh;
-  }
+  opacity: 0.85;
 }
