@@ -10,6 +10,13 @@
     "moduleDetection": "force",
     "resolveJsonModule": true,
     "isolatedModules": true,
+    /*
+     * Matter.js 以 `export =` 形式提供型別（CommonJS 風格），需要 interop 才能
+     * 用 `import Matter from 'matter-js'`。Vite 打包時本來就會做同樣的轉換。
+     * Matter.js declares its types with `export =`, so interop is required for a
+     * default import. Vite performs the same transform when bundling.
+     */
+    "esModuleInterop": true,
     "skipLibCheck": true,
     "noEmit": true,
 
