@@ -1,7 +1,34 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="方團團大作戰">
-  <rect width="64" height="64" rx="15" fill="#1b1c20"/>
-  <rect x="7" y="11" width="50" height="46" rx="13" fill="#e8c07a"/>
-  <circle cx="23" cy="31" r="5" fill="#1b1c20"/>
-  <circle cx="41" cy="31" r="5" fill="#1b1c20"/>
-  <path d="M25 42q7 6 14 0" fill="none" stroke="#1b1c20" stroke-width="3.5" stroke-linecap="round"/>
+<svg width="256" height="323" viewBox="0 0 256 323" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M3.00049 81.076C10.6468 -39.4781 39.8757 -2.41305 81.0005 66.5875L3.00049 81.076Z" fill="#717481" stroke="black" stroke-width="5"/>
+<path d="M8 81.1815C14.568 -32.3517 39.6749 2.55471 75 67.5368L8 81.1815Z" fill="#F4F4F4" stroke="#F2C1C3" stroke-width="5"/>
+<path d="M253 81.7576C245.354 -38.7964 216.125 -1.73141 175 67.2691L253 81.7576Z" fill="#717481" stroke="black" stroke-width="5"/>
+<path d="M248 81.8632C241.432 -31.6701 216.326 3.23635 181 68.2185L248 81.8632Z" fill="#F4F4F4" stroke="#F2C1C3" stroke-width="5"/>
+<rect x="2.50017" y="57.6835" width="251" height="251" rx="29.5" fill="#F2C1C3" stroke="black" stroke-width="5"/>
+<path d="M104.001 219.183C110.95 224.967 121.058 224.976 128.001 219.183C134.95 224.967 145.058 224.976 152.001 219.183" stroke="black" stroke-width="3" stroke-linecap="round"/>
+<circle cx="69.9998" cy="163.184" r="36" fill="white"/>
+<mask id="mask0_1408_1235" style="mask-type:alpha" maskUnits="userSpaceOnUse" x="33" y="127" width="73" height="73">
+<circle cx="69.9998" cy="163.184" r="36" fill="white"/>
+</mask>
+<g mask="url(#mask0_1408_1235)">
+<circle cx="75.6248" cy="159.809" r="32.625" fill="#D18A8D"/>
+</g>
+<circle cx="69.9998" cy="163.184" r="35.5" stroke="black"/>
+<circle cx="36" cy="36" r="35.5" transform="matrix(-1 0 0 1 222 127.183)" fill="white" stroke="black"/>
+<mask id="mask1_1408_1235" style="mask-type:alpha" maskUnits="userSpaceOnUse" x="149" y="127" width="73" height="73">
+<circle cx="36" cy="36" r="35.5" transform="matrix(-1 0 0 1 222 127.183)" fill="white" stroke="black"/>
+</mask>
+<g mask="url(#mask1_1408_1235)">
+<circle cx="32.625" cy="32.625" r="32.625" transform="matrix(-1 0 0 1 213 127.183)" fill="#D18A8D"/>
+</g>
+<circle cx="186" cy="163.184" r="35.5" stroke="black"/>
+<circle cx="70" cy="298.184" r="21.5" fill="#FDE5D6" stroke="black" stroke-width="5"/>
+<circle cx="184" cy="298.184" r="21.5" fill="#FDE5D6" stroke="black" stroke-width="5"/>
+<path d="M100.938 232.44C113.173 231.959 125.108 236.302 134.172 244.534L137.221 247.304C137.905 247.925 138.088 248.928 137.666 249.751L107.66 308.273C107.386 308.808 106.817 309.124 106.219 309.075L105.036 308.977C94.7247 308.128 85.1125 303.42 78.1201 295.794C77.783 295.426 77.6767 294.902 77.8438 294.432L99.4961 233.502C99.7149 232.887 100.286 232.466 100.938 232.44Z" fill="url(#paint0_linear_1408_1235)" stroke="black"/>
+<rect x="126.636" y="219.693" width="5" height="17.3396" transform="rotate(25.3561 126.636 219.693)" fill="#D9D9D9" stroke="black"/>
+<defs>
+<linearGradient id="paint0_linear_1408_1235" x1="122.5" y1="247.682" x2="109" y2="311.182" gradientUnits="userSpaceOnUse">
+<stop stop-color="#FBFBFB"/>
+<stop offset="1" stop-color="#FFB400"/>
+</linearGradient>
+</defs>
 </svg>

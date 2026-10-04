@@ -2,11 +2,11 @@
  * 全域樣式入口。
  * Global stylesheet entry.
  *
- * 這支只負責「重設 + 版面宿主」。設計 token 在 tokens.css、面板外觀在
- * panels.css、七區域的幾何在 layout.css。
- * This file owns only the reset and the layout host. Design tokens live in
- * tokens.css, panel appearance in panels.css, and the seven-region geometry in
- * layout.css.
+ * 這支只負責「重設 + 版面宿主」。設計 token 在 tokens.css、面板外觀在 panels.css、
+ * 主畫面幾何在 layout.css、名冊在 melting-list.css。
+ * This file owns only the reset and the layout host. Tokens live in tokens.css, panel
+ * appearance in panels.css, main-screen geometry in layout.css and the roster in
+ * melting-list.css.
  */
 
 @import './tokens.css';
@@ -27,18 +27,36 @@ body {
   margin: 0;
 }
 
+/*
+ * 背景美術：幾何漸層（深灰 → 海藍 → 粉）。設計稿的 `bg` 節點（`1408:2063`）同樣是一張
+ * 鋪滿 1920×1080 的圖，`cover` 讓非 16:9 的視窗也不會露出底色。
+ * The geometric gradient backdrop. The mock's `bg` node is likewise a 1920×1080 image
+ * filling the frame; `cover` keeps a non-16:9 viewport from showing the flat base colour.
+ */
 body {
-  background: var(--color-bg);
+  overflow: hidden;
+  background-color: var(--color-bg);
+  background-image: var(--bg-image);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
   color: var(--color-fg);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
 
 /*
- * 版面宿主。高度以 dvh 為單位，讓手機的動態工具列不會把容器推出畫面。
- * Layout host. The height uses dvh so a mobile browser's dynamic toolbars never
- * push the board out of view.
+ * 版面宿主：固定滿版、置中、裁掉溢出。設計畫布是固定 1920×1080，靠 `ui/scale.ts` 的
+ * 等比縮放貼合視窗，所以這裡**不需要**任何流式尺寸 —— 只要有任何一個尺寸跟著視窗跑，
+ * 這一輪要消掉的「比例漂移」就會從那個地方長回來。
+ * Fixed full-bleed host, centred, clipping overflow. The design canvas is a fixed
+ * 1920×1080 scaled to fit by `ui/scale.ts`, so nothing here may be fluid: any
+ * viewport-driven size would let ratio drift grow back from that spot.
  */
 #app {
-  min-height: 100dvh;
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
 }
