@@ -1,0 +1,121 @@
+/*
+ * MELTING LIST 名冊樣式。
+ * MELTING LIST roster styles.
+ *
+ * 格子的**位置**由 `ui/serpentine.ts` 決定並以顯式 grid-row / grid-column 寫入，
+ * 這支只負責外觀：1:1 正方格、素材等比放入、未解鎖的 `???`、蛇形箭頭與組別分隔。
+ * Cell positions come from the serpentine algorithm; this file owns appearance
+ * only — square cells, contained art, the `???` locked state, arrows and the
+ * group separator.
+ */
+
+.roster {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+}
+
+.roster-cell {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  aspect-ratio: 1;
+  border-radius: var(--radius-md);
+  background: var(--color-panel-strong);
+  color: var(--color-fg-dim);
+  font-size: var(--text-xs);
+  letter-spacing: 0.1em;
+}
+
+.roster-cell--locked {
+  border: 1px dashed var(--color-border);
+  background: transparent;
+}
+
+/*
+ * 素材框（D26）。圖框比格子略大，讓方團團的身體佔到視覺重心；但倍率不能太大，
+ * 否則會把頭頂的裝飾（角、帽）裁掉 —— design.md §2.5 明確要求預留上方空間。
+ * 推導：`萊萬汀` 的角最高到 body 上方 65/512，故倍率 s 需滿足
+ * `0.127s ≤ (1 − 0.594s) / 2`，即 `s ≤ 1.18`。取 1.25 讓身體再大一點，
+ * 代價是最高的角被裁約 1.4px（肉眼不可見）。
+ * The art frame is slightly larger than the cell so the body dominates, but not so
+ * large that the head decorations are cropped. For `萊萬汀` the horns reach 65/512
+ * above the body, so keeping them needs s ≤ 1.18; 1.25 trades a ~1.4px horn tip
+ * for a slightly larger body.
+ */
+.roster-cell__art {
+  --art-scale: 1.25;
+  /* body 中心在圖內的高度：SPRITE_ANCHOR.y / SPRITE_SIZE = 328 / 512。 */
+  --sprite-anchor-y: 0.640625;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.roster-cell__img {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: calc(100% * var(--art-scale));
+  height: calc(100% * var(--art-scale));
+  object-fit: contain;
+  /*
+   * 把 body 中心對到格子正中。transform 百分比以元素自身尺寸為基準，故換算為
+   * `100% / (2 × art-scale) − anchor`。改 `--art-scale` 時不需重算這個式子。
+   * Aligns the body centre with the cell centre; the formula stays valid when
+   * `--art-scale` changes.
+   */
+  transform: translate(-50%, calc(100% / (2 * var(--art-scale)) - var(--sprite-anchor-y) * 100%));
+}
+
+/* 素材不可用時的替代：等級色塊 + 數字，配色與 Canvas 佔位圖一致。 */
+.roster-cell__fallback {
+  display: grid;
+  place-items: center;
+  width: 62%;
+  aspect-ratio: 1;
+  border-radius: 24%;
+  background: var(--fallback-tint, var(--color-panel-strong));
+  color: rgba(17, 18, 22, 0.88);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+/* 蛇形箭頭：貼齊該列行進方向的末端。 */
+.roster-arrow {
+  display: flex;
+  height: 22px;
+  color: var(--color-accent);
+}
+
+.roster-arrow--right {
+  justify-content: flex-end;
+}
+
+.roster-arrow--left {
+  justify-content: flex-start;
+}
+
+.roster-arrow__glyph {
+  width: 46px;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.85;
+}
+
+/* 超出每組列數上限時的分隔列（design.md §2.5 第 4 點）。 */
+.roster-group {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-1) 0;
+  color: var(--color-fg-dim);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+}

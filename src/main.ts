@@ -5,6 +5,7 @@ import { SpriteLoader } from './render/spriteLoader';
 import { Viewport } from './render/viewport';
 import { hook } from './ui/dom';
 import { createLayout, type Layout } from './ui/layout';
+import { createMeltingList, type MeltingList } from './ui/meltingList';
 import { createNotice } from './ui/notice';
 
 /**
@@ -24,6 +25,7 @@ export interface AppContext {
   sprites: SpriteLoader;
   viewport: Viewport;
   layout: Layout;
+  meltingList: MeltingList;
 }
 
 async function bootstrap(): Promise<void> {
@@ -54,7 +56,14 @@ async function bootstrap(): Promise<void> {
     viewport.resize();
   });
 
-  const context: AppContext = { config, sprites, viewport, layout };
+  /* M2：名冊靠面板寬度反推欄數，故掛載後由它自己量測並監看尺寸。 */
+  const meltingList = createMeltingList({
+    host: hook(layout.regions.melting, 'melting-body'),
+    levels: config.levels.levels,
+    sprites,
+  });
+
+  const context: AppContext = { config, sprites, viewport, layout, meltingList };
   exposeForDebugging(context);
 }
 

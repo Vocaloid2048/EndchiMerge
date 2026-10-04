@@ -75,6 +75,19 @@ export class SpriteLoader {
     return this.entries.get(levelId);
   }
 
+  /**
+   * 取得某一級的圖片 URL。
+   * Get the image URL for a level.
+   *
+   * DOM 場景（名冊、NEXT）自己建 `<img>` 並沿用瀏覽器快取，比共用同一個
+   * `HTMLImageElement` 安全 —— 同一個元素不可能同時出現在兩個位置。
+   * DOM surfaces build their own `<img>` and reuse the browser cache. Sharing one
+   * `HTMLImageElement` would be unsafe: a single element cannot be in two places.
+   */
+  srcFor(level: LevelDef): string {
+    return resolveSpriteUrl(this.baseUrl, level.sprite);
+  }
+
   /** 已處理過的等級數量（含失敗者）。 */
   get size(): number {
     return this.entries.size;

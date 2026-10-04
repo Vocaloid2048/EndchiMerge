@@ -197,7 +197,7 @@
 }
 
 .panel--melting {
-  flex: 0 0 clamp(150px, 18%, 240px);
+  flex: 0 0 clamp(150px, 18%, 300px);
 }
 
 .stage {
