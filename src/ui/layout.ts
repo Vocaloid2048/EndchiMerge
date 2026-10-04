@@ -30,6 +30,8 @@ export interface Layout {
   root: HTMLElement;
   /** 七個區域節點，供後續模組掛載內容。 */
   regions: Record<RegionName, HTMLElement>;
+  /** 非官方聲明的宿主；內容由 `ui/notice.ts` 在配置載入後填入。 */
+  notice: HTMLElement;
 }
 
 /** 工具列每個圖示的語意（design.md D23）。 */
@@ -187,11 +189,16 @@ export function createLayout(host: HTMLElement): Layout {
   const melting = buildMeltingList();
   appendChildren(main, skill, container, melting);
 
-  appendChildren(root, top, main);
+  /* 非官方聲明常駐頁尾：內容稍後由配置填入，但宿主永遠存在。 */
+  const notice = el('footer', 'layout__notice');
+  notice.dataset['hook'] = 'notice';
+
+  appendChildren(root, top, main, notice);
   host.append(root);
 
   return {
     root,
     regions: { score, toolbar, next, combo, skill, container, melting },
+    notice,
   };
 }
