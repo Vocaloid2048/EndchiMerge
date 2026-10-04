@@ -10,10 +10,13 @@
  * only on a real change — rewriting `src` each frame would re-decode the image and
  * force a reflow.
  *
- * NEXT 的內容來自 `session.nextLevelId`，而那就是 `spawnQueue.peek()`（D22）。這裡
- * 絕不自行抽取或推測下一顆。
- * The NEXT content comes from `session.nextLevelId`, which is `spawnQueue.peek()`
- * (D22). This module never draws or guesses a level itself.
+ * NEXT 的內容來自 `session.upcomingLevelId`，也就是 `spawnQueue.peekAt(1)`：**放下手上
+ * 這顆之後**才會上場的那一顆（D22）。它**不是**馬上要掉的那顆（那是
+ * `session.pendingLevelId`，由準心預覽負責）。這裡絕不自行抽取或推測下一顆。
+ * The NEXT content comes from `session.upcomingLevelId`, i.e. `spawnQueue.peekAt(1)`:
+ * the one that takes the field **after** the dumpling in hand (D22). It is **not** the one
+ * about to drop — that is `session.pendingLevelId`, which drives the aim preview. This
+ * module never draws or guesses a level itself.
  */
 
 import type { SpriteLoader } from '../render/spriteLoader';
@@ -29,7 +32,7 @@ export interface HudOptions {
 }
 
 export interface HudState {
-  /** 下一次投放的等級編號。 */
+  /** NEXT 卡顯示的等級編號（＝放下手上這顆之後才上場的那顆）。 */
   nextLevelId: number;
   score: number;
   mergedCount: number;

@@ -11,13 +11,20 @@
  * Two things are deliberately left out, both as scope boundaries:
  *
  * 1. **管理掉落順序** —— 那屬於 `SpawnQueue`（D22 的單一真實來源）。這裡只呼叫
- *    `take()`，絕不自行抽取，否則 NEXT 卡又會和實際掉落不一致。
- *    Spawn ordering belongs to `SpawnQueue`; this only calls `take()`, never draws,
- *    or the NEXT card drifts from the actual drop again.
+ *    `take()`／`peekAt()`，絕不自行抽取，否則 NEXT 卡又會和實際掉落不一致。
+ *    Spawn ordering belongs to `SpawnQueue`; this only calls `take()`/`peekAt()`, never
+ *    draws, or the NEXT card drifts from the actual drop again.
  * 2. **判定溢出／上限** —— `maxBodies`、`overflowPenalty` 的規則在 design.md §10
  *    尚未定案。這裡只做「離開場地就回收」，避免剛體無限累積。
  *    Overflow rules are undecided (§10); this only recycles bodies that leave the
  *    field so the body count cannot grow without bound.
+ *
+ * 對外有**兩個**「下一顆」，名字刻意分開，因為搞混就是一個 bug：
+ * Two different "next" values are exposed, deliberately with different names because
+ * conflating them is a bug:
+ *
+ * - `pendingLevelId`：馬上要掉的那顆（＝手上這顆），驅動畫面預覽。
+ * - `upcomingLevelId`：**放下之後**才上場的那顆，驅動 NEXT 卡。
  */
 
 import Matter from 'matter-js';
@@ -113,7 +120,7 @@ export class GameSession {
     this.geometry = this.buildGeometry(virtualWidth, virtualHeight);
     this.cavity = computeContainerBounds(this.geometry.front, WALL_THICKNESS).cavity;
     this.applyWalls();
-    this.aimX = this.clampAimX(this.aimX, this.nextLevel().radius);
+    this.aimX = this.clampAimX(this.aimX, this.pendingLevel().radius);
   }
 
   private buildGeometry(virtualWidth: number, virtualHeight: number): ContainerGeometry {
@@ -142,7 +149,7 @@ export class GameSession {
    * Set the aim position, clamping so the dumpling just fits against the wall.
    */
   setAim(x: number): void {
-    this.aimX = this.clampAimX(x, this.nextLevel().radius);
+    this.aimX = this.clampAimX(x, this.pendingLevel().radius);
   }
 
   /** 把 X 夾到目前等級的半徑能完整放進空腔的範圍。 */
@@ -158,14 +165,40 @@ export class GameSession {
 
   /* ------------------------------------------------------------------ 投放 */
 
-  /** 目前佇列最前面的等級編號；NEXT 卡要顯示的就是它。 */
-  get nextLevelId(): number {
-    return this.spawnQueue.peek();
+  /**
+   * **馬上**要掉落的那顆等級編號。滑鼠放開時掉下來的、以及畫面上跟著準心跑的那顆，
+   * 都是它（`spawnQueue.peekAt(0)`）。
+   * The level that is about to drop (`spawnQueue.peekAt(0)`): what follows the pointer and
+   * what appears on release are both this one.
+   */
+  get pendingLevelId(): number {
+    return this.spawnQueue.peekAt(0);
   }
 
-  /** 下一顆的完整定義。 */
-  nextLevel(): LevelDef {
-    return this.levelDef(this.spawnQueue.peek());
+  /**
+   * NEXT 卡要顯示的等級編號：**放下手上這顆之後**才會上場的那顆
+   * （`spawnQueue.peekAt(1)`）。
+   * The level the NEXT card shows — the one that takes the field **after** the current
+   * dumpling is dropped (`spawnQueue.peekAt(1)`).
+   *
+   * 這與 `pendingLevelId` 是兩個不同的東西，混用會讓玩家看到「卡上寫 A、掉下 B」。
+   * 佇列深度固定為 2 時 `peekAt(1)` 一定存在；`SpawnQueue` 會擋掉越界的索引。
+   * Distinct from `pendingLevelId`; conflating them produces the "card says A, B falls"
+   * bug. With a fixed depth of 2 the index always resolves, and the queue rejects
+   * out-of-range reads rather than returning undefined.
+   */
+  get upcomingLevelId(): number {
+    return this.spawnQueue.peekAt(1);
+  }
+
+  /** 馬上要掉落那顆的完整定義。 */
+  pendingLevel(): LevelDef {
+    return this.levelDef(this.pendingLevelId);
+  }
+
+  /** NEXT 卡那顆的完整定義。 */
+  upcomingLevel(): LevelDef {
+    return this.levelDef(this.upcomingLevelId);
   }
 
   /**
@@ -246,7 +279,7 @@ export class GameSession {
 
   /** 投放預覽；`aimY` 就是預覽圓心的高度。 */
   get aimPreview(): RenderAim {
-    const level = this.nextLevel();
+    const level = this.pendingLevel();
 
     return {
       levelId: level.id,

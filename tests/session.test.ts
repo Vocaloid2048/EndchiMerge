@@ -2,11 +2,14 @@
  * 單局狀態的單元測試。
  * Unit tests for the play session.
  *
- * 這裡守住 D22 在**整合層**的版本：`nextLevelId` 顯示什麼，`drop()` 就必須掉什麼。
- * `SpawnQueue` 自己的測試證明了佇列內部一致，這裡證明 session 沒有在串接時把它弄丟。
- * This is D22 at the integration level: whatever `nextLevelId` shows is what `drop()`
- * must produce. The queue's own tests prove internal consistency; these prove the
- * session does not lose it while wiring things up.
+ * 這裡守住 D22 在**整合層**的版本：`pendingLevelId`（馬上要掉的那顆）是什麼，`drop()`
+ * 就必須掉什麼；而 `upcomingLevelId`（NEXT 卡顯示的那顆）在這一掉之後必須**遞補**成
+ * 新的 `pendingLevelId`。`SpawnQueue` 自己的測試證明了佇列內部一致，這裡證明 session
+ * 沒有在串接時把它弄丟。
+ * This is D22 at the integration level: whatever `pendingLevelId` (about to drop) is, is
+ * what `drop()` must produce; and the `upcomingLevelId` (what the NEXT card shows) must
+ * **promote** into the new `pendingLevelId` after that drop. The queue's own tests prove
+ * internal consistency; these prove the session does not lose it while wiring things up.
  *
  * 同時釘住瞄準的夾制行為 —— 允許把方團團丟到牆外會在 M4 變成「合成永遠不觸發」的鬼故事。
  * The aim clamp is pinned too: letting a dumpling spawn inside a wall would become a
@@ -121,7 +124,7 @@ describe('GameSession — 瞄準夾制 / aim clamping', () => {
   it('clamps an aim beyond the right wall so the dumpling still fits', () => {
     const session = makeSession();
     const cavity = session.playArea;
-    const radius = session.nextLevel().radius;
+    const radius = session.pendingLevel().radius;
 
     session.setAim(cavity.x + cavity.width + 500);
 
@@ -131,7 +134,7 @@ describe('GameSession — 瞄準夾制 / aim clamping', () => {
   it('clamps an aim beyond the left wall so the dumpling still fits', () => {
     const session = makeSession();
     const cavity = session.playArea;
-    const radius = session.nextLevel().radius;
+    const radius = session.pendingLevel().radius;
 
     session.setAim(cavity.x - 500);
 
@@ -195,28 +198,52 @@ describe('GameSession — 投放 / dropping', () => {
 });
 
 describe('GameSession — D22 在整合層 / D22 at the integration level', () => {
-  it('drops exactly the level the NEXT card was showing', () => {
+  it('drops exactly the level that was pending', () => {
     const session = makeSession();
 
     for (let index = 0; index < 40; index += 1) {
-      const previewed = session.nextLevelId;
+      const inHand = session.pendingLevelId;
       session.drop();
 
       /* bodies 是「已存在」的順序，所以最新一顆在最後。 */
-      expect(session.bodies.at(-1)?.levelId).toBe(previewed);
+      expect(session.bodies.at(-1)?.levelId).toBe(inHand);
     }
   });
 
-  it('shows a fresh level after each drop', () => {
+  it('promotes the NEXT card’s dumpling to pending once the drop happens', () => {
     const session = makeSession();
-    const before = session.nextLevelId;
 
-    session.drop();
+    for (let index = 0; index < 40; index += 1) {
+      /*
+       * 玩家現在看到 NEXT 卡上那顆（upcoming），一按下去，掉的是手上的那顆
+       * （pending），而卡上那顆就遞補成新的 pending。
+       */
+      const cardShown = session.upcomingLevelId;
+      session.drop();
 
-    /* 只能說「補了一顆」，不能斷言一定不同 —— 權重抽取本來就可能重複。 */
-    expect(session.nextLevelId).toBeTypeOf('number');
-    expect(session.aimPreview.levelId).toBe(session.nextLevelId);
-    expect(before).toBeTypeOf('number');
+      expect(session.pendingLevelId).toBe(cardShown);
+    }
+  });
+
+  it('drives the aim preview from the pending level, not the NEXT card', () => {
+    const session = makeSession();
+
+    for (let index = 0; index < 20; index += 1) {
+      expect(session.aimPreview.levelId).toBe(session.pendingLevelId);
+      session.drop();
+    }
+  });
+
+  it('keeps both lookahead slots populated after every drop', () => {
+    const session = makeSession();
+
+    for (let index = 0; index < 40; index += 1) {
+      /* 只能說「兩格都有值」，不能斷言一定不同 —— 權重抽取本來就可能重複。 */
+      expect(session.pendingLevelId).toBeTypeOf('number');
+      expect(session.upcomingLevelId).toBeTypeOf('number');
+      expect(session.upcomingLevel().id).toBe(session.upcomingLevelId);
+      session.drop();
+    }
   });
 });
 

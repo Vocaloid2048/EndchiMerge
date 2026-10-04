@@ -11,6 +11,8 @@ import { Hud } from './ui/hud';
 import { createLayout, type Layout } from './ui/layout';
 import { createMeltingList, type MeltingList } from './ui/meltingList';
 import { createNotice } from './ui/notice';
+import { attachStageScale } from './ui/scale';
+import { createSpMeter, type SpMeter } from './ui/spMeter';
 
 /**
  * 應用程式入口。
@@ -19,8 +21,8 @@ import { createNotice } from './ui/notice';
  * `main.ts` 只做**組裝**：載入配置與素材、建立版面與視埠，再把各模組接起來。
  * 它不含任何遊戲邏輯（agent-readme §0.2 的依賴方向）。
  * This file only assembles: it loads config and assets, builds the layout and the
- * viewport, and wires the modules together. It holds no game logic, per the
- * dependency direction in agent-readme §0.2.
+ * viewport, and wires the modules together. It holds no game logic, per the dependency
+ * direction in agent-readme §0.2.
  */
 
 /** 執行期共享的組裝結果。 */
@@ -30,11 +32,14 @@ export interface AppContext {
   viewport: Viewport;
   layout: Layout;
   meltingList: MeltingList;
+  spMeter: SpMeter;
   session: GameSession;
   hud: Hud;
   loop: FrameLoop;
   /** 卸下投放輸入的事件綁定。 */
   detachInput: () => void;
+  /** 停止監看視窗尺寸與名冊尺寸。 */
+  detachScale: () => void;
 }
 
 async function bootstrap(): Promise<void> {
@@ -47,10 +52,22 @@ async function bootstrap(): Promise<void> {
   /* 先建版面：即使配置或素材全部失敗，玩家至少看得到骨架與非官方聲明。 */
   const layout = createLayout(host);
 
+  /*
+   * 版面一建好就開始等比縮放，而不是等配置載入完 —— 否則在那段時間裡畫面會是一張
+   * 超出視窗、被裁掉大半的 1920×1080 畫布。
+   * Scaling starts as soon as the canvas exists rather than after the config load,
+   * otherwise the first frame is an unscaled 1920×1080 canvas cropped by the viewport.
+   */
+  const detachScale = attachStageScale({ stage: layout.stage });
+
   const config = await loadConfig();
 
   document.title = `${config.branding.gameName} ${config.branding.gameNameZh}`;
   layout.notice.append(createNotice({ zh: config.branding.noticeZh, en: config.branding.notice }));
+
+  /* 技力條的段數由 `sp.max` 決定（一點一條），所以要在配置到手之後才建。 */
+  const spMeter = createSpMeter(hook<HTMLElement>(layout.regions.skill, 'sp-meter'));
+  spMeter.update({ value: config.skills.sp.initial, max: config.skills.sp.max });
 
   /* 素材載入失敗不會拋錯，失敗的等級之後會退回程式佔位圖。 */
   const sprites = new SpriteLoader();
@@ -67,7 +84,7 @@ async function bootstrap(): Promise<void> {
     sprites,
     onAfterFrame: (current): void => {
       hud.update({
-        nextLevelId: current.nextLevelId,
+        nextLevelId: current.upcomingLevelId,
         score: current.score,
         mergedCount: current.mergedCount,
       });
@@ -76,11 +93,16 @@ async function bootstrap(): Promise<void> {
 
   /*
    * `observe()` 會立刻回報一次，所以不需要先手動量尺寸。
-   * 視埠與 session 必須**一起**重算：前者決定縮放，後者決定牆壁位置，只更新其中
-   * 一個會讓物理邊界與畫面框線錯開。
-   * observe() reports once immediately, so no manual first measurement is needed. The
-   * viewport and the session must be recomputed together: one owns the scale, the other
-   * the wall positions, and updating only one misaligns physics from the frame.
+   * 視埠與 session 必須**一起**重算：前者決定縮放，後者決定牆壁位置，只更新其中一個
+   * 會讓物理邊界與畫面框線錯開。
+   * observe() reports once immediately. The viewport and the session are recomputed
+   * together because one owns the scale and the other the wall positions.
+   *
+   * 畫布尺寸現在是固定設計值（不再隨視窗浮動），所以這條路徑實際上每次都算出同一組
+   * 數字；留著是為了讓 `Viewport` 仍是唯一的縮放來源，而不是靠「它不會變」的假設。
+   * The canvas is now a fixed design size, so this path recomputes the same numbers every
+   * time. It stays because `Viewport` should remain the single owner of the scale rather
+   * than relying on an assumption that nothing will ever change it.
    */
   viewport.observe((): void => {
     viewport.resize();
@@ -99,14 +121,14 @@ async function bootstrap(): Promise<void> {
 
   /* 先寫一次 HUD，否則 NEXT 卡會空著等到第一次狀態變化。 */
   hud.update({
-    nextLevelId: session.nextLevelId,
+    nextLevelId: session.upcomingLevelId,
     score: session.score,
     mergedCount: session.mergedCount,
   });
 
   loop.start();
 
-  /* M2：名冊靠面板寬度反推欄數，故掛載後由它自己量測並監看尺寸。 */
+  /* 名冊格數現在由設計稿決定，不再依面板寬度量測。 */
   const meltingList = createMeltingList({
     host: hook(layout.regions.melting, 'melting-body'),
     levels: config.levels.levels,
@@ -119,10 +141,12 @@ async function bootstrap(): Promise<void> {
     viewport,
     layout,
     meltingList,
+    spMeter,
     session,
     hud,
     loop,
     detachInput,
+    detachScale,
   };
   exposeForDebugging(context);
 }
@@ -130,8 +154,8 @@ async function bootstrap(): Promise<void> {
 /**
  * 在開發模式下把組裝結果掛到 `window` 方便手動檢查。
  * 正式建置會被 Vite 的 `import.meta.env.DEV` 常數折疊掉，不會進產物。
- * Exposes the assembled context on `window` in development only; the production
- * build folds this away.
+ * Exposes the assembled context on `window` in development only; the production build
+ * folds this away.
  */
 function exposeForDebugging(context: AppContext): void {
   if (import.meta.env.DEV) {

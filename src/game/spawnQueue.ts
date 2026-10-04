@@ -2,36 +2,46 @@
  * 掉落佇列。
  * The spawn queue.
  *
- * 依 design.md §5.7（D22）的硬性要求：**NEXT 卡顯示的方團團，必須就是下一次投放的方團團**。
- * Per design.md §5.7 (D22) the NEXT card must show the exact dumpling that will drop next.
+ * 依 design.md §5.7（D22）的硬性要求：**NEXT 卡顯示的方團團，必須就是佇列裡的那一顆**。
+ * Per design.md §5.7 (D22) the NEXT card must show a dumpling that really comes from the
+ * queue rather than being guessed independently.
  *
  * 舊版做法是「NEXT 與投放各自抽一次」，只要兩邊的抽取條件有一點不同步就會露出馬腳
  * （例如玩家看到 A、掉下 B）。這裡改用**單一佇列**：只有這個類別能產生等級，
- * NEXT 卡讀 `peek()`、投放呼叫 `take()`，兩者看的是同一個 `items[0]`。
+ * 預覽讀 `peekAt()`、投放呼叫 `take()`，兩者看的是同一個陣列。
  * The old approach drew twice — once for the display, once for the drop — and any drift
- * between them showed up as "the card said A, B fell". Here a single queue is the only
- * producer: the card reads `peek()`, the drop calls `take()`, and both look at `items[0]`.
+ * showed up as "the card said A, B fell". Here a single queue is the only producer:
+ * previews read `peekAt()`, drops call `take()`, and both look at the same array.
  *
- * **禁止**「先顯示、後抽取」。佇列永遠保持滿的，所以 `peek()` 不可能對上一個已消耗的等級。
- * Displaying before drawing is forbidden: the queue is always kept full, so `peek()` can
- * never refer to a level that was already consumed.
+ * **深度 2，不是 1。** 玩家看到的 NEXT 是「**放下手上這顆之後**才會上場的那顆」，
+ * 所以佇列必須同時容納「馬上要掉的」與「下一顆」：
+ * **Depth 2, not 1.** The NEXT card shows the dumpling that follows the one in hand, so the
+ * queue has to hold both "about to drop" and "the one after":
+ *
+ * - `peekAt(0)` ＝ 現在按下滑鼠會放下的那顆（`GameSession.pendingLevelId`）
+ * - `peekAt(1)` ＝ NEXT 卡顯示的那顆（`GameSession.upcomingLevelId`）
+ *
+ * 這個順序不可以顛倒：若把 `peekAt(1)` 拿去投放，畫面就會出現「卡上寫 A、掉下 B」，
+ * 那正是 D22 要消滅的 bug。
+ * The order must not be swapped: dropping `peekAt(1)` would resurrect exactly the "card says
+ * A, B falls" bug D22 exists to kill.
  */
 
 import type { LevelDef } from '../core/types';
 import type { Rng } from '../core/rng';
 
 /**
- * 佇列深度。1 代表只預測下一顆，與 §2.2「NEXT 卡 = 下一顆方團團」一致。
- * Queue depth. 1 means predicting exactly one dumpling, matching §2.2.
+ * 佇列深度。2 ＝ 手上的那顆 ＋ NEXT 卡顯示的那顆。
+ * Queue depth. 2 = the one in hand plus the one the NEXT card shows.
  */
-export const DEFAULT_SPAWN_QUEUE_DEPTH = 1;
+export const DEFAULT_SPAWN_QUEUE_DEPTH = 2;
 
 export interface SpawnQueueOptions {
   /** 全部等級定義；內部會篩掉不可投放者。 */
   levels: readonly LevelDef[];
   /** 亂數來源；注入種子即可讓序列可斷言。 */
   rng: Rng;
-  /** 佇列深度；預設 1。 */
+  /** 佇列深度；預設 2（見上方說明）。 */
   depth?: number;
 }
 
@@ -86,22 +96,40 @@ export class SpawnQueue {
   }
 
   /**
-   * 預覽下一顆，**不消耗**。
-   * Preview the next one without consuming it.
+   * 預覽第 `index` 顆，**不消耗**。
+   * Preview the entry at `index` without consuming it.
    *
-   * NEXT 卡渲染用。回傳值必然等於緊接著 `take()` 會拿到的值。
-   * Used by the NEXT card; the value always equals what the following `take()` returns.
+   * `peekAt(0)` 是馬上要掉落的那顆，`peekAt(1)` 是 NEXT 卡要顯示的那顆。佇列永遠保持滿的
+   * （`take()` 會立刻補），所以這裡不可能取到已經被消耗掉的等級。
+   * `peekAt(0)` is about to drop, `peekAt(1)` is what the NEXT card shows. The queue is
+   * always kept full, so this can never address a level that was already consumed.
+   *
+   * @param index 0 為底 / Zero-based index.
    */
-  peek(): LevelDef['id'] {
-    const first = this.items[0];
+  peekAt(index: number): LevelDef['id'] {
+    if (!Number.isInteger(index) || index < 0 || index >= this.depth) {
+      throw new RangeError(
+        `SpawnQueue.peekAt(${String(index)}) is outside the queue's depth of ${String(this.depth)}.`,
+      );
+    }
 
-    /* 建構子已填空，所以這裡理論上不會發生；留著是為了讓型別收窄，也避免
-     * 有人日後加了 `take()` 卻忘了補佇列時拿到 undefined。 */
-    if (first === undefined) {
+    const entry = this.items[index];
+
+    /* 建構子與 `take()` 都會補滿佇列，所以這裡理論上不會發生；留著是為了讓型別收窄，
+     * 也避免有人日後改了補滿邏輯卻讓取用端拿到 undefined。 */
+    if (entry === undefined) {
       throw new Error('SpawnQueue is empty; it should have been refilled after the last take().');
     }
 
-    return first;
+    return entry;
+  }
+
+  /**
+   * 預覽馬上要掉落的那顆（等同 `peekAt(0)`）。
+   * Preview the entry that is about to drop; shorthand for `peekAt(0)`.
+   */
+  peek(): LevelDef['id'] {
+    return this.peekAt(0);
   }
 
   /**
