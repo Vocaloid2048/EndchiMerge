@@ -1,12 +1,13 @@
 {
   "_meta": {
     "provisional": true,
-    "note": "透視偏移與染色值為目視暫定值。3D 外框是純裝飾，遊戲區永遠是前表面矩形，物理不套用透視。"
+    "note": "描邊幾何已對齊設計稿：main_play_area (1408:2110) 是 strokeWeight 10、strokeAlign INSIDE、SOLID 純白、無圓角的 VECTOR。透視偏移 (perspectiveDx/Dy) 仍是目視暫定值：設計稿的後表面比前表面窄（後上緣 444.85 對前表面 667），本專案的模型是斜投影（前後同寬、僅平移），要完全一致需要改投影模型，而那會連帶改動物理可用寬度，因此暫不動。3D 外框是純裝飾，遊戲區永遠是前表面矩形，物理不套用透視。",
+    "derivation": "strokeWeight=10、strokeAlign=INSIDE、strokePaints[0]=SOLID rgb(255,255,255)、vectorData 無 cornerRadius，全部讀自 方團團.fig 的 Group 445 / main_play_area。"
   },
 
-  "cornerRadius": 28,
-  "strokeWidth": 3,
-  "strokeColor": "#E8C07A",
+  "cornerRadius": 0,
+  "strokeWidth": 10,
+  "strokeColor": "#FFFFFF",
 
   "perspectiveDx": 26,
   "perspectiveDy": -18,
