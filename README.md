@@ -133,19 +133,20 @@ EndchiMerge
 │  └─assets                     # 素材
 │     ├─character               # 方團團角色素材（<角色名>_img.webp）
 │     ├─icons                   # 工具列圖示
-│     ├─ui                      # 面板裝飾
+│     ├─ui                      # 面板裝飾（含幾何漸層背景 background.webp）
 │     └─audio                   # 音效
 ├─src
 │  ├─core                       # 無業務邏輯的地基
 │  │  ├─types.ts                # 配置與狀態的型別定義
 │  │  ├─constants.ts            # 全域常數（含 sprite 正規化三常數）
+│  │  ├─design.ts               # 設計稿常數（Figma Group 445 的矩形、格網、走線）
 │  │  ├─rng.ts                  # 可注入種子的亂數（供測試）
 │  │  ├─configLoader.ts         # 執行期配置載入與逐欄退回
 │  │  ├─physics.ts              # Matter.js 引擎封裝
 │  │  └─input.ts                # 投放輸入（指標與鍵盤）
 │  ├─game                       # 單局邏輯
 │  │  ├─session.ts              # 投放、瞄準、剛體回收
-│  │  ├─spawnQueue.ts           # 掉落佇列（NEXT 的單一真實來源）
+│  │  ├─spawnQueue.ts           # 掉落佇列（peekAt(0) 手上、peekAt(1) NEXT）
 │  │  ├─containerBox.ts         # 物理邊界（牆與地板）
 │  │  └─loop.ts                 # 固定時間步的畫面迴圈
 │  ├─render                     # 畫面繪製
@@ -155,9 +156,12 @@ EndchiMerge
 │  │  ├─spriteLoader.ts         # 素材載入與降級
 │  │  └─placeholder.ts          # 程式化佔位方團團
 │  ├─ui                         # DOM 介面
-│  │  ├─layout.ts               # 七區域版面骨架
-│  │  ├─meltingList.ts          # 蛇形名冊
-│  │  ├─serpentine.ts           # 蛇形佈局演算法
+│  │  ├─layout.ts               # 七區域版面（絕對定位在設計畫布上）
+│  │  ├─scale.ts                # 設計畫布的等比縮放
+│  │  ├─designTokens.ts         # 設計數值 → CSS 變數
+│  │  ├─meltingList.ts          # 名冊渲染與蛇形走線
+│  │  ├─serpentine.ts           # 蛇形佈局 + 走線幾何演算法
+│  │  ├─spMeter.ts              # 技力條（一點一段）
 │  │  ├─hud.ts                  # NEXT／SCORE 卡更新
 │  │  ├─icons.ts                # 內嵌 SVG 圖示
 │  │  ├─notice.ts               # 非官方聲明
@@ -167,7 +171,7 @@ EndchiMerge
 │  │  ├─tokens.css              # 顏色／間距／圓角變數
 │  │  ├─panels.css              # 面板共用樣式（Liquid Glass）
 │  │  ├─layout.css              # 七區域版面樣式
-│  │  ├─melting-list.css        # 名冊格與箭頭
+│  │  ├─melting-list.css        # 名冊格與走線
 │  │  └─sprite.css              # 輪廓白框
 │  ├─main.ts                    # 應用入口（只做組裝）
 │  └─vite-env.d.ts
@@ -204,6 +208,12 @@ EndchiMerge
 
 > M0 尚未收尾的是**描邊快取**與**碰撞半徑校準原型**：`levels.json` 的半徑與物理參數
 > 目前全是暫定值，待校準原型定案後會整表重算。詳細變更見 [`docs/CHANGELOG.md`](docs/CHANGELOG.md)。
+
+> **v1.6 介面對齊設計稿**：版面已改為**固定 1920×1080 設計畫布 + 單一 `transform: scale()`**，
+> 座標直接取自 Figma 檔 `方團團.fig` 的 `Group 445`。瀏覽器縮放到 110% / 90% 時不再改變
+> 任何兩件東西的相對大小（也就不會「縮小之後名冊多塞幾格」）。MELTING LIST 依設計稿改為
+> **4 欄 × 5 列直行蛇形**，連接線是一條帶 32 圓角與箭頭的一筆畫；NEXT 卡改為顯示
+> **放下手上這顆之後**才上場的那顆（D22 修訂）。
 
 ## 🙏 特別鳴謝
 - 玩法靈感來自《明日方舟：終末地》的「山團團」，版權歸 **鷹角網絡 / Gryphline** 所有

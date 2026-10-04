@@ -132,19 +132,20 @@ EndchiMerge
 │  └─assets                     # Art and audio
 │     ├─character               # Dumpling assets (<name>_img.webp)
 │     ├─icons                   # Toolbar icons
-│     ├─ui                      # Panel decoration
+│     ├─ui                      # Panel decoration (incl. the geometric backdrop)
 │     └─audio                   # Sound effects
 ├─src
 │  ├─core                       # Foundation with no business logic
 │  │  ├─types.ts                # Types for config and game state
 │  │  ├─constants.ts            # Global constants (incl. the sprite normalisation trio)
+│  │  ├─design.ts               # Design constants (Figma Group 445 rects, grid, track)
 │  │  ├─rng.ts                  # Seedable random source (for deterministic tests)
 │  │  ├─configLoader.ts         # Runtime config loading with per-field fallback
 │  │  ├─physics.ts              # Matter.js engine wrapper
 │  │  └─input.ts                # Drop input (pointer and keyboard)
 │  ├─game                       # Per-run logic
 │  │  ├─session.ts              # Drops, aiming, body recycling
-│  │  ├─spawnQueue.ts           # Spawn queue (the single source of truth for NEXT)
+│  │  ├─spawnQueue.ts           # Spawn queue (peekAt(0) in hand, peekAt(1) for NEXT)
 │  │  ├─containerBox.ts         # Physics boundaries (walls and floor)
 │  │  └─loop.ts                 # Fixed-timestep frame loop
 │  ├─render                     # Drawing
@@ -154,9 +155,12 @@ EndchiMerge
 │  │  ├─spriteLoader.ts         # Asset loading and fallback
 │  │  └─placeholder.ts          # Programmatic placeholder dumpling
 │  ├─ui                         # DOM surfaces
-│  │  ├─layout.ts               # Seven-region layout skeleton
-│  │  ├─meltingList.ts          # Serpentine roster
-│  │  ├─serpentine.ts           # Serpentine layout algorithm
+│  │  ├─layout.ts               # Seven regions, absolutely placed on the design canvas
+│  │  ├─scale.ts                # Uniform scaling of the design canvas
+│  │  ├─designTokens.ts         # Design numbers → CSS custom properties
+│  │  ├─meltingList.ts          # Roster rendering and the serpentine track
+│  │  ├─serpentine.ts           # Serpentine layout + track geometry
+│  │  ├─spMeter.ts              # SP meter (one segment per point)
 │  │  ├─hud.ts                  # NEXT / SCORE card updates
 │  │  ├─icons.ts                # Inline SVG icons
 │  │  ├─notice.ts               # Unofficial notice
@@ -166,7 +170,7 @@ EndchiMerge
 │  │  ├─tokens.css              # Colour, spacing and radius variables
 │  │  ├─panels.css              # Shared panel styles (liquid glass)
 │  │  ├─layout.css              # Seven-region layout styles
-│  │  ├─melting-list.css        # Roster cells and arrows
+│  │  ├─melting-list.css        # Roster cells and the track
 │  │  └─sprite.css              # Silhouette outline
 │  ├─main.ts                    # Application entry point (assembly only)
 │  └─vite-env.d.ts
@@ -205,6 +209,14 @@ EndchiMerge
 > What M0 still owes is **outline baking** and the **collision-radius calibration prototype**:
 > the radii and physics numbers in `levels.json` are all provisional and will be recomputed
 > once that prototype lands. Full details in [`docs/CHANGELOG.md`](docs/CHANGELOG.md).
+
+> **v1.6 — UI brought in line with the mock**: the layout is now a **fixed 1920×1080 design
+> canvas scaled by a single `transform: scale()`**, with every panel placed at the coordinates
+> taken from the Figma file's `Group 445`. Browser zoom at 110% / 90% no longer changes the
+> size of anything relative to anything else (so zooming out can no longer fit extra roster
+> cells). The MELTING LIST follows the mock's **4×5 column-major serpentine**, and its
+> connector is one continuous path with 32-radius fillets and an arrowhead. The NEXT card now
+> shows the dumpling that takes the field **after** the one in hand (D22 revised).
 
 ## 🙏 Credits
 - Gameplay inspired by the "山團團" mini-game in *Arknights: Endfield*, all rights reserved by **Hypergryph / Gryphline**
