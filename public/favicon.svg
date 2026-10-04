@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="方團團大作戰">
+  <rect width="64" height="64" rx="15" fill="#1b1c20"/>
+  <rect x="7" y="11" width="50" height="46" rx="13" fill="#e8c07a"/>
+  <circle cx="23" cy="31" r="5" fill="#1b1c20"/>
+  <circle cx="41" cy="31" r="5" fill="#1b1c20"/>
+  <path d="M25 42q7 6 14 0" fill="none" stroke="#1b1c20" stroke-width="3.5" stroke-linecap="round"/>
+</svg>
