@@ -2,68 +2,109 @@
  * MELTING LIST 名冊樣式。
  * MELTING LIST roster styles.
  *
- * 格子的**位置**由 `ui/serpentine.ts` 決定並以顯式 grid-row / grid-column 寫入，
- * 這支只負責外觀：1:1 正方格、素材等比放入、未解鎖的 `???`、蛇形箭頭與組別分隔。
- * Cell positions come from the serpentine algorithm; this file owns appearance
- * only — square cells, contained art, the `???` locked state, arrows and the
- * group separator.
+ * 格子的**位置**由 `ui/serpentine.ts` 算出並以 inline 的 left/top 寫入，這支只負責外觀與
+ * 固定尺寸：單格 84.25×94.4、素材 80×80 等比放入、未解鎖的 `???`、以及蛇形連接線。
+ * Cell positions come from `ui/serpentine.ts` as inline left/top; this file owns appearance
+ * and the fixed sizes only.
+ *
+ * 所有長度都來自 `ui/designTokens.ts` 寫進來的 CSS 變數，來源是 `core/design.ts` 的
+ * `MELTING`（＝ Figma `Group 451`），所以這裡不會出現第二份會漂移的副本。
+ * Every length arrives as a CSS variable from `ui/designTokens.ts`, sourced from `MELTING`
+ * in `core/design.ts`, so no number is duplicated here.
  */
 
+/* 內容區 367×472（`1408:2234`），大小由 UI 層設定，這裡只建立定位上下文。 */
 .roster {
-  display: grid;
-  gap: var(--space-2);
-  align-content: start;
+  position: relative;
+  width: var(--melting-content-w);
+  height: var(--melting-content-h);
 }
 
+/*
+ * 蛇形走線：鋪滿內容區、永遠在素材之下（DOM 順序在格子之前）。
+ * The serpentine track: spans the content box and always sits under the art (its DOM order
+ * puts it before the cells).
+ *
+ * `overflow: visible` 是刻意的：箭頭由內容區右緣再伸出約 18px（設計稿亦然，仍在面板
+ * 之內）。SVG 預設裁掉視埠外的內容，那會把箭頭切掉一半。
+ * `overflow: visible` is deliberate: the arrowhead overshoots the content box's right edge
+ * by about 18px (the mock does too, still inside the panel). SVG clips to its viewport by
+ * default, which would cut the arrowhead in half.
+ */
+.roster-track {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.roster-track__route,
+.roster-track__arrow {
+  fill: none;
+  stroke: var(--color-track);
+}
+
+/* 走線用平頭接角，與設計稿的 `strokeJoin: MITER` 一致；轉彎已經由路徑的圓角負責。 */
+.roster-track__route {
+  stroke-linejoin: miter;
+  stroke-linecap: butt;
+}
+
+/* 箭頭是開放 V 形，端點與尖端收圓比較乾淨。 */
+.roster-track__arrow {
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+/*
+ * 單格。**不裁切、不加背景**：設計稿的格子本身是透明的，角色直接浮在玻璃面板上；
+ * 加底色會把它變成九宮格，那並不是設計稿的樣子。
+ * A cell. No crop and no background: in the mock the cells are transparent and the
+ * characters float on the glass panel itself, so filling them would turn the roster into a
+ * nine-box grid the mock never had.
+ */
 .roster-cell {
+  position: absolute;
   display: grid;
   place-items: center;
-  /*
-   * 3px 內距是留給輪廓白框的：白框畫在素材之外，若緊貼格邊會被 `overflow: hidden`
-   * 切掉，反而沿裁切線描出一條白邊。
-   * The 3px padding is room for the outline. Without it the frame is clipped at the
-   * cell edge and traces a white band along the crop line instead of the character.
-   */
-  padding: 3px;
-  overflow: hidden;
-  aspect-ratio: 1;
-  border-radius: var(--radius-md);
-  background: var(--color-panel-strong);
-  color: var(--color-fg-dim);
-  font-size: var(--text-xs);
-  letter-spacing: 0.1em;
+  width: var(--melting-cell-w);
+  height: var(--melting-cell-h);
 }
 
+/* 未解鎖：只留一個虛線記號，不填色，避免搶走已解鎖角色的注意力。 */
 .roster-cell--locked {
-  border: 1px dashed var(--color-border);
-  background: transparent;
+  color: var(--color-fg-dim);
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+}
+
+.roster-cell--locked::before {
+  content: '';
+  position: absolute;
+  width: var(--melting-art);
+  height: var(--melting-art);
+  border: 2px dashed var(--color-border);
+  border-radius: 22px;
 }
 
 /*
  * 素材框（D26）。**不裁切**：完整 512×512 縮進格子，讓輪廓白框能沿真正的剪影走。
  * 一旦放大到需要裁切，白框就會沿裁切線描邊，變成頭頂一條白塊。
- * 素材本身上方有 23% 的透明留白（角最高到 y≈120/512），所以即使不放大，
- * 角色仍然佔到格子的約 76% 高度。
- * (D26) No cropping: the full 512×512 is scaled into the cell so the outline can
- * trace the real silhouette. Scaling until it crops makes the outline follow the
- * crop line. The art's own 23% top margin keeps the character at ~76% of the cell
- * height even at scale 1.
+ * 素材本身上方有大量透明留白（角最高到 y≈120/512），所以即使不放大，角色仍然佔到框的
+ * 約 76% 高度。
+ * (D26) No cropping: the full 512² is scaled into the box so the outline can trace the real
+ * silhouette. Scaling until it crops makes the outline follow the crop line.
  */
 .roster-cell__art {
   --art-scale: 1.05;
-  /*
-   * body 中心在圖內的高度：SPRITE_ANCHOR.y / SPRITE_SIZE = 328 / 512。
-   * CSS 無法 import TS，所以這個值與 `src/core/constants.ts` 的
-   * `SPRITE_ANCHOR.y / SPRITE_SIZE` **互為鏡像**；改動其中一邊務必同步另一邊。
-   * CSS cannot import TS, so this mirrors SPRITE_ANCHOR.y / SPRITE_SIZE in
-   * src/core/constants.ts — change one and you must change the other.
-   */
-  --sprite-anchor-y: 0.640625;
   position: relative;
   display: grid;
   place-items: center;
-  width: 100%;
-  height: 100%;
+  width: var(--melting-art);
+  height: var(--melting-art);
 }
 
 .roster-cell__img {
@@ -89,44 +130,8 @@
   width: 62%;
   aspect-ratio: 1;
   border-radius: 24%;
-  background: var(--fallback-tint, var(--color-panel-strong));
+  background: var(--fallback-tint, var(--color-object));
   color: rgba(17, 18, 22, 0.88);
-  font-size: var(--text-sm);
+  font-size: 22px;
   font-weight: 600;
-}
-
-/* 蛇形箭頭：貼齊該列行進方向的末端。 */
-.roster-arrow {
-  display: flex;
-  height: 22px;
-  color: var(--color-accent);
-}
-
-.roster-arrow--right {
-  justify-content: flex-end;
-}
-
-.roster-arrow--left {
-  justify-content: flex-start;
-}
-
-.roster-arrow__glyph {
-  width: 46px;
-  height: 100%;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  opacity: 0.85;
-}
-
-/* 超出每組列數上限時的分隔列（design.md §2.5 第 4 點）。 */
-.roster-group {
-  display: flex;
-  justify-content: center;
-  padding: var(--space-1) 0;
-  color: var(--color-fg-dim);
-  font-size: var(--text-xs);
-  letter-spacing: 0.08em;
 }
