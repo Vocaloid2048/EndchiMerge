@@ -24,6 +24,42 @@ export const VIRTUAL_HEIGHT = 1000;
 export const WALL_THICKNESS = 16;
 
 /**
+ * Sprite 正規化的三個常數（design.md §1.5.1／D16／D28）。
+ * The three sprite normalisation constants.
+ *
+ * 素材端已把每個角色正規化成「512² 畫布、body 外框 304、body 中心 (256, 328)、
+ * 其餘完全透明」。因此渲染器**不需要**在 `levels.json` 存任何尺寸或偏移 ——
+ * 只要這三個數字就能把任何等級的碰撞圓對上畫面。
+ * The assets are normalised to a 512² canvas with a 304 body box centred at
+ * (256, 328) and fully transparent padding, so the renderer needs no per-level size
+ * or offset — these three numbers are enough to align any collision circle.
+ *
+ * 留白必須透明（§1.5.1）：§3.2 的輪廓白框是從 alpha 通道推導形狀的，若留白填白，
+ * 剪影會變成整張畫布而讓所有量測靜默失效。
+ * The padding must stay transparent: the D20 outline frame derives its shape from the
+ * alpha channel, so opaque padding would silently turn the silhouette into the whole
+ * canvas.
+ */
+export const SPRITE_SIZE = 512;
+
+/** body 外框邊長，像素。實測為 304 ± 2。 */
+export const SPRITE_BODY = 304;
+
+/** body 中心在畫布中的位置，像素。y 偏下是因為裝飾多在身體上方。 */
+export const SPRITE_ANCHOR = { x: 256, y: 328 } as const;
+
+/**
+ * 「碰撞半徑 → sprite 繪製縮放」的換算率。
+ * Conversion factor from collision radius to sprite draw scale.
+ *
+ * 與 design.md §1.5.1 的公式一致：`scale = (2 * radius) / SPRITE_BODY`。
+ * Matches the formula in design.md §1.5.1.
+ */
+export function spriteScaleForRadius(radius: number): number {
+  return (2 * radius) / SPRITE_BODY;
+}
+
+/**
  * 技力硬上限（程式常數）。
  * Hard ceiling for SP (a code constant).
  *

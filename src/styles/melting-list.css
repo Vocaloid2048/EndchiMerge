@@ -51,7 +51,13 @@
  */
 .roster-cell__art {
   --art-scale: 1.05;
-  /* body 中心在圖內的高度：SPRITE_ANCHOR.y / SPRITE_SIZE = 328 / 512。 */
+  /*
+   * body 中心在圖內的高度：SPRITE_ANCHOR.y / SPRITE_SIZE = 328 / 512。
+   * CSS 無法 import TS，所以這個值與 `src/core/constants.ts` 的
+   * `SPRITE_ANCHOR.y / SPRITE_SIZE` **互為鏡像**；改動其中一邊務必同步另一邊。
+   * CSS cannot import TS, so this mirrors SPRITE_ANCHOR.y / SPRITE_SIZE in
+   * src/core/constants.ts — change one and you must change the other.
+   */
   --sprite-anchor-y: 0.640625;
   position: relative;
   display: grid;
