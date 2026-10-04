@@ -18,15 +18,32 @@
 /* ── 畫布 / Canvas ──────────────────────────────────────────────────────── */
 
 /*
- * 固定 1920×1080 的設計畫布。倍率由 `ui/scale.ts` 設成 inline transform。
- * transform-origin 置中，配合 #app 的 grid 居中，非 16:9 的視窗會均勻留黑邊。
- * The fixed 1920×1080 design canvas. `ui/scale.ts` sets the scale as an inline transform;
- * a centred origin plus the grid on #app letterboxes evenly on non-16:9 viewports.
+ * 固定 1920×1080 的設計畫布。縮放與置中由 `ui/scale.ts` 合成**一條** inline transform：
+ * `translate(-50%, -50%) scale(k)`。
+ * The fixed 1920×1080 design canvas. `ui/scale.ts` writes **one** inline transform that
+ * both centres and scales it: `translate(-50%, -50%) scale(k)`.
+ *
+ * 為何不用父層置中：`transform: scale()` 不改變 layout 尺寸，所以這張畫布永遠比視窗大；
+ * 置中一個超尺寸元素的行為不保證（瀏覽器會貼齊 start），會讓畫布往右下漂。用
+ * `translate(-50%, -50%)` 則是以**自身尺寸**（永遠 1920×1080）把中點釘在父層中心，
+ * 之後 `scale()` 以自身中心縮放，中點不動 —— 與視窗大小無關。
+ * Why not centre via the parent: `transform: scale()` does not change layout size, so this
+ * canvas is always larger than the viewport, and centring an oversized element is not
+ * guaranteed (the browser aligns it to `start`) — the canvas then drifts down-right.
+ * `translate(-50%, -50%)` uses the element's **own** size (always 1920×1080) to pin the
+ * centre to the host's centre; `scale()` then scales about that centre and it does not
+ * move, regardless of viewport size.
+ *
+ * `--stage-scale` 是給需要換算的人讀的（例如除錯面板），實際畫面靠 transform 本身。
+ * `--stage-scale` exists for readers that need the factor (debug panels); the pixels come
+ * from the transform.
  */
 .stage-scale {
-  position: relative;
-  flex: none;
+  position: absolute;
+  left: 50%;
+  top: 50%;
   transform-origin: center center;
+  transform: translate(-50%, -50%) scale(var(--stage-scale, 1));
   will-change: transform;
 }
 

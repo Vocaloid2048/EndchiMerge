@@ -128,7 +128,7 @@ EndchiMerge
 │  ├─config                     # 遊戲配置（外部化，改完不需重新 build）
 │  │  ├─levels.json             # 合成鏈 10 級與各級物理參數
 │  │  ├─skills.json             # 技力設定與技能表
-│  │  ├─container.json          # 容器 3D 外框參數
+│  │  ├─container.json          # 容器 U 形外框與投放留白參數
 │  │  └─branding.json           # 遊戲名、公告、repo 連結
 │  └─assets                     # 素材
 │     ├─character               # 方團團角色素材（<角色名>_img.webp）
@@ -151,7 +151,7 @@ EndchiMerge
 │  │  └─loop.ts                 # 固定時間步的畫面迴圈
 │  ├─render                     # 畫面繪製
 │  │  ├─viewport.ts             # 虛擬座標系與縮放
-│  │  ├─container.ts            # 容器 3D 線框幾何
+│  │  ├─container.ts            # 容器 U 形外框幾何
 │  │  ├─stage.ts                # 容器與方團團的畫布繪製
 │  │  ├─spriteLoader.ts         # 素材載入與降級
 │  │  └─placeholder.ts          # 程式化佔位方團團
@@ -200,7 +200,7 @@ EndchiMerge
 | M0 | 腳手架、配置系統、WebP 素材載入 | ✅ 已完成（**描邊快取與半徑校準原型仍缺**） |
 | M1 | 版面骨架（7 區域）、座標系、視覺系統、響應式 | ✅ 已完成 |
 | M2 | 蛇形名冊（自動佈局）＋ 輪廓白框 | ✅ 已完成 |
-| M3 | 容器渲染（3D 外框）、投放輸入、NEXT 佇列 | ✅ 已完成 |
+| M3 | 容器渲染（平面 U 形外框）、投放輸入、NEXT 佇列 | ✅ 已完成 |
 | M4 | 合成核心、冷卻、Combo、彈跳動畫 | 🚧 進行中 |
 | M5–M6 | 技力與技能、解鎖系統與圖鑑 | ⏳ 待辦 |
 | M7–M9 | 存檔與後端同步、排行榜、分析與反作弊 | ⏳ 待辦 |

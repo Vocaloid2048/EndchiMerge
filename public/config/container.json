@@ -1,19 +1,17 @@
 {
   "_meta": {
     "provisional": true,
-    "note": "描邊幾何已對齊設計稿：main_play_area (1408:2110) 是 strokeWeight 10、strokeAlign INSIDE、SOLID 純白、無圓角的 VECTOR。透視偏移 (perspectiveDx/Dy) 仍是目視暫定值：設計稿的後表面比前表面窄（後上緣 444.85 對前表面 667），本專案的模型是斜投影（前後同寬、僅平移），要完全一致需要改投影模型，而那會連帶改動物理可用寬度，因此暫不動。3D 外框是純裝飾，遊戲區永遠是前表面矩形，物理不套用透視。",
-    "derivation": "strokeWeight=10、strokeAlign=INSIDE、strokePaints[0]=SOLID rgb(255,255,255)、vectorData 無 cornerRadius，全部讀自 方團團.fig 的 Group 445 / main_play_area。"
+    "note": "容器是**平面 U 形**（左牆＋右牆＋底部，頂端開口，底部兩個圓角），不是 3D 盒體。所有欄位都是可調的美術參數；物理邊界由 game/containerBox.ts 從同一個 frame 矩形內縮推導，改這裡不會動到碰撞。調參位置：cornerRadius 底部圓角、strokeWidth/strokeColor 線框、fill 內部填充、topOffset 頂端留白（投放頭部空間）、spawnGap 投放留白（投放高度在頂緣上方多少＋瞄準範圍左右各內縮多少）。",
+    "tuning": "改這個檔就能調外觀，不必碰程式。線框粗細單位是「虛擬單位」：VIRTUAL_HEIGHT=1000 對應畫布高，所以 strokeWidth=10 約等於畫布高度的 1%。"
   },
 
-  "cornerRadius": 0,
+  "cornerRadius": 32,
   "strokeWidth": 10,
   "strokeColor": "#FFFFFF",
+  "fill": "rgba(255, 255, 255, 0.20)",
 
-  "perspectiveDx": 26,
-  "perspectiveDy": -18,
-
-  "frontTint": "rgba(255, 255, 255, 0.04)",
-  "backTint": "rgba(255, 255, 255, 0.02)",
+  "topOffset": 200,
+  "spawnGap": 16,
 
   "aspectMin": 0.62,
   "aspectMax": 1.45

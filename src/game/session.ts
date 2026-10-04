@@ -87,7 +87,7 @@ export class GameSession {
 
     /* 先建一次，讓 `aimX` 與牆壁在任何 resize 之前就有合法值。 */
     this.geometry = this.buildGeometry(options.virtualWidth ?? 500, this.virtualHeight);
-    this.cavity = computeContainerBounds(this.geometry.front, WALL_THICKNESS).cavity;
+    this.cavity = computeContainerBounds(this.geometry.frame, WALL_THICKNESS).cavity;
     this.aimX = this.cavity.x + this.cavity.width / 2;
     this.applyWalls();
   }
@@ -118,7 +118,7 @@ export class GameSession {
 
     this.virtualHeight = virtualHeight;
     this.geometry = this.buildGeometry(virtualWidth, virtualHeight);
-    this.cavity = computeContainerBounds(this.geometry.front, WALL_THICKNESS).cavity;
+    this.cavity = computeContainerBounds(this.geometry.frame, WALL_THICKNESS).cavity;
     this.applyWalls();
     this.aimX = this.clampAimX(this.aimX, this.pendingLevel().radius);
   }
@@ -132,16 +132,29 @@ export class GameSession {
     if (this.wallBodies.length > 0) {
       this.physics.remove(...this.wallBodies);
     }
-    const bounds = computeContainerBounds(this.geometry.front, WALL_THICKNESS);
+    const bounds = computeContainerBounds(this.geometry.frame, WALL_THICKNESS);
     this.wallBodies = createContainerBodies(bounds.walls);
     this.physics.add(...this.wallBodies);
   }
 
   /* ------------------------------------------------------------------ 瞄準 */
 
-  /** 目前瞄準的虛擬 X（已夾在空腔內）。 */
+  /** 目前瞄準的虛擬 X（已夾在投放範圍內）。 */
   get aimXValue(): number {
     return this.aimX;
+  }
+
+  /**
+   * 投放高度（虛擬 Y）：U 形頂緣**上方** `spawnGap` 的位置。
+   * Drop height (virtual Y): `spawnGap` **above** the U's rim.
+   *
+   * 由幾何推導而非另存一個常數，所以改 `container.json` 的 `topOffset` 或 `spawnGap`
+   * 之後，投放線與預覽會自動跟著移動。
+   * Derived from the geometry rather than stored separately, so changing `topOffset` or
+   * `spawnGap` in container.json moves the spawn line and the preview with it.
+   */
+  get spawnYValue(): number {
+    return this.geometry.frame.y - Math.max(0, this.config.container.spawnGap);
   }
 
   /**
@@ -152,13 +165,28 @@ export class GameSession {
     this.aimX = this.clampAimX(x, this.pendingLevel().radius);
   }
 
-  /** 把 X 夾到目前等級的半徑能完整放進空腔的範圍。 */
+  /**
+   * 把 X 夾到「容器左右邊緣各內縮 `spawnGap`，再各讓開一個半徑」的範圍。
+   * Clamp X so the dumpling's outline stays `spawnGap` inside the container's left/right
+   * edges, then a further radius in.
+   *
+   * **調參入口**：`spawnGap` 來自 `container.json`。想讓方團團緊貼牆的**內緣**（空腔），
+   * 把下面的 `frame` 換成 `computeContainerBounds(this.geometry.frame, WALL_THICKNESS).cavity`
+   * 即可；想讓它可以微微探出邊緣，把 `radius` 一項拿掉。
+   * **The tuning entry point**: `spawnGap` comes from container.json. To make the dumpling
+   * hug the wall's inner face instead, swap `frame` for the cavity; to let it poke slightly
+   * past the edge, drop the `radius` term.
+   */
   private clampAimX(x: number, radius: number): number {
-    const min = this.cavity.x + radius;
-    const max = this.cavity.x + this.cavity.width - radius;
+    const gap = Math.max(0, this.config.container.spawnGap);
+    const inset = gap + radius;
+    const left = this.geometry.frame.x;
+    const right = left + this.geometry.frame.width;
+    const min = left + inset;
+    const max = right - inset;
 
-    /* 空腔比直徑還窄時 min > max，此時置中比夾到某側合理。 */
-    if (min > max) return this.cavity.x + this.cavity.width / 2;
+    /* 容器比直徑還窄時 min > max，此時置中比夾到某側合理。 */
+    if (min > max) return left + this.geometry.frame.width / 2;
 
     return Math.min(Math.max(x, min), max);
   }
@@ -219,7 +247,7 @@ export class GameSession {
     const id = this.spawnQueue.take();
     const level = this.levelDef(id);
     const x = this.clampAimX(this.aimX, level.radius);
-    const y = this.config.levels.settings.aimY;
+    const y = this.spawnYValue;
 
     const body = createCircleBody(x, y, level.radius, {
       density: level.density,
@@ -230,8 +258,13 @@ export class GameSession {
       label: `level-${String(id)}`,
     });
 
-    /* design.md §4.1：sprite 必須保持直立，理由見 `lockRotation`。 */
-    lockRotation(body);
+    /*
+     * 旋轉預設交給物理引擎（`settings.lockRotation = false`）：碰撞產生的力矩會讓方團團
+     * 翻滾、沿斜面滾落，堆積才會自然。只有配置要求直立時才把慣量鎖成無限大。
+     * Rotation is left to the engine by default (lockRotation = false) so contact torques
+     * tumble the dumplings and piles settle naturally; it is locked only on request.
+     */
+    if (this.config.levels.settings.lockRotation) lockRotation(body);
 
     this.physics.add(body);
     this.dropped.push({ body, level });
@@ -246,13 +279,13 @@ export class GameSession {
   }
 
   private recycle(): void {
-    const floor = this.geometry.front.y + this.geometry.front.height;
+    const floor = this.geometry.frame.y + this.geometry.frame.height;
     const survivors: { body: Matter.Body; level: LevelDef }[] = [];
     const removed: Matter.Body[] = [];
 
     for (const entry of this.dropped) {
       const { y } = entry.body.position;
-      const gone = y > floor + FALL_OUT_MARGIN || y < this.geometry.front.y - FALL_OUT_MARGIN;
+      const gone = y > floor + FALL_OUT_MARGIN || y < this.geometry.frame.y - FALL_OUT_MARGIN;
 
       if (gone) removed.push(entry.body);
       else survivors.push(entry);
@@ -277,14 +310,14 @@ export class GameSession {
     }));
   }
 
-  /** 投放預覽；`aimY` 就是預覽圓心的高度。 */
+  /** 投放預覽；`spawnYValue` 就是預覽圓心的高度。 */
   get aimPreview(): RenderAim {
     const level = this.pendingLevel();
 
     return {
       levelId: level.id,
       x: this.clampAimX(this.aimX, level.radius),
-      y: this.config.levels.settings.aimY,
+      y: this.spawnYValue,
       radius: level.radius,
     };
   }

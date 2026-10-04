@@ -46,17 +46,33 @@ body {
 }
 
 /*
- * 版面宿主：固定滿版、置中、裁掉溢出。設計畫布是固定 1920×1080，靠 `ui/scale.ts` 的
- * 等比縮放貼合視窗，所以這裡**不需要**任何流式尺寸 —— 只要有任何一個尺寸跟著視窗跑，
- * 這一輪要消掉的「比例漂移」就會從那個地方長回來。
- * Fixed full-bleed host, centred, clipping overflow. The design canvas is a fixed
- * 1920×1080 scaled to fit by `ui/scale.ts`, so nothing here may be fluid: any
- * viewport-driven size would let ratio drift grow back from that spot.
+ * 版面宿主：固定滿版、裁掉溢出。
+ * Fixed full-bleed host, clipping overflow.
+ *
+ * **刻意不做置中**（原本是 `display: grid; place-items: center`）。原因是一個實測過的
+ * 瀏覽器行為：被 `transform: scale()` 縮放的子元素，其 layout 尺寸不會變，所以在幾乎
+ * 所有視窗下都比容器大；而「置中一個比容器大的元素」並不保證置中 —— 瀏覽器會把溢出
+ * 推到某一側（把元素貼齊 start），`overflow: hidden` 再把另一側裁掉。於是
+ * `transform-origin: center center` 落在未變形盒子的中心 (960, 540)，而不是視窗中心，
+ * 整張畫布就往右下漂。25% 縮放時視窗 CSS px 反而大於 1920×1080，置中恢復正常，所以
+ * 只有切到高倍率才看見。
+ * **Deliberately not centred** (it used to be `display: grid; place-items: center`).
+ * A `transform: scale()`d child keeps its layout size, so it is larger than the host in
+ * almost every viewport; and centring an oversized child is not guaranteed — the browser
+ * pushes the overflow to one side (aligning the child to `start`) and `overflow: hidden`
+ * clips the other. `transform-origin: center center` then lands on the untransformed box
+ * centre (960, 540) rather than the viewport centre, and the whole canvas drifts
+ * down-right. At 25% zoom the viewport's CSS pixel count exceeds 1920×1080, centring
+ * works again, so the bug only shows at higher zoom levels.
+ *
+ * 置中改由 `styles/layout.css` 的 `.stage-scale` 用 `translate(-50%, -50%)` 自己完成 ——
+ * 它用元素自身尺寸運算，與父層大小、與瀏覽器如何處置溢出都無關。
+ * Centring now lives in `.stage-scale` as `translate(-50%, -50%)`, which resolves against
+ * the element's own size and therefore does not depend on the host size or on how the
+ * browser resolves overflow.
  */
 #app {
   position: fixed;
   inset: 0;
-  display: grid;
-  place-items: center;
   overflow: hidden;
 }

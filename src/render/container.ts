@@ -1,44 +1,61 @@
 /**
- * 中央容器的 3D 線框外框。
- * The centre container's 3D wireframe shell.
+ * 中央容器的平面 U 形外框。
+ * The centre container's flat U-shaped shell.
  *
- * 依 design.md §4（D15）：外框是**純裝飾的線框**，盒內方團團是平面 2D sprite，
- * **不做透視變形**。物理邊界對齊的是**前表面矩形**，不含透視偏移的部分。
- * Per design.md §4 (D15) the shell is a purely decorative wireframe and the
- * dumplings inside stay flat 2D sprites with no perspective distortion. The
- * physics boundary follows the **front face** only.
+ * 容器是一件**平面**的 U 形玻璃槽：左牆、右牆、底部，頂端開口；底部兩個角是圓角，
+ * 內部填一層半透明白。它**不是** 3D 盒體 —— 之前的斜投影線框已被平面 U 取代。
+ * The container is a **flat** U-shaped glass trough: left wall, right wall, floor, open
+ * top, rounded bottom corners and a translucent white interior fill. It is **not** a 3D
+ * box; the earlier oblique-projection wireframe has been replaced by this flat U.
  *
- * 繪製順序是「裝在玻璃箱內」這個效果的全部來源（design.md §4.1）：
- * 後緣 → sprite → 前表面 4 條邊。少了最後一步，方團團看起來是貼在外面而不是裝在裡面。
- * The draw order is what sells "inside a glass box": back edges → sprites → the
- * front face's four edges. Without that last step the dumplings look pasted on.
+ * **單一真實來源**：`frame` 是 U 形（也就是容器）的外框矩形。物理邊界由
+ * `game/containerBox.ts` 從**同一個矩形**內縮出空腔與牆，所以畫面與碰撞永遠對得上。
+ * **One source of truth**: `frame` is the U's outer rectangle, i.e. the container. The
+ * physics boundaries are derived from **that same rectangle** by `game/containerBox.ts`,
+ * so the drawn shell and the collider can never disagree.
+ *
+ * 可調參數全部來自 `public/config/container.json`：
+ * `cornerRadius`（底部圓角）、`strokeWidth` / `strokeColor`（線框）、`fill`（內部填充）、
+ * `topOffset`（U 形頂緣距畫布頂端的留白，投放用的頭部空間）。
+ * Every tunable comes from `public/config/container.json`: `cornerRadius` (bottom corners),
+ * `strokeWidth` / `strokeColor` (the outline), `fill` (interior), and `topOffset` (the
+ * headroom between the canvas top and the U's rim, which the drop needs).
+ *
+ * 繪製順序是「裝在容器內」這個效果的全部來源：
+ * The draw order is what sells "inside the container":
+ *
+ * 1. `drawContainerBack` —— 填內部（**在方團團之下**）。
+ * 2. 方團團。
+ * 3. `drawContainerFront` —— 描 U 形線框（**在方團團之上**）。
+ *
+ * 少了第 3 步，方團團看起來是貼在槽前面而不是裝在裡面。
+ * Without step 3 the dumplings read as pasted on rather than sitting inside.
  */
 
 import type { ContainerConfig, Rect } from '../core/types';
 
-/** 帶圓角的矩形面。 */
-export interface BoxFace extends Rect {
-  cornerRadius: number;
-}
-
 export interface ContainerGeometry {
-  /** 前表面；**遊戲區與物理邊界就是這個矩形**。 */
-  front: BoxFace;
-  /** 後表面；由 `perspectiveDx` / `perspectiveDy` 偏移而來。 */
-  back: BoxFace;
+  /** U 形（容器）的外框矩形；**物理遊戲區就是這個矩形**，再由 `containerBox` 內縮出空腔。 */
+  frame: Rect;
+  /** 底部兩個圓角的半徑，虛擬單位。 */
+  cornerRadius: number;
+  /** U 形線框粗細，虛擬單位。 */
   strokeWidth: number;
+  /** U 形線框顏色。 */
   strokeColor: string;
-  frontTint: string;
-  backTint: string;
+  /** U 形內部的填充色。 */
+  fill: string;
 }
 
 /**
- * 依容器尺寸與配置算出前後兩個面。
- * Derive both faces from the container size and config.
+ * 依容器尺寸與配置算出 U 形的外框。
+ * Derive the U's outer rectangle from the container size and config.
  *
- * 前表面會被往內縮，縮的量剛好等於透視偏移，這樣兩個面都落在畫布內。
- * The front face is inset by exactly the perspective offset so both faces stay
- * inside the canvas.
+ * 寬度吃滿畫布；垂直方向在頂端留 `topOffset` 的空白，投放中的方團團就在這段空白裡出現。
+ * 留白會被夾在 `[0, height - 1]`，所以退化輸入（畫布高 0）也拿得到正尺寸的矩形。
+ * The width fills the canvas; vertically, `topOffset` of headroom is reserved at the top,
+ * and that is where the in-flight dumpling appears. The offset is clamped to
+ * `[0, height - 1]` so even degenerate input (zero-height canvas) yields a positive rect.
  *
  * @param width 容器寬（虛擬單位）/ Container width in virtual units.
  * @param height 容器高（虛擬單位）/ Container height in virtual units.
@@ -48,139 +65,93 @@ export function computeContainerGeometry(
   height: number,
   config: ContainerConfig,
 ): ContainerGeometry {
-  const dx = config.perspectiveDx;
-  const dy = config.perspectiveDy;
-  const insetX = Math.abs(dx);
-  const insetY = Math.abs(dy);
-
-  const faceWidth = Math.max(1, width - insetX);
-  const faceHeight = Math.max(1, height - insetY);
-
-  const front: BoxFace = {
-    /* 後緣往右 → 前表面貼左；往左則相反。 */
-    x: dx < 0 ? insetX : 0,
-    /* 後緣往上（dy < 0）→ 前表面下移，反之貼頂。 */
-    y: dy > 0 ? 0 : insetY,
-    width: faceWidth,
-    height: faceHeight,
-    cornerRadius: config.cornerRadius,
-  };
-
-  const back: BoxFace = {
-    x: front.x + dx,
-    y: front.y + dy,
-    width: faceWidth,
-    height: faceHeight,
-    cornerRadius: config.cornerRadius,
-  };
+  const w = Math.max(1, width);
+  const h = Math.max(1, height);
+  const top = Math.max(0, Math.min(config.topOffset, h - 1));
 
   return {
-    front,
-    back,
-    strokeWidth: config.strokeWidth,
+    frame: { x: 0, y: top, width: w, height: Math.max(1, h - top) },
+    cornerRadius: Math.max(0, config.cornerRadius),
+    strokeWidth: Math.max(0, config.strokeWidth),
     strokeColor: config.strokeColor,
-    frontTint: config.frontTint,
-    backTint: config.backTint,
+    fill: config.fill,
   };
-}
-
-/** 四個象限座標。 */
-function corners(face: BoxFace): { x: number; y: number }[] {
-  return [
-    { x: face.x, y: face.y },
-    { x: face.x + face.width, y: face.y },
-    { x: face.x + face.width, y: face.y + face.height },
-    { x: face.x, y: face.y + face.height },
-  ];
-}
-
-/** 圓角矩形路徑。 */
-function roundedRectPath(ctx: CanvasRenderingContext2D, face: BoxFace): void {
-  const r = Math.max(0, Math.min(face.cornerRadius, face.width / 2, face.height / 2));
-  const { x, y, width, height } = face;
-
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + width - r, y);
-  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
-  ctx.lineTo(x + width, y + height - r);
-  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
-  ctx.lineTo(x + r, y + height);
-  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
-}
-
-function quadPath(
-  ctx: CanvasRenderingContext2D,
-  a: { x: number; y: number },
-  b: { x: number; y: number },
-  c: { x: number; y: number },
-  d: { x: number; y: number },
-): void {
-  ctx.beginPath();
-  ctx.moveTo(a.x, a.y);
-  ctx.lineTo(b.x, b.y);
-  ctx.lineTo(c.x, c.y);
-  ctx.lineTo(d.x, d.y);
-  ctx.closePath();
 }
 
 /**
- * 畫「後方」的部分：後表面、頂面與右側面。應在方團團**之前**呼叫。
- * Draw everything behind the dumplings. Call this before them.
+ * U 形路徑：由左上角往下、繞過底部兩個圓角、再沿右牆回到右上角。
+ * The U path: down the left side, round the two bottom corners, up the right side.
+ *
+ * 刻意**不呼叫 `closePath()`** —— 那會補上一條頂邊，U 就變成封閉矩形。`fill()` 會隱式
+ * 閉合子路徑，所以不必關閉也能正確填充內部。
+ * Deliberately **no `closePath()`**: that would add the top edge and turn the U into a
+ * closed rectangle. `fill()` closes the subpath implicitly, so the interior still fills.
+ *
+ * `arcTo` 需要路徑上已有一個點，因此圓角半徑為 0 時改走直角分支，避免 `arcTo` 拿到
+ * 退化的切線。
+ * `arcTo` needs an existing current point, so a zero radius takes the square-corner branch
+ * instead of feeding `arcTo` a degenerate tangent.
+ */
+function uPath(ctx: CanvasRenderingContext2D, frame: Rect, radius: number): void {
+  const left = frame.x;
+  const right = frame.x + frame.width;
+  const top = frame.y;
+  const bottom = frame.y + frame.height;
+  const r = Math.max(0, Math.min(radius, frame.width / 2, frame.height));
+
+  ctx.beginPath();
+  ctx.moveTo(left, top);
+
+  if (r > 0) {
+    ctx.lineTo(left, bottom - r);
+    ctx.arcTo(left, bottom, left + r, bottom, r);
+    ctx.lineTo(right - r, bottom);
+    ctx.arcTo(right, bottom, right, bottom - r, r);
+    ctx.lineTo(right, top);
+  } else {
+    ctx.lineTo(left, bottom);
+    ctx.lineTo(right, bottom);
+    ctx.lineTo(right, top);
+  }
+}
+
+/**
+ * 畫「槽的內部」：U 形範圍的填充。應在方團團**之前**呼叫。
+ * Draw the trough's interior fill. Call this before the dumplings.
  */
 export function drawContainerBack(ctx: CanvasRenderingContext2D, geometry: ContainerGeometry): void {
-  const { front, back } = geometry;
-  const [frontTopLeft, frontTopRight, frontBottomRight] = corners(front) as [
-    { x: number; y: number },
-    { x: number; y: number },
-    { x: number; y: number },
-  ];
-  const [backTopLeft, backTopRight, backBottomRight] = corners(back) as [
-    { x: number; y: number },
-    { x: number; y: number },
-    { x: number; y: number },
-  ];
-
   ctx.save();
-  ctx.lineWidth = geometry.strokeWidth;
-  ctx.strokeStyle = geometry.strokeColor;
-  ctx.lineJoin = 'round';
-  ctx.fillStyle = geometry.backTint;
-
-  /* 後表面。 */
-  roundedRectPath(ctx, back);
+  ctx.fillStyle = geometry.fill;
+  uPath(ctx, geometry.frame, geometry.cornerRadius);
   ctx.fill();
-  ctx.stroke();
-
-  /* 頂面與右側面：兩片薄薄的斜面板，讓線框看起來有體積。 */
-  quadPath(ctx, frontTopLeft, frontTopRight, backTopRight, backTopLeft);
-  ctx.fill();
-  ctx.stroke();
-
-  quadPath(ctx, frontTopRight, backTopRight, backBottomRight, frontBottomRight);
-  ctx.fill();
-  ctx.stroke();
-
   ctx.restore();
 }
 
 /**
- * 畫「前方」的部分：前表面的 4 條邊。應在方團團**之後**呼叫。
- * Draw the front face's four edges. Call this after the dumplings.
+ * 畫「槽的線框」：U 形輪廓。應在方團團**之後**呼叫。
+ * Draw the trough's outline. Call this after the dumplings.
+ *
+ * 線框往內縮半個線寬，模擬設計稿的 `strokeAlign: INSIDE` —— 否則線寬一半會落在畫布
+ * 之外被裁掉（畫布寬度就等於 U 的寬度）。頂端是開口的，所以不做垂直內縮。
+ * The outline is inset by half its width to emulate the mock's `strokeAlign: INSIDE`;
+ * otherwise half the stroke falls outside the canvas (whose width equals the U's width).
+ * The top is open, so it is not inset vertically.
  */
 export function drawContainerFront(ctx: CanvasRenderingContext2D, geometry: ContainerGeometry): void {
+  const inset = geometry.strokeWidth / 2;
+  const outline: Rect = {
+    x: geometry.frame.x + inset,
+    y: geometry.frame.y,
+    width: Math.max(1, geometry.frame.width - inset * 2),
+    height: Math.max(1, geometry.frame.height - inset),
+  };
+
   ctx.save();
   ctx.lineWidth = geometry.strokeWidth;
   ctx.strokeStyle = geometry.strokeColor;
   ctx.lineJoin = 'round';
-  ctx.fillStyle = geometry.frontTint;
-
-  roundedRectPath(ctx, geometry.front);
-  ctx.fill();
+  ctx.lineCap = 'round';
+  uPath(ctx, outline, geometry.cornerRadius);
   ctx.stroke();
-
   ctx.restore();
 }

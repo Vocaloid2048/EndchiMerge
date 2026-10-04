@@ -53,8 +53,23 @@ export interface GameSettings {
    * changes gravity.
    */
   gravityY: number;
-  /** 瞄準指示線距容器頂端的距離，虛擬單位。 */
-  aimY: number;
+  /**
+   * 是否鎖定方團團的旋轉。
+   * Whether the dumplings' rotation is locked.
+   *
+   * `false`（預設）＝**依真實物理翻滾**：碰撞產生的力矩會讓方團團轉動、沿斜面滾落，
+   * 堆疊因此自然。`true` ＝ 慣量設無限大，方團團永遠直立。
+   * `false` (default) leaves rotation to the physics engine, so contact torques tumble and
+   * roll the dumplings and piles settle naturally. `true` sets inertia to infinity and
+   * keeps every sprite upright.
+   *
+   * 取捨：碰撞形狀是**圓**而畫面是**方**，自由旋轉時玩家看得出兩者不完全一致；
+   * 鎖定旋轉則會讓方塊永遠像是「平放」而不受碰撞影響。
+   * The trade-off: the collider is a **circle** while the art is a **square**, so free
+   * rotation makes that mismatch visible; locking it makes square art sit as if nothing
+   * could ever tip it.
+   */
+  lockRotation: boolean;
   /** 是否禁止在特定條件下繼續投放。 */
   spawnBlockEnabled: boolean;
   /** 溢出時是否直接扣分結束，或僅提示。 */
@@ -117,19 +132,25 @@ export interface SkillsConfig {
   skills: SkillDef[];
 }
 
-/** 中央容器的 3D 裝飾外框參數。物理不套用這些值。 */
+/** 中央容器（平面 U 形）的外觀與擺位參數。物理不套用這些值。 */
 export interface ContainerConfig {
+  /** 底部兩個圓角的半徑，虛擬單位。 */
   cornerRadius: number;
+  /** U 形線框粗細，虛擬單位。 */
   strokeWidth: number;
+  /** U 形線框顏色。 */
   strokeColor: string;
-  /** 後緣相對前緣的水平偏移，虛擬單位。 */
-  perspectiveDx: number;
-  /** 後緣相對前緣的垂直偏移，虛擬單位。 */
-  perspectiveDy: number;
-  /** 前表面染色。 */
-  frontTint: string;
-  /** 後表面染色。 */
-  backTint: string;
+  /** U 形內部的填充色。 */
+  fill: string;
+  /** U 形頂緣距畫布頂端的距離，虛擬單位。留出投放用的頭部空間。 */
+  topOffset: number;
+  /**
+   * 投放留白，虛擬單位。同時決定兩件事：投放高度在 U 形頂緣**上方**多少、
+   * 以及瞄準範圍距離左右邊緣各內縮多少（再各讓開一個半徑）。
+   * Drop padding in virtual units. It sets both how far above the U's rim the drop starts
+   * and how far the aim range is inset from the left/right edges (plus one radius each).
+   */
+  spawnGap: number;
   /** 容器寬高比下限。 */
   aspectMin: number;
   /** 容器寬高比上限。 */

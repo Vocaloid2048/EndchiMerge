@@ -87,20 +87,22 @@ export function createStaticRect(
 }
 
 /**
- * 鎖定旋轉。
- * Lock rotation.
+ * 鎖定旋轉（**可選**，預設不啟用）。
+ * Lock rotation (**opt-in**, off by default).
  *
- * 依 design.md §4.1，方團團是「平面、直立，不旋轉或僅小幅旋轉」的 sprite。這不只是
- * 美術偏好：碰撞形狀是**圓**而畫面是**方**，一旦自由旋轉，方塊在圓形碰撞體裡轉動
- * 就會把「畫面與物理不一致」這件事直接演給玩家看。
- * Per design.md §4.1 the dumplings are flat, upright sprites with no or only slight
- * rotation. This is not just art direction: the collider is a **circle** while the art
- * is a **square**, so free rotation would visibly betray the mismatch between them.
+ * 只有在 `levels.json → settings.lockRotation` 為 `true` 時才會呼叫。預設是**讓物理
+ * 自由轉動**：碰撞產生的力矩會讓方團團翻滾、沿斜面滾落，堆積因而自然。
+ * Called only when `levels.json → settings.lockRotation` is `true`. By default rotation is
+ * **left to the engine**: contact torques tumble the dumplings and roll them down slopes,
+ * which is what makes a pile settle naturally.
  *
- * 做法是把慣量設成無限大 —— 力矩除以無限大的慣量得到零角加速度，因此不必每幀歸零
- * 角速度，也不可能被碰撞推歪。
- * Setting inertia to infinity makes angular acceleration zero regardless of torque, so
- * nothing has to be reset each frame and no collision can tip a body over.
+ * 代價要知道：碰撞形狀是**圓**而畫面是**方**。自由旋轉時，方形 sprite 在圓形碰撞體裡
+ * 轉動，會讓「畫面與物理不完全一致」變得看得見。要換回舊的直立手感就打開
+ * `lockRotation`，那一瞬間所有力矩都失效（慣量無限大），方團團永遠正立。
+ * The cost is worth knowing: the collider is a **circle** while the art is a **square**, so
+ * free rotation makes that mismatch visible as the square spins inside its circle. Flip
+ * `lockRotation` on to get the old always-upright feel back — inertia becomes infinite, so
+ * every torque produces zero angular acceleration.
  */
 export function lockRotation(body: Matter.Body): void {
   Matter.Body.setInertia(body, Number.POSITIVE_INFINITY);

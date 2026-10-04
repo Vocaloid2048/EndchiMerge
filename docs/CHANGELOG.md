@@ -12,6 +12,60 @@
 分支關係：`feat-ui-init` → `dev` → `main`。本節涵蓋的範圍是「可以丟方團團」，
 合成、Combo 與彈跳動畫屬 M4，尚未進入。
 
+### 修正 — 縮放 25% ↔ 500% 時整張畫布往右下漂
+
+`#app` 原本用 `display: grid; place-items: center` 置中 1920×1080 的設計畫布。但
+`transform: scale()` **不改變 layout 尺寸**，畫布在幾乎所有視窗下都比容器大，而置中一個
+超尺寸元素的行為**不保證**（瀏覽器會把溢出推到一側、把元素貼齊 `start`），
+`transform-origin` 於是脫離視窗中心，整張畫布往右下漂、右側面板被 `overflow: hidden`
+裁掉。25% 縮放時視窗 CSS px 反而大於 1920×1080，置中恢復正常 —— 所以這個 bug 只在切到
+高倍率時看得見。
+
+置中改寫進 transform 本身（`ui/scale.ts → stageTransform()`）：
+`translate(-50%, -50%) scale(k)`。以 headless Chrome 實測，1076×519 視窗下舊做法偏移
+`(+422, +281)`，新做法偏移 ≈ `0`。硬性規則已記入 `../agent-readme.md` §版面與縮放規範。
+
+- `src/styles/main.css`：`#app` 移除 grid 置中。
+- `src/styles/layout.css`：`.stage-scale` 改為 `absolute` + `translate(-50%, -50%) scale()`。
+- `src/ui/scale.ts`：新增 `stageTransform()`。
+- `tests/stageScale.test.ts`：新增 `stageTransform()` 的置中形式斷言。
+
+### 變更 — 容器由 3D 斜投影線框改為平面 U 形
+
+容器改為**平面 U 形**（左牆＋右牆＋底部，頂端開口，底部 16 圓角），內部填 20%
+`#FFFFFF`。外觀與投放留白全部外部化到 `public/config/container.json`
+（`cornerRadius` / `strokeWidth` / `strokeColor` / `fill` / `topOffset` / `spawnGap`）；
+`perspectiveDx` / `perspectiveDy` / `frontTint` / `backTint` 已移除。
+
+- `src/render/container.ts`：`ContainerGeometry` 由 `{ front, back }` 改為單一 `frame`；
+  新增 `uPath()` 與 U 形描邊（往內縮半個線寬，模擬設計稿的 `strokeAlign: INSIDE`）。
+- `src/core/types.ts` / `configLoader.ts`：`ContainerConfig` 欄位更新。
+
+### 變更 — 投放位置改由幾何推導
+
+投放高度改為 `spawnYValue = frame.y - spawnGap`（U 形頂緣**上方** `spawnGap`），
+瞄準範圍夾到 `frame 左右邊緣 ± (spawnGap + radius)`。
+
+- `src/game/session.ts`：新增 `spawnYValue` getter；`clampAimX()` 改以 `frame` 為基準。
+- `GameSettings.aimY` 已**移除**（原本寫死 90，落在槽內部）。
+
+### 變更 — 旋轉改為依真實物理
+
+新增 `levels.json → settings.lockRotation`（預設 `false`）。`false` 時不再呼叫
+`lockRotation()`，碰撞力矩會讓方團團翻滾、沿斜面滾落，堆積因而自然。`physics.ts` 的
+`lockRotation()` 保留為 opt-in。取捨：碰撞體是**圓**、畫面是**方**，自由旋轉會讓兩者的
+不一致看得見；此為對 `design.md` §4.1「平面直立」的覆蓋。
+
+- `src/core/physics.ts`：`lockRotation()` 改為 opt-in 並更新說明。
+- `tests/session.test.ts`：旋轉測試改為「預設會翻滾」＋「`lockRotation: true` 時保持直立」。
+
+### 新增 — 除錯輔助線與渲染管線文檔
+
+- `?debug=1`（開發模式）疊加容器外框、物理空腔與投放線
+  （`game/loop.ts` → `StageFrame.debug` → `render/stage.ts → drawDebugOverlay()`）。
+- 新增 `docs/rendering.md`：繪製順序、每個視覺元素對應的函式、以及完整調參地圖
+  （含角色大小基數與投放虛線樣式的位置）。
+
 ### 新增 — M0 前置缺口（補完）
 
 `dev` 當時只有配置 JSON、WebP 素材與 `core/{types,constants,rng}`，**沒有**任何載入

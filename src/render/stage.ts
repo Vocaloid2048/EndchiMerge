@@ -9,14 +9,43 @@
  * and the canvas merely projects it. That keeps frames replayable and prevents the
  * renderer from quietly mutating game state.
  *
- * 繪製順序完全照 design.md §4.1，順序本身就是「裝在玻璃箱內」這個效果的全部來源。
- * The draw order follows design.md §4.1 exactly; that order is the whole effect.
+ * 繪製順序本身就是「裝在容器內」這個效果的全部來源（見 `render/container.ts`）：
+ * 內部填充 → 輔助線 → 方團團 → U 形線框 → 投放預覽。
+ * The draw order is the whole effect (see `render/container.ts`): interior fill → guide →
+ * dumplings → U outline → drop preview.
  */
 
+import type { Rect } from '../core/types';
 import type { ContainerGeometry } from './container';
 import { drawContainerBack, drawContainerFront } from './container';
 import { drawPlaceholderDumpling } from './placeholder';
 import { SPRITE_ANCHOR, SPRITE_SIZE, spriteScaleForRadius } from '../core/constants';
+
+/**
+ * 投放輔助虛線的樣式。
+ * Aim-guide dash style.
+ *
+ * **調參入口**：虛線的粗幼、節奏與顏色都在這裡改。`color` 只是預設值，
+ * `StageFrame.guideColor` 會覆寫它。
+ * **The tuning entry point**: dash width, rhythm and colour all live here. `color` is only
+ * a default; `StageFrame.guideColor` overrides it.
+ */
+export const AIM_GUIDE_STYLE = {
+  /** 線寬，虛擬單位。 */
+  lineWidth: 5,
+  /** 虛線節奏 `[實線, 空白]`，虛擬單位。 */
+  dash: [10, 15] as const,
+  /** 顏色。 */
+  color: 'rgba(61, 61, 61, 0.69)',
+} as const;
+
+/** 除錯輔助線的樣式；只在 `StageFrame.debug` 存在時使用。 */
+const DEBUG_STYLE = {
+  lineWidth: 1.5,
+  frame: 'rgba(255, 84, 160, 0.95)',
+  cavity: 'rgba(90, 220, 255, 0.95)',
+  spawn: 'rgba(255, 214, 92, 0.95)',
+} as const;
 
 /**
  * 一顆要被畫出來的方團團。
@@ -41,7 +70,7 @@ export interface RenderBody {
 export interface RenderAim {
   levelId: number;
   x: number;
-  /** 預覽的圓心 Y，通常等於 `settings.aimY`。 */
+  /** 預覽的圓心 Y，等於 `GameSession` 的投放高度。 */
   y: number;
   radius: number;
 }
@@ -56,8 +85,17 @@ export interface StageFrame {
   bodies: readonly RenderBody[];
   /** 目前滑鼠位置的投放預覽；null 表示不畫。 */
   aim: RenderAim | null;
-  /** 輔助線的顏色（預覽用）。 */
+  /** 輔助線的顏色（預覽用）；未提供時用 `AIM_GUIDE_STYLE.color`。 */
   guideColor?: string;
+  /**
+   * 除錯輔助。提供時額外畫出容器的外框、物理空腔與投放線。
+   * Debug overlay. When present, the frame, the physics cavity and the spawn line are
+   * outlined as well. Only wired up behind `?debug=1` in development.
+   */
+  debug?: {
+    cavity: Rect;
+    spawnY: number;
+  };
 }
 
 /** 由碰撞半徑算出 sprite 的繪製邊長（虛擬單位）。 */
@@ -105,6 +143,9 @@ function drawBody(
  * 畫一條從投放高度垂到下緣的輔助線，讓玩家看得出會落在哪一欄。
  * Draw a vertical guide from the drop height down to the floor so the landing
  * column is readable.
+ *
+ * 樣式見 `AIM_GUIDE_STYLE`（粗幼、節奏、顏色）。
+ * Style comes from `AIM_GUIDE_STYLE`.
  */
 function drawAimGuide(
   ctx: CanvasRenderingContext2D,
@@ -112,16 +153,48 @@ function drawAimGuide(
   geometry: ContainerGeometry,
   color: string,
 ): void {
-  const floorY = geometry.front.y + geometry.front.height;
+  const floorY = geometry.frame.y + geometry.frame.height;
 
   ctx.save();
   ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
-  ctx.setLineDash([10, 12]);
+  ctx.lineWidth = AIM_GUIDE_STYLE.lineWidth;
+  ctx.setLineDash([...AIM_GUIDE_STYLE.dash]);
   ctx.beginPath();
   ctx.moveTo(aim.x, aim.y + aim.radius);
   ctx.lineTo(aim.x, floorY);
   ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * 除錯輔助線：容器外框、物理空腔、投放高度。
+ * Debug guides: container frame, physics cavity and spawn height.
+ */
+function drawDebugOverlay(
+  ctx: CanvasRenderingContext2D,
+  geometry: ContainerGeometry,
+  debug: NonNullable<StageFrame['debug']>,
+): void {
+  const { frame } = geometry;
+  const { cavity, spawnY } = debug;
+
+  ctx.save();
+  ctx.lineWidth = DEBUG_STYLE.lineWidth;
+  ctx.setLineDash([]);
+
+  ctx.strokeStyle = DEBUG_STYLE.frame;
+  ctx.strokeRect(frame.x, frame.y, frame.width, frame.height);
+
+  ctx.strokeStyle = DEBUG_STYLE.cavity;
+  ctx.strokeRect(cavity.x, cavity.y, cavity.width, cavity.height);
+
+  ctx.strokeStyle = DEBUG_STYLE.spawn;
+  ctx.setLineDash([6, 6]);
+  ctx.beginPath();
+  ctx.moveTo(frame.x, spawnY);
+  ctx.lineTo(frame.x + frame.width, spawnY);
+  ctx.stroke();
+
   ctx.restore();
 }
 
@@ -139,27 +212,32 @@ export function drawStage(
 ): void {
   const { geometry, bodies, aim } = frame;
 
-  /* 1. 盒後緣、頂面與右側面。必須先畫，否則方團團會看起來在外面。 */
+  /* 1. 槽的內部填充。必須先畫，否則方團團會看起來在外面。 */
   drawContainerBack(ctx, geometry);
 
   /* 輔助線在 sprite 之下，才不會蓋住方團團。 */
   if (aim !== null) {
-    drawAimGuide(ctx, aim, geometry, frame.guideColor ?? 'rgba(232, 192, 122, 0.45)');
+    drawAimGuide(ctx, aim, geometry, frame.guideColor ?? AIM_GUIDE_STYLE.color);
   }
 
-  /* 2. 全部方團團（平面、直立）。 */
+  /* 2. 全部方團團（依物理角度翻滾）。 */
   for (const body of bodies) {
     drawBody(ctx, body, sprites);
   }
 
-  /* 3. 前表面 4 條邊 + 極淡染色。少了這步就沒有「玻璃箱」的感覺。 */
+  /* 3. U 形線框。少了這步就沒有「裝在槽內」的感覺。 */
   drawContainerFront(ctx, geometry);
 
-  /* 4. 投放預覽畫在最上層：它應該壓在前框線上，因為它還沒進到箱子裡。 */
+  /* 4. 投放預覽畫在最上層：它應該壓在線框上，因為它還沒進到槽裡。 */
   if (aim !== null) {
     ctx.save();
     ctx.globalAlpha = 0.85;
     drawBody(ctx, { ...aim, angle: 0 }, sprites);
     ctx.restore();
+  }
+
+  /* 5. 除錯輔助線永遠在最上層，否則看不到。 */
+  if (frame.debug !== undefined) {
+    drawDebugOverlay(ctx, geometry, frame.debug);
   }
 }

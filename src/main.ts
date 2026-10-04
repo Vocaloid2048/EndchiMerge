@@ -78,10 +78,20 @@ async function bootstrap(): Promise<void> {
 
   const session = new GameSession({ config });
   const hud = new Hud({ layout, sprites, levels: config.levels.levels });
+
+  /*
+   * 除錯輔助線：開發模式下加上 `?debug=1` 就會疊出容器外框、物理空腔與投放線。
+   * 這正是「哪個框對應哪個框」的答案，也是取代「瞎子摸象」最快的方法。
+   * Debug guides: `?debug=1` in a dev build overlays the container frame, the physics
+   * cavity and the spawn line — the quickest answer to "which rectangle is which".
+   */
+  const debugOverlay = import.meta.env.DEV && new URLSearchParams(window.location.search).has('debug');
+
   const loop = new FrameLoop({
     viewport,
     session,
     sprites,
+    debug: debugOverlay,
     onAfterFrame: (current): void => {
       hud.update({
         nextLevelId: current.upcomingLevelId,

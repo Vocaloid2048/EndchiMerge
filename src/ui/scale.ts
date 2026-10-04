@@ -69,12 +69,46 @@ function viewportSize(): { width: number; height: number } {
 }
 
 /**
+ * 把「置中 + 等比縮放」合成一條 transform 字串。
+ * Compose centring and uniform scaling into a single transform string.
+ *
+ * **為何置中要寫進 transform，而不是靠父層 `display: grid; place-items: center`**：
+ * `transform: scale()` 不改變元素的 layout 尺寸，所以這張 1920×1080 的畫布在幾乎所有
+ * 視窗下都比容器大。而「置中一個比容器大的元素」並不保證置中 —— 瀏覽器會把溢出推到
+ * 某一側（把元素貼齊 start），父層的 `overflow: hidden` 再把另一側裁掉。此時
+ * `transform-origin: center center` 落在未變形盒子的中心 (960, 540)，而不是視窗中心，
+ * 整張畫布就往右下漂。實測（Chrome，1076×519 視窗）：內容中心 (960, 540) 對視窗中心
+ * (538, 260)，偏移 (+422, +281)；把視窗放大到超過 1920×1080 則偏移歸零 —— 這正是
+ * 「25% 正常、100%–500% 跑位」的原因。
+ * **Why centring belongs in the transform rather than the parent:** `transform: scale()`
+ * leaves the layout size untouched, so this 1920×1080 canvas is larger than its host in
+ * almost every viewport; and centring an oversized element is not guaranteed — the browser
+ * aligns it to `start` and the host's `overflow: hidden` clips the other side.
+ * `transform-origin: center center` then lands on the untransformed box centre (960, 540)
+ * instead of the viewport centre, and the canvas drifts down-right. Measured in Chrome on
+ * a 1076×519 viewport: content centre (960, 540) versus viewport centre (538, 260), an
+ * offset of (+422, +281); grow the viewport past 1920×1080 and the offset goes to zero —
+ * which is exactly why 25% looks right and 100%–500% does not.
+ *
+ * `translate(-50%, -50%)` 用**元素自身尺寸**把中點釘到父層中心，`scale()` 再以同一個
+ * 中點縮放，所以結果與視窗大小、與瀏覽器如何處置溢出都無關。
+ * `translate(-50%, -50%)` uses the element's **own** size to pin its centre to the host's
+ * centre, and `scale()` scales about that same centre, so the result is independent of the
+ * viewport size and of how the browser resolves overflow.
+ *
+ * @param scale CSS px / 虛擬單位 / CSS pixels per virtual unit.
+ */
+export function stageTransform(scale: number): string {
+  return `translate(-50%, -50%) scale(${String(scale)})`;
+}
+
+/**
  * 把縮放倍率套到畫布上。
  * Apply the scale factor to the canvas.
  */
 function applyScale(stage: HTMLElement, scale: number): void {
   stage.style.setProperty('--stage-scale', String(scale));
-  stage.style.transform = `scale(${String(scale)})`;
+  stage.style.transform = stageTransform(scale);
 }
 
 export interface StageScaleOptions {

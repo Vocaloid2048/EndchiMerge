@@ -2,17 +2,17 @@
  * 遊玩區的物理邊界。
  * The play area's physics boundaries.
  *
- * 依 design.md §4.3：遊戲區 = 盒子的**前表面矩形**，物理邊界（左右牆＋地板）對齊它，
- * 不含透視偏移的部分。這裡只做「幾何 → 矩形」與「矩形 → 靜態剛體」的換算，
+ * 依 `render/container.ts`：遊戲區 = 容器的 **`frame` 矩形**（平面 U 形的外框），
+ * 物理邊界（左右牆＋地板）對齊它。這裡只做「幾何 → 矩形」與「矩形 → 靜態剛體」的換算，
  * 不含任何渲染，因為線框外觀屬於 `render/container.ts`。
- * Per design.md §4.3 the play area is the box's **front face**; the walls align to it
- * and ignore the perspective offset. This module only maps geometry to rectangles and
- * rectangles to static bodies — the wireframe look belongs to `render/container.ts`.
+ * Per `render/container.ts` the play area is the container's **`frame` rectangle** (the
+ * flat U's outer box); the walls align to it. This module only maps geometry to rectangles
+ * and rectangles to static bodies — the shell's look belongs to `render/container.ts`.
  *
- * 空腔（cavity）刻意比前表面**往內縮一個牆厚**（`WALL_THICKNESS`）：貼牆的方團團
+ * 空腔（cavity）刻意比 frame **往內縮一個牆厚**（`WALL_THICKNESS`）：貼牆的方團團
  * 邊緣因此永遠落在框線內側，不會被線框壓過去或溢出畫布。
- * The cavity is deliberately inset from the front face by one wall thickness so a
- * dumpling resting against a wall always stays inside the drawn frame.
+ * The cavity is deliberately inset from the frame by one wall thickness so a dumpling
+ * resting against a wall always stays inside the drawn outline.
  */
 
 import Matter from 'matter-js';

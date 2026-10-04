@@ -127,7 +127,7 @@ EndchiMerge
 │  ├─config                     # Game configuration (externalised, no rebuild needed)
 │  │  ├─levels.json             # The 10-level merge chain and per-level physics
 │  │  ├─skills.json             # SP settings and the skill table
-│  │  ├─container.json          # Decorative 3D frame parameters
+│  │  ├─container.json          # Container U-shape frame & drop padding parameters
 │  │  └─branding.json           # Game name, notices, repo link
 │  └─assets                     # Art and audio
 │     ├─character               # Dumpling assets (<name>_img.webp)
@@ -200,7 +200,7 @@ EndchiMerge
 | M0 | Scaffold, config system, WebP asset loading | ✅ Done (**outline baking and radius calibration still missing**) |
 | M1 | Layout skeleton (7 regions), coordinate system, visuals, responsive | ✅ Done |
 | M2 | Serpentine roster (auto layout) + silhouette outline | ✅ Done |
-| M3 | Container rendering (3D frame), drop input, NEXT queue | ✅ Done |
+| M3 | Container rendering (flat U-shape frame), drop input, NEXT queue | ✅ Done |
 | M4 | Merge core, cooldown, combo, pop animation | 🚧 In progress |
 | M5–M6 | SP and skills, unlock system and codex | ⏳ Pending |
 | M7–M9 | Save data and backend sync, leaderboards, analytics and anti-cheat | ⏳ Pending |

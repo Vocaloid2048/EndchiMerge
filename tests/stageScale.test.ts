@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { computeStageScale } from '../src/ui/scale';
+import { computeStageScale, stageTransform } from '../src/ui/scale';
 import { DESIGN_HEIGHT, DESIGN_WIDTH, MELTING } from '../src/core/design';
 
 describe('computeStageScale — 等比縮放 / uniform scaling', () => {
@@ -119,5 +119,28 @@ describe('computeStageScale — 等比縮放 / uniform scaling', () => {
   it('honours an explicit design size', () => {
     expect(computeStageScale(1000, 500, 1000, 500)).toBe(1);
     expect(computeStageScale(2000, 4000, 1000, 500)).toBeCloseTo(2, 9);
+  });
+});
+
+describe('stageTransform — 置中寫進 transform / centring baked into the transform', () => {
+  it('centres with translate(-50%, -50%) and then scales', () => {
+    expect(stageTransform(0.5)).toBe('translate(-50%, -50%) scale(0.5)');
+    expect(stageTransform(2.25)).toBe('translate(-50%, -50%) scale(2.25)');
+  });
+
+  it('uses a percentage translate so the centre never depends on the viewport', () => {
+    /*
+     * 百分比 translate 以**元素自身尺寸**（永遠 1920×1080）計算，所以中點永遠被釘在
+     * 父層中心，不必知道父層多大。這正是修掉「25% ↔ 500% 切換時整張畫布往右下漂」的
+     * 關鍵：舊做法靠父層 `place-items: center` 置中一個比容器大的元素，行為不保證。
+     * A percentage translate resolves against the element's **own** size (always
+     * 1920×1080), so the centre is pinned to the host's centre without knowing its size.
+     * That is exactly what fixes the canvas drifting down-right when the zoom cycles from
+     * 25% to 500%: the old approach asked the host to centre an oversized child, which is
+     * not guaranteed to work.
+     */
+    for (const scale of [0.25, 1, 2.5, 5]) {
+      expect(stageTransform(scale)).toMatch(/^translate\(-50%, -50%\) scale\(/);
+    }
   });
 });

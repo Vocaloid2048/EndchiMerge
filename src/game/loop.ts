@@ -142,6 +142,8 @@ export interface FrameLoopOptions {
   stepMs?: number;
   /** 覆寫單幀最大步數。 */
   maxSubsteps?: number;
+  /** 疊加除錯輔助線（容器外框、物理空腔、投放線）。開發時由 `?debug=1` 開啟。 */
+  debug?: boolean;
 }
 
 export class FrameLoop {
@@ -151,6 +153,7 @@ export class FrameLoop {
   private readonly onAfterFrame: ((session: GameSession) => void) | undefined;
   private readonly stepper: FixedStepper;
   private readonly stepMs: number;
+  private readonly debug: boolean;
 
   private handle: number | null = null;
   private lastTime = 0;
@@ -161,6 +164,7 @@ export class FrameLoop {
     this.sprites = options.sprites;
     this.onAfterFrame = options.onAfterFrame;
     this.stepMs = options.stepMs ?? FIXED_STEP_MS;
+    this.debug = options.debug ?? false;
     this.stepper = new FixedStepper({ stepMs: this.stepMs, maxSubsteps: options.maxSubsteps });
   }
 
@@ -219,6 +223,9 @@ export class FrameLoop {
         geometry: this.session.containerGeometry,
         bodies: this.session.bodies,
         aim: this.session.aimPreview,
+        debug: this.debug
+          ? { cavity: this.session.playArea, spawnY: this.session.spawnYValue }
+          : undefined,
       },
       this.sprites,
     );

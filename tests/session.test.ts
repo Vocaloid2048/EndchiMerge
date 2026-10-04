@@ -21,7 +21,7 @@ import { GameSession } from '../src/game/session';
 import { computeContainerBounds } from '../src/game/containerBox';
 import { WALL_THICKNESS } from '../src/core/constants';
 import { createRng } from '../src/core/rng';
-import type { AllConfig, LevelDef } from '../src/core/types';
+import type { AllConfig, GameSettings, LevelDef } from '../src/core/types';
 
 function level(id: number, radius: number, spawnWeight: number, droppable = true): LevelDef {
   return {
@@ -46,7 +46,7 @@ const CONFIG: AllConfig = {
     settings: {
       maxBodies: 80,
       gravityY: 1,
-      aimY: 90,
+      lockRotation: false,
       spawnBlockEnabled: false,
       overflowPenalty: false,
       mergeCooldownMs: 100,
@@ -58,13 +58,12 @@ const CONFIG: AllConfig = {
     skills: [],
   },
   container: {
-    cornerRadius: 28,
-    strokeWidth: 3,
-    strokeColor: '#e8c07a',
-    perspectiveDx: 26,
-    perspectiveDy: -18,
-    frontTint: 'rgba(255, 255, 255, 0.04)',
-    backTint: 'rgba(255, 255, 255, 0.02)',
+    cornerRadius: 16,
+    strokeWidth: 10,
+    strokeColor: '#FFFFFF',
+    fill: 'rgba(255, 255, 255, 0.20)',
+    topOffset: 80,
+    spawnGap: 8,
     aspectMin: 0.62,
     aspectMax: 1.45,
   },
@@ -78,20 +77,37 @@ const CONFIG: AllConfig = {
   },
 };
 
-/** 固定種子、固定寬度的 session。 */
-function makeSession(virtualWidth = 500): GameSession {
-  return new GameSession({ config: CONFIG, rng: createRng(20261004), virtualWidth });
+/** 固定種子、固定寬度的 session；可覆寫個別 settings 來測不同開關。 */
+function makeSession(virtualWidth = 500, settings: Partial<GameSettings> = {}): GameSession {
+  return new GameSession({
+    config: {
+      ...CONFIG,
+      levels: { ...CONFIG.levels, settings: { ...CONFIG.levels.settings, ...settings } },
+    },
+    rng: createRng(20261004),
+    virtualWidth,
+  });
 }
 
 describe('GameSession — 幾何與空腔 / geometry and cavity', () => {
-  it('insets the cavity inside the front face', () => {
+  it('insets the cavity inside the container frame', () => {
     const session = makeSession();
-    const front = session.containerGeometry.front;
-    const expected = computeContainerBounds(front, WALL_THICKNESS).cavity;
+    const frame = session.containerGeometry.frame;
+    const expected = computeContainerBounds(frame, WALL_THICKNESS).cavity;
 
     expect(session.playArea).toEqual(expected);
-    expect(session.playArea.x).toBe(front.x + WALL_THICKNESS);
-    expect(session.playArea.y).toBe(front.y);
+    expect(session.playArea.x).toBe(frame.x + WALL_THICKNESS);
+    expect(session.playArea.y).toBe(frame.y);
+  });
+
+  it('reserves the headroom above the frame for the drop', () => {
+    const session = makeSession();
+    const frame = session.containerGeometry.frame;
+
+    expect(frame.y).toBe(CONFIG.container.topOffset);
+    /* 投放高度＝頂緣上方一個 spawnGap，所以一定小於 frame.y。 */
+    expect(session.spawnYValue).toBe(frame.y - CONFIG.container.spawnGap);
+    expect(session.spawnYValue).toBeLessThan(frame.y);
   });
 
   it('recomputes geometry and cavity on resize', () => {
@@ -99,17 +115,17 @@ describe('GameSession — 幾何與空腔 / geometry and cavity', () => {
 
     session.resize(900, 1000);
 
-    expect(session.containerGeometry.front.width).toBe(900 - 26);
-    expect(session.playArea.width).toBe(900 - 26 - WALL_THICKNESS * 2);
+    expect(session.containerGeometry.frame.width).toBe(900);
+    expect(session.playArea.width).toBe(900 - WALL_THICKNESS * 2);
   });
 
   it('ignores a degenerate resize so a hidden canvas cannot wipe the arena', () => {
     const session = makeSession(500);
-    const before = session.containerGeometry.front.width;
+    const before = session.containerGeometry.frame.width;
 
     session.resize(0, 0);
 
-    expect(session.containerGeometry.front.width).toBe(before);
+    expect(session.containerGeometry.frame.width).toBe(before);
   });
 });
 
@@ -121,24 +137,24 @@ describe('GameSession — 瞄準夾制 / aim clamping', () => {
     expect(session.aimXValue).toBe(cavity.x + cavity.width / 2);
   });
 
-  it('clamps an aim beyond the right wall so the dumpling still fits', () => {
+  it('clamps an aim beyond the right edge so the dumpling keeps the spawn padding', () => {
     const session = makeSession();
-    const cavity = session.playArea;
+    const frame = session.containerGeometry.frame;
     const radius = session.pendingLevel().radius;
 
-    session.setAim(cavity.x + cavity.width + 500);
+    session.setAim(frame.x + frame.width + 500);
 
-    expect(session.aimXValue).toBe(cavity.x + cavity.width - radius);
+    expect(session.aimXValue).toBe(frame.x + frame.width - CONFIG.container.spawnGap - radius);
   });
 
-  it('clamps an aim beyond the left wall so the dumpling still fits', () => {
+  it('clamps an aim beyond the left edge so the dumpling keeps the spawn padding', () => {
     const session = makeSession();
-    const cavity = session.playArea;
+    const frame = session.containerGeometry.frame;
     const radius = session.pendingLevel().radius;
 
-    session.setAim(cavity.x - 500);
+    session.setAim(frame.x - 500);
 
-    expect(session.aimXValue).toBe(cavity.x + radius);
+    expect(session.aimXValue).toBe(frame.x + CONFIG.container.spawnGap + radius);
   });
 });
 
@@ -151,7 +167,7 @@ describe('GameSession — 投放 / dropping', () => {
 
     const [body] = session.bodies;
     expect(body?.x).toBeCloseTo(200, 6);
-    expect(body?.y).toBe(CONFIG.levels.settings.aimY);
+    expect(body?.y).toBe(session.spawnYValue);
   });
 
   it('uses the radius of the level it spawned', () => {
@@ -170,8 +186,8 @@ describe('GameSession — 投放 / dropping', () => {
 
     session.drop();
 
-    /* 第一顆的 y 應該正好等於 aimY，而不是被初始速度推走。 */
-    expect(session.bodies[0]?.y).toBe(CONFIG.levels.settings.aimY);
+    /* 第一顆的 y 應該正好等於投放高度，而不是被初始速度推走。 */
+    expect(session.bodies[0]?.y).toBe(session.spawnYValue);
   });
 
   it('accumulates one body per drop', () => {
@@ -289,7 +305,7 @@ describe('GameSession — 物理推進 / stepping', () => {
       session.step(1000 / 60);
     }
 
-    const floor = session.containerGeometry.front.y + session.containerGeometry.front.height;
+    const floor = session.containerGeometry.frame.y + session.containerGeometry.frame.height;
     for (const body of session.bodies) {
       /* 落地後圓心應該停在離地板一個半徑的高處附近。 */
       expect(body.y).toBeLessThan(floor);
@@ -298,8 +314,8 @@ describe('GameSession — 物理推進 / stepping', () => {
   });
 });
 
-describe('GameSession — sprite 保持直立 / sprites stay upright', () => {
-  it('keeps every dumpling at zero angle after a busy pile-up', () => {
+describe('GameSession — 旋轉交由物理 / rotation follows the engine', () => {
+  it('lets a busy pile-up tumble the dumplings', () => {
     const session = makeSession();
 
     /* 故意交錯投放，製造大量碰撞與擠壓。 */
@@ -310,24 +326,27 @@ describe('GameSession — sprite 保持直立 / sprites stay upright', () => {
     }
     for (let frame = 0; frame < 600; frame += 1) session.step(1000 / 60);
 
-    /* design.md §4.1：方團團「平面、直立，不旋轉或僅小幅旋轉」。
-     * 碰撞體是圓、畫面是方，一旦旋轉就會把兩者不一致演給玩家看。 */
+    /*
+     * `lockRotation: false`（預設）＝ 依真實物理：碰撞力矩會讓方團團轉動。
+     * 只要有任意一顆轉過，就證明旋轉沒有被鎖死。
+     */
+    expect(session.bodies.some((body) => Math.abs(body.angle) > 0.01)).toBe(true);
+  });
+
+  it('keeps every dumpling upright when lockRotation is on', () => {
+    const session = makeSession(500, { lockRotation: true });
+
+    for (const x of [200, 260, 220, 240, 280, 210]) {
+      session.setAim(x);
+      session.drop();
+      for (let frame = 0; frame < 20; frame += 1) session.step(1000 / 60);
+    }
+    for (let frame = 0; frame < 600; frame += 1) session.step(1000 / 60);
+
+    /* 慣量無限大時，任何力矩都推不歪。 */
     for (const body of session.bodies) {
       expect(body.angle).toBe(0);
     }
-  });
-
-  it('does not let the pile-up leave anyone spinning', () => {
-    const session = makeSession();
-
-    session.drop();
-    session.drop();
-
-    for (let frame = 0; frame < 300; frame += 1) {
-      session.step(1000 / 60);
-    }
-
-    expect(session.bodies.every((body) => body.angle === 0)).toBe(true);
   });
 });
 

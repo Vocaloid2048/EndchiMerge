@@ -57,7 +57,7 @@ import type {
 const DEFAULT_SETTINGS: GameSettings = {
   maxBodies: 80,
   gravityY: 1,
-  aimY: 90,
+  lockRotation: false,
   spawnBlockEnabled: false,
   overflowPenalty: false,
   mergeCooldownMs: 100,
@@ -93,13 +93,12 @@ const DEFAULT_SKILLS: readonly SkillDef[] = [
 ];
 
 const DEFAULT_CONTAINER: ContainerConfig = {
-  cornerRadius: 28,
-  strokeWidth: 3,
-  strokeColor: '#e8c07a',
-  perspectiveDx: 26,
-  perspectiveDy: -18,
-  frontTint: 'rgba(255, 255, 255, 0.04)',
-  backTint: 'rgba(255, 255, 255, 0.02)',
+  cornerRadius: 16,
+  strokeWidth: 10,
+  strokeColor: '#FFFFFF',
+  fill: 'rgba(255, 255, 255, 0.20)',
+  topOffset: 80,
+  spawnGap: 8,
   aspectMin: 0.62,
   aspectMax: 1.45,
 };
@@ -197,7 +196,7 @@ function sanitizeSettings(raw: unknown, warn: ConfigWarning): GameSettings {
     maxBodies: read.number(raw, 'maxBodies', DEFAULT_SETTINGS.maxBodies, { min: 1, integer: true }),
     /* 重力允許 0（無重力）與負值（反向），但必須是有限數，故不設 min。 */
     gravityY: read.number(raw, 'gravityY', DEFAULT_SETTINGS.gravityY),
-    aimY: read.number(raw, 'aimY', DEFAULT_SETTINGS.aimY, { min: 0 }),
+    lockRotation: read.boolean(raw, 'lockRotation', DEFAULT_SETTINGS.lockRotation),
     spawnBlockEnabled: read.boolean(raw, 'spawnBlockEnabled', DEFAULT_SETTINGS.spawnBlockEnabled),
     overflowPenalty: read.boolean(raw, 'overflowPenalty', DEFAULT_SETTINGS.overflowPenalty),
     mergeCooldownMs: read.number(raw, 'mergeCooldownMs', DEFAULT_SETTINGS.mergeCooldownMs, { min: 0 }),
@@ -403,30 +402,22 @@ function sanitizeContainer(raw: unknown, warn: ConfigWarning): ContainerConfig {
   const read = makeReader(warn, 'container');
   const aspectMin = read.number(raw, 'aspectMin', DEFAULT_CONTAINER.aspectMin, { min: 0.05, max: 10 });
   const aspectMax = read.number(raw, 'aspectMax', DEFAULT_CONTAINER.aspectMax, { min: 0.05, max: 10 });
-  if (aspectMin >= aspectMax) {
+
+  /* 上下限倒過來時只否決這一組，其他欄位照樣沿用作者填的值。 */
+  const usableRange = aspectMin < aspectMax;
+  if (!usableRange) {
     warn(`container aspect range is inverted (${aspectMin} >= ${aspectMax}); using the default range.`);
-    return {
-      cornerRadius: read.number(raw, 'cornerRadius', DEFAULT_CONTAINER.cornerRadius, { min: 0 }),
-      strokeWidth: read.number(raw, 'strokeWidth', DEFAULT_CONTAINER.strokeWidth, { min: 0 }),
-      strokeColor: read.string(raw, 'strokeColor', DEFAULT_CONTAINER.strokeColor),
-      perspectiveDx: read.number(raw, 'perspectiveDx', DEFAULT_CONTAINER.perspectiveDx),
-      perspectiveDy: read.number(raw, 'perspectiveDy', DEFAULT_CONTAINER.perspectiveDy),
-      frontTint: read.string(raw, 'frontTint', DEFAULT_CONTAINER.frontTint),
-      backTint: read.string(raw, 'backTint', DEFAULT_CONTAINER.backTint),
-      aspectMin: DEFAULT_CONTAINER.aspectMin,
-      aspectMax: DEFAULT_CONTAINER.aspectMax,
-    };
   }
+
   return {
     cornerRadius: read.number(raw, 'cornerRadius', DEFAULT_CONTAINER.cornerRadius, { min: 0 }),
     strokeWidth: read.number(raw, 'strokeWidth', DEFAULT_CONTAINER.strokeWidth, { min: 0 }),
     strokeColor: read.string(raw, 'strokeColor', DEFAULT_CONTAINER.strokeColor),
-    perspectiveDx: read.number(raw, 'perspectiveDx', DEFAULT_CONTAINER.perspectiveDx),
-    perspectiveDy: read.number(raw, 'perspectiveDy', DEFAULT_CONTAINER.perspectiveDy),
-    frontTint: read.string(raw, 'frontTint', DEFAULT_CONTAINER.frontTint),
-    backTint: read.string(raw, 'backTint', DEFAULT_CONTAINER.backTint),
-    aspectMin,
-    aspectMax,
+    fill: read.string(raw, 'fill', DEFAULT_CONTAINER.fill),
+    topOffset: read.number(raw, 'topOffset', DEFAULT_CONTAINER.topOffset, { min: 0 }),
+    spawnGap: read.number(raw, 'spawnGap', DEFAULT_CONTAINER.spawnGap, { min: 0 }),
+    aspectMin: usableRange ? aspectMin : DEFAULT_CONTAINER.aspectMin,
+    aspectMax: usableRange ? aspectMax : DEFAULT_CONTAINER.aspectMax,
   };
 }
 
