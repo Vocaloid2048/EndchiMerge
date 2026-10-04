@@ -56,6 +56,7 @@ import type {
 
 const DEFAULT_SETTINGS: GameSettings = {
   maxBodies: 80,
+  gravityY: 1,
   aimY: 90,
   spawnBlockEnabled: false,
   overflowPenalty: false,
@@ -194,6 +195,8 @@ function sanitizeSettings(raw: unknown, warn: ConfigWarning): GameSettings {
   const read = makeReader(warn, 'levels.settings');
   return {
     maxBodies: read.number(raw, 'maxBodies', DEFAULT_SETTINGS.maxBodies, { min: 1, integer: true }),
+    /* 重力允許 0（無重力）與負值（反向），但必須是有限數，故不設 min。 */
+    gravityY: read.number(raw, 'gravityY', DEFAULT_SETTINGS.gravityY),
     aimY: read.number(raw, 'aimY', DEFAULT_SETTINGS.aimY, { min: 0 }),
     spawnBlockEnabled: read.boolean(raw, 'spawnBlockEnabled', DEFAULT_SETTINGS.spawnBlockEnabled),
     overflowPenalty: read.boolean(raw, 'overflowPenalty', DEFAULT_SETTINGS.overflowPenalty),

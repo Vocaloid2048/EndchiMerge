@@ -42,6 +42,17 @@ export interface LevelDef {
 export interface GameSettings {
   /** 場上同時存在的物體上限，超過即視為溢出。 */
   maxBodies: number;
+  /**
+   * 重力加速度（Matter.js 的 `gravity.y`）。
+   * Gravitational acceleration, passed to Matter.js as `gravity.y`.
+   *
+   * 放在這裡而非 `constants.ts`，因為它是**可調參數**：手感靠它調。物理常數一律以
+   * 虛擬單位定義，`scale` 只用於投影，所以換裝置不會改變重力。
+   * It lives in config rather than `constants.ts` because it is a tuning knob.
+   * Physics constants are defined in virtual units, so changing devices never
+   * changes gravity.
+   */
+  gravityY: number;
   /** 瞄準指示線距容器頂端的距離，虛擬單位。 */
   aimY: number;
   /** 是否禁止在特定條件下繼續投放。 */

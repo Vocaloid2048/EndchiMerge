@@ -97,6 +97,16 @@ describe('loadConfig — 正常路徑 / happy path', () => {
     expect(messages).toEqual([]);
   });
 
+  it('keeps an explicit gravity, including zero', async () => {
+    const files = allValid({
+      'levels.json': JSON.stringify({ settings: { gravityY: 0 }, levels: JSON.parse(VALID_LEVELS).levels }),
+    });
+    const config = await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files) });
+
+    /* 0 是合法值（無重力），不應被當成缺漏而退回預設的 1。 */
+    expect(config.levels.settings.gravityY).toBe(0);
+  });
+
   it('keeps a null mergeResult, which marks the terminal level', async () => {
     const config = await loadConfig({ ...OPTIONS, fetcher: makeFetcher(allValid()) });
     expect(config.levels.levels[1]?.mergeResult).toBeNull();
@@ -107,8 +117,7 @@ describe('loadConfig — 正常路徑 / happy path', () => {
     expect(config.skills.skills.map((skill) => skill.id)).toEqual(['early', 'late']);
   });
 
-  it('forces pickCount to zero for immediate skills', async () => {
-    const files = allValid({
+  it('forces pickCount to zero for immediate skills', async () => {    const files = allValid({
       'skills.json': JSON.stringify({
         sp: { max: 3 },
         skills: [{ id: 'x', name: 'X', cost: 1, targeting: 'immediate', pickCount: 5, params: {} }],
