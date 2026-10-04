@@ -4,11 +4,35 @@
  *
  * 七個區域（design.md §2.2）中，SCORE 卡、NEXT 卡、COMBO 卡、SKILL LIST、
  * MELTING LIST 共用同一組面板外觀，差別只在尺寸與內容。共用類別才不會出現
- * 五份幾乎一樣、但圓角各差 2px 的規則。
+ * 五份幾乎一樣、但圓角各差 2px 的規則。工具列的膠囊群組也吃同一套玻璃表面。
  * Five of the seven regions share one panel appearance and differ only in size
- * and content. A shared class avoids five near-identical rules whose corner
- * radii drift apart by two pixels each.
+ * and content. A shared class avoids five near-identical rules. The toolbar pill
+ * shares the same glass surface.
+ *
+ * 玻璃配方是 Apple Liquid Glass 的**近似**：真品會對背景做折射與位移，那需要
+ * backdrop 取樣與 shader，純 CSS 無法達成。這裡以背景模糊 + 飽和提升 + 頂部高光
+ * + 內外陰影模擬透光與厚度感。若視覺上不理想，可整段換回設計稿原值
+ * （fill `#222222` @80%、stroke `#3C3C43` @80%、drop shadow `0 4 4 rgba(0,0,0,.25)`）。
+ * The glass recipe approximates Liquid Glass; the genuine effect refracts and
+ * displaces the backdrop, which plain CSS cannot do.
  */
+
+/*
+ * 共用玻璃表面：底色、描邊、背景模糊、陰影。幾何（尺寸、圓角、padding）留在
+ * layout.css，因為版面的變動頻率遠低於外觀。
+ * The shared glass surface. Geometry stays in layout.css.
+ */
+.panel,
+.toolbar__group {
+  background-color: var(--color-panel);
+  border: 1px solid var(--glass-rim);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow:
+    var(--glass-shadow),
+    inset 0 1px 0 var(--glass-highlight),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.18);
+}
 
 .panel {
   position: relative;
@@ -16,9 +40,27 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  background: var(--color-panel);
-  border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
+
+  /*
+   * 斜向高光：左上偏亮、右下偏暗，模擬玻璃受光面。圖層疊在底色之上，因此
+   * background-color 仍由上面那條共用規則決定。
+   * A diagonal sheen: brighter top-left, darker bottom-right.
+   */
+  background-image: linear-gradient(
+    150deg,
+    rgba(255, 255, 255, 0.1) 0%,
+    rgba(255, 255, 255, 0.02) 42%,
+    rgba(0, 0, 0, 0.12) 100%
+  );
+}
+
+/* 不支援 backdrop-filter 時提高不透明度，避免文字與背景混在一起而無法閱讀。 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .panel,
+  .toolbar__group {
+    background-color: var(--glass-tint-fallback);
+  }
 }
 
 /*

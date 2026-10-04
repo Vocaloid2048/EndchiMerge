@@ -133,13 +133,12 @@
   align-items: center;
 }
 
+/* 工具列的膠囊幾何；玻璃表面（底色、描邊、模糊）在 panels.css。 */
 .toolbar__group {
   display: flex;
   gap: 2px;
   padding: 6px;
-  border: 1px solid var(--color-border);
   border-radius: var(--radius-pill);
-  background: var(--color-panel);
 }
 
 .toolbar__button {

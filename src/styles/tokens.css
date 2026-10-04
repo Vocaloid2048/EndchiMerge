@@ -19,10 +19,35 @@
   /* 表面 Surfaces */
   --color-bg: #1b1c20;
   --color-bg-deep: #15161a;
-  --color-panel: rgba(255, 255, 255, 0.06);
+  /*
+   * 面板底色。來源是設計稿的 `#222222`，但**刻意降為 72%**：截圖上的 80% 幾乎不透光，
+   * 會讓下面的玻璃模糊白做。真正決定「透多少」的是 backdrop blur，這裡只提供染色。
+   * Sourced from the mock-up's `#222222` but deliberately dropped to 72%: at the
+   * mock-up's 80% almost nothing shows through and the backdrop blur is wasted.
+   */
+  --color-panel: rgba(34, 34, 34, 0.72);
   --color-panel-strong: rgba(255, 255, 255, 0.1);
   --color-border: rgba(255, 255, 255, 0.14);
   --color-border-strong: rgba(255, 255, 255, 0.3);
+
+  /*
+   * 玻璃面板 Glass。
+   * 這是 Apple Liquid Glass 的近似值。真正的 Liquid Glass 會取樣背景做折射與位移，
+   * 需要 shader，純 CSS 做不到；這裡用「背景模糊 + 飽和提升 + 邊緣高光 + 內外陰影」
+   * 模擬玻璃的透光與厚度。不理想時退回設計稿原值即可（fill #222222 @80%、
+   * stroke #3C3C43 @80%、drop shadow 0/4/4 rgba(0,0,0,.25)）。
+   * An approximation of Apple's Liquid Glass. The real thing refracts and displaces
+   * the backdrop, which needs a shader and is out of reach for plain CSS; this
+   * approximates transmission and thickness with blur, saturation, a rim highlight
+   * and inner shadows.
+   */
+  --glass-blur: 20px;
+  --glass-saturate: 180%;
+  --glass-rim: rgba(255, 255, 255, 0.16);
+  --glass-highlight: rgba(255, 255, 255, 0.26);
+  --glass-shadow: 0 4px 4px rgba(0, 0, 0, 0.25);
+  /* backdrop-filter 不可用時的替代不透明度，避免面板與背景糊在一起。 */
+  --glass-tint-fallback: rgba(30, 31, 36, 0.94);
 
   /* 文字 Text */
   --color-fg: #f2f2f4;
