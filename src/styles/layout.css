@@ -212,6 +212,17 @@
   display: block;
   width: 100%;
   height: 100%;
+  /*
+   * 觸控時不要在畫布上滾動或縮放頁面 —— 指標的移動全部屬於瞄準。
+   * Suppress scrolling and pinch-zoom on the canvas: every pointer move is aiming.
+   */
+  touch-action: none;
+}
+
+/* 畫布可聚焦（鍵盤瞄準與投放），所以需要一個看得見的焦點框。 */
+.stage__canvas:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 /* 技力條：技能欄頂部那條黃色橫條（design.md §5.3）。 */

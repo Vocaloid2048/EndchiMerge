@@ -145,9 +145,19 @@ function buildStage(): HTMLElement {
 
   const canvas = el('canvas', 'stage__canvas');
   canvas.dataset['hook'] = 'stage-canvas';
-  /* Canvas 對輔助技術沒有內容，補一段說明文字。 */
-  canvas.setAttribute('role', 'img');
-  canvas.setAttribute('aria-label', '遊戲容器，方團團在此落下與合成。');
+  /*
+   * 畫布是自繪的互動介面，不是圖片：`role="img"` 會讓鍵盤使用者永遠進不去。
+   * 改為 `application` 並讓它可以聚焦，鍵盤的瞄準與投放才有宿主。
+   * The canvas is a self-drawn interactive surface, not an image: `role="img"` would
+   * leave keyboard users locked out. `application` plus a tab stop gives the keyboard
+   * controls a home.
+   */
+  canvas.setAttribute('role', 'application');
+  canvas.setAttribute('tabindex', '0');
+  canvas.setAttribute(
+    'aria-label',
+    '遊戲容器：方向鍵瞄準、空白鍵投放，或用滑鼠點擊投放。方團團在此落下與合成。',
+  );
 
   stage.append(canvas);
   return stage;
