@@ -1,0 +1,39 @@
+/*
+ * 方團團的素材外觀。
+ * Sprite appearance for dumplings.
+ *
+ * 這裡放「與素材本身有關、但不屬於任何單一面板」的視覺，第一個成員是輪廓白框。
+ * 放在共用檔案而非名冊樣式裡，是因為 NEXT 卡與圖鑑（M3／M6）會用同一套。
+ * Visuals that belong to the sprite itself rather than to one panel. The outline
+ * frame lives here so the NEXT card and the codex (M3/M6) can reuse it.
+ */
+
+/*
+ * 輪廓白框（design.md §3.2 / D20）。
+ *
+ * 白框必須**沿角色外輪廓**，不是圖片的矩形邊界。做法是 8 方向 `drop-shadow`：
+ * 每個方向的剪影即「不透明像素」的形狀，而素材是**不透明實心、無鏤空**、
+ * 畫布留白完全透明（§1.3、§1.5.1），所以剪影就等於角色輪廓（含頭頂雙角）。
+ * The frame must follow the character silhouette, not the image rectangle. Eight
+ * `drop-shadow`s do it: each one's silhouette is the set of opaque pixels, and the
+ * art is opaque and hole-free with a fully transparent margin, so the silhouette
+ * equals the character outline.
+ *
+ * 對角方向的位移略小於正交方向，這樣八個影子疊出來的描邊寬度才大致等寬。
+ * The diagonal offsets are smaller so all eight shadows produce an even-width edge.
+ */
+.sprite-outline {
+  --outline-width: 1.2px;
+  --outline-diagonal: 0.85px;
+  --outline-color: #ffffff;
+
+  filter:
+    drop-shadow(var(--outline-width) 0 0 var(--outline-color))
+    drop-shadow(calc(-1 * var(--outline-width)) 0 0 var(--outline-color))
+    drop-shadow(0 var(--outline-width) 0 var(--outline-color))
+    drop-shadow(0 calc(-1 * var(--outline-width)) 0 var(--outline-color))
+    drop-shadow(var(--outline-diagonal) var(--outline-diagonal) 0 var(--outline-color))
+    drop-shadow(calc(-1 * var(--outline-diagonal)) calc(-1 * var(--outline-diagonal)) 0 var(--outline-color))
+    drop-shadow(var(--outline-diagonal) calc(-1 * var(--outline-diagonal)) 0 var(--outline-color))
+    drop-shadow(calc(-1 * var(--outline-diagonal)) var(--outline-diagonal) 0 var(--outline-color));
+}

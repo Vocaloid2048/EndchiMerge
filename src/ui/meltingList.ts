@@ -92,7 +92,8 @@ export function createMeltingList(options: MeltingListOptions): MeltingList {
 
     if (entry?.ok === true) {
       const image = new Image();
-      image.className = 'roster-cell__img';
+      /* `sprite-outline` 沿 alpha 剪影描白邊（design.md §3.2）。 */
+      image.className = 'roster-cell__img sprite-outline';
       image.decoding = 'async';
       /* 素材載入後才失敗（例如快取被清）時退回佔位色塊。 */
       image.addEventListener(
