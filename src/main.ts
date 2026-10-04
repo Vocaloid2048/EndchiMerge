@@ -1,9 +1,13 @@
 import './styles/main.css';
+import { attachDropInput } from './core/input';
 import { loadConfig } from './core/configLoader';
 import type { AllConfig } from './core/types';
+import { FrameLoop } from './game/loop';
+import { GameSession } from './game/session';
 import { SpriteLoader } from './render/spriteLoader';
 import { Viewport } from './render/viewport';
 import { hook } from './ui/dom';
+import { Hud } from './ui/hud';
 import { createLayout, type Layout } from './ui/layout';
 import { createMeltingList, type MeltingList } from './ui/meltingList';
 import { createNotice } from './ui/notice';
@@ -12,11 +16,11 @@ import { createNotice } from './ui/notice';
  * 應用程式入口。
  * Application entry point.
  *
- * `main.ts` 只做**組裝**：載入配置與素材、建立版面與視埠，再交由後續模組掛載
- * 內容。它不含任何遊戲邏輯（agent-readme §0.2 的依賴方向）。
+ * `main.ts` 只做**組裝**：載入配置與素材、建立版面與視埠，再把各模組接起來。
+ * 它不含任何遊戲邏輯（agent-readme §0.2 的依賴方向）。
  * This file only assembles: it loads config and assets, builds the layout and the
- * viewport, and hands off to the modules that mount content. It holds no game
- * logic, per the dependency direction in agent-readme §0.2.
+ * viewport, and wires the modules together. It holds no game logic, per the
+ * dependency direction in agent-readme §0.2.
  */
 
 /** 執行期共享的組裝結果。 */
@@ -26,6 +30,11 @@ export interface AppContext {
   viewport: Viewport;
   layout: Layout;
   meltingList: MeltingList;
+  session: GameSession;
+  hud: Hud;
+  loop: FrameLoop;
+  /** 卸下投放輸入的事件綁定。 */
+  detachInput: () => void;
 }
 
 async function bootstrap(): Promise<void> {
@@ -50,11 +59,52 @@ async function bootstrap(): Promise<void> {
   const canvas = hook<HTMLCanvasElement>(layout.regions.container, 'stage-canvas');
   const viewport = new Viewport(canvas);
 
-  /* 先量一次尺寸，之後跟著容器變化重算。 */
-  viewport.resize();
+  const session = new GameSession({ config });
+  const hud = new Hud({ layout, sprites, levels: config.levels.levels });
+  const loop = new FrameLoop({
+    viewport,
+    session,
+    sprites,
+    onAfterFrame: (current): void => {
+      hud.update({
+        nextLevelId: current.nextLevelId,
+        score: current.score,
+        mergedCount: current.mergedCount,
+      });
+    },
+  });
+
+  /*
+   * `observe()` 會立刻回報一次，所以不需要先手動量尺寸。
+   * 視埠與 session 必須**一起**重算：前者決定縮放，後者決定牆壁位置，只更新其中
+   * 一個會讓物理邊界與畫面框線錯開。
+   * observe() reports once immediately, so no manual first measurement is needed. The
+   * viewport and the session must be recomputed together: one owns the scale, the other
+   * the wall positions, and updating only one misaligns physics from the frame.
+   */
   viewport.observe((): void => {
     viewport.resize();
+    session.resize(viewport.virtualWidth, viewport.virtualHeight);
+    /* 迴圈暫停時（例如背景分頁）resize 不會被下一幀帶到，所以這裡補畫一次。 */
+    loop.renderOnce();
   });
+
+  const detachInput = attachDropInput({
+    target: canvas,
+    viewport,
+    onAim: (x): void => session.setAim(x),
+    onDrop: (): void => session.drop(),
+    initialAim: session.aimXValue,
+  });
+
+  /* 先寫一次 HUD，否則 NEXT 卡會空著等到第一次狀態變化。 */
+  hud.update({
+    nextLevelId: session.nextLevelId,
+    score: session.score,
+    mergedCount: session.mergedCount,
+  });
+
+  loop.start();
 
   /* M2：名冊靠面板寬度反推欄數，故掛載後由它自己量測並監看尺寸。 */
   const meltingList = createMeltingList({
@@ -63,7 +113,17 @@ async function bootstrap(): Promise<void> {
     sprites,
   });
 
-  const context: AppContext = { config, sprites, viewport, layout, meltingList };
+  const context: AppContext = {
+    config,
+    sprites,
+    viewport,
+    layout,
+    meltingList,
+    session,
+    hud,
+    loop,
+    detachInput,
+  };
   exposeForDebugging(context);
 }
 
