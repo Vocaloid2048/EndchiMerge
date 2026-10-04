@@ -11,6 +11,7 @@ Techstack:<br>
 ![Vite](https://img.shields.io/badge/Vite-B73BFE?style=flat&logo=vite&logoColor=FFD62E)
 ![Matter.js](https://img.shields.io/badge/Matter.js-4B5562?style=flat)
 ![Canvas 2D](https://img.shields.io/badge/Canvas_2D-E34F26?style=flat&logo=html5&logoColor=white)
+![Vitest](https://img.shields.io/badge/Vitest-6E9F18?style=flat&logo=vitest&logoColor=white)
 
 
 | <span style="color:#FF99CC">📢 Think it's fun? Share it with a friend!</span><br> | Going live soon (Vercel) |
@@ -43,6 +44,10 @@ Techstack:<br>
 4. Merges in quick succession build a **Combo**, raising the score multiplier
 5. The container overflowing ends the run and banks your score
 
+> **Current state**: steps 1–2 are playable — dumplings really fall, tumble and stack inside
+> the container, and whatever the NEXT card shows is always what drops. Arrow keys aim and
+> Space/Enter drops. Merging and scoring (step 3 onwards) are not implemented yet (M4+).
+
 ## <span style="color:#569CD6">🧩 Merge chain (10 levels)</span>
 Start with the smallest, 萊萬汀, and work your way up to 梨諾:
 
@@ -70,10 +75,12 @@ Every successful drop banks **1.0 SP**. The gauge doubles as the unlock gate —
 
 ## <span style="color:#569CD6">✨ Features</span>
 - ✅ **Real physics**: driven by Matter.js — gravity, collision and stacking all follow genuine mechanics, with tunable parameters
+- ✅ **Fixed timestep**: physics advances in fixed 1/60s steps so the feel never changes with display refresh rate; the per-frame step count is capped so a backgrounded tab cannot blow the box apart on return
 - ✅ **Config-driven**: levels, skills, container frame and branding all live in `public/config/`, editable without a rebuild
 - ✅ **Hand-drawn art**: dumplings are authored as vector art and exported as lossless 512×512 WebP; the white outline hugs the character silhouette rather than the image bounds
-- ✅ **Landscape 16:9 responsive**: the container has no fixed pixel size; it scales proportionally and fills the space available
+- ✅ **Art aligned to physics**: sprites scale from the collision radius, so the body on screen and the collision circle coincide exactly
 - ✅ **Fallback first**: missing art or config degrades gracefully and never leaves a blank screen
+- ✅ **Tested**: deterministic logic (config loading, layout, geometry, sampling, timestep) has unit coverage
 - ✅ **Free and open source**: MIT licensed. Play it, fork it, change it
 
 ## 💻 Running locally
@@ -99,6 +106,8 @@ Other commands:
 npm run build      # typecheck + bundle
 npm run preview    # preview the production build
 npm run typecheck  # typecheck only
+npm test           # run unit tests once (Vitest)
+npm run test:watch # unit tests in watch mode
 ```
 
 Requires Node.js 20 or newer.
@@ -112,6 +121,7 @@ EndchiMerge
 ├─docs                          # Documentation
 │  ├─physics.md                 # Derivation of the physics numbers and why they are provisional
 │  ├─asset-signatures.md        # How character asset metadata signing works
+│  ├─CHANGELOG.md               # What each milestone delivered
 │  └─design-main-screen.jpg     # Main screen design
 ├─public                        # Served verbatim, never bundled
 │  ├─config                     # Game configuration (externalised, no rebuild needed)
@@ -127,14 +137,40 @@ EndchiMerge
 ├─src
 │  ├─core                       # Foundation with no business logic
 │  │  ├─types.ts                # Types for config and game state
-│  │  ├─constants.ts            # Global constants
-│  │  └─rng.ts                  # Seedable random source (for deterministic tests)
+│  │  ├─constants.ts            # Global constants (incl. the sprite normalisation trio)
+│  │  ├─rng.ts                  # Seedable random source (for deterministic tests)
+│  │  ├─configLoader.ts         # Runtime config loading with per-field fallback
+│  │  ├─physics.ts              # Matter.js engine wrapper
+│  │  └─input.ts                # Drop input (pointer and keyboard)
+│  ├─game                       # Per-run logic
+│  │  ├─session.ts              # Drops, aiming, body recycling
+│  │  ├─spawnQueue.ts           # Spawn queue (the single source of truth for NEXT)
+│  │  ├─containerBox.ts         # Physics boundaries (walls and floor)
+│  │  └─loop.ts                 # Fixed-timestep frame loop
+│  ├─render                     # Drawing
+│  │  ├─viewport.ts             # Virtual coordinate system and scaling
+│  │  ├─container.ts            # Container wireframe geometry
+│  │  ├─stage.ts                # Canvas drawing for the container and dumplings
+│  │  ├─spriteLoader.ts         # Asset loading and fallback
+│  │  └─placeholder.ts          # Programmatic placeholder dumpling
+│  ├─ui                         # DOM surfaces
+│  │  ├─layout.ts               # Seven-region layout skeleton
+│  │  ├─meltingList.ts          # Serpentine roster
+│  │  ├─serpentine.ts           # Serpentine layout algorithm
+│  │  ├─hud.ts                  # NEXT / SCORE card updates
+│  │  ├─icons.ts                # Inline SVG icons
+│  │  ├─notice.ts               # Unofficial notice
+│  │  └─dom.ts                  # Small DOM helpers
 │  ├─styles
-│  │  ├─main.css                # Reset and layout host
+│  │  ├─main.css                # Reset, layout host and import order
 │  │  ├─tokens.css              # Colour, spacing and radius variables
-│  │  └─panels.css              # Shared panel styles
-│  ├─main.ts                    # Application entry point
+│  │  ├─panels.css              # Shared panel styles (liquid glass)
+│  │  ├─layout.css              # Seven-region layout styles
+│  │  ├─melting-list.css        # Roster cells and arrows
+│  │  └─sprite.css              # Silhouette outline
+│  ├─main.ts                    # Application entry point (assembly only)
 │  └─vite-env.d.ts
+├─tests                         # Vitest unit tests (deterministic logic)
 ├─scripts
 │  ├─sign-assets.mjs            # Signs character assets (SVG / PNG / WebP)
 │  └─install-git-hooks.mjs      # Sets core.hooksPath (runs after npm install)
@@ -144,22 +180,31 @@ EndchiMerge
 │  └─workflows                  # CI (asset signature backstop)
 ├─index.html
 ├─package.json
-├─tsconfig.json / tsconfig.app.json / tsconfig.node.json
-└─vite.config.ts
+├─tsconfig.json / tsconfig.app.json / tsconfig.node.json / tsconfig.test.json
+├─vite.config.ts
+└─vitest.config.ts
 ```
 
-> Game logic (`src/game/`, `src/render/`, `src/ui/`) lands as development progresses. The full milestone list lives in `docs/`.
+> The dependency direction is fixed at `core/` ← `game/` ← `render/` ← `ui/` ← `main.ts`:
+> lower layers never know about higher ones. `render/` has no idea Matter.js exists —
+> `render/stage.ts` consumes plain data.
 </details>
 
 ## <span style="color:#569CD6">🚦 Progress</span>
 | Phase | Scope | Status |
 |:--|:--|:--:|
-| M0 | Scaffold, config system, WebP asset loading and collision-radius calibration | 🚧 In progress |
-| M1–M2 | Layout skeleton, visual system, snake roster and silhouette outline | ⏳ Pending |
-| M3–M4 | Container rendering, drop input, merge core and combo | ⏳ Pending |
+| M0 | Scaffold, config system, WebP asset loading | ✅ Done (**outline baking and radius calibration still missing**) |
+| M1 | Layout skeleton (7 regions), coordinate system, visuals, responsive | ✅ Done |
+| M2 | Serpentine roster (auto layout) + silhouette outline | ✅ Done |
+| M3 | Container rendering (3D frame), drop input, NEXT queue | ✅ Done |
+| M4 | Merge core, cooldown, combo, pop animation | 🚧 In progress |
 | M5–M6 | SP and skills, unlock system and codex | ⏳ Pending |
 | M7–M9 | Save data and backend sync, leaderboards, analytics and anti-cheat | ⏳ Pending |
 | M10 | Deployment, audio, accessibility | ⏳ Pending |
+
+> What M0 still owes is **outline baking** and the **collision-radius calibration prototype**:
+> the radii and physics numbers in `levels.json` are all provisional and will be recomputed
+> once that prototype lands. Full details in [`docs/CHANGELOG.md`](docs/CHANGELOG.md).
 
 ## 🙏 Credits
 - Gameplay inspired by the "山團團" mini-game in *Arknights: Endfield*, all rights reserved by **Hypergryph / Gryphline**

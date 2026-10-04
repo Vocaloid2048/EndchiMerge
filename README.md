@@ -11,6 +11,7 @@ Techstack:<br>
 ![Vite](https://img.shields.io/badge/Vite-B73BFE?style=flat&logo=vite&logoColor=FFD62E)
 ![Matter.js](https://img.shields.io/badge/Matter.js-4B5562?style=flat)
 ![Canvas 2D](https://img.shields.io/badge/Canvas_2D-E34F26?style=flat&logo=html5&logoColor=white)
+![Vitest](https://img.shields.io/badge/Vitest-6E9F18?style=flat&logo=vitest&logoColor=white)
 
 
 | <span style="color:#FF99CC">📢 覺得有趣的話，歡迎分享給你的朋友！</span><br> | 遊戲即將上線（Vercel） |
@@ -43,6 +44,10 @@ Techstack:<br>
 4. 連續不斷的合成會累積 **Combo**，分數加成越高
 5. 容器滿溢就結束，結算你在這局拿到的分數
 
+> **現況**：第 1–2 步已可實際操作——方團團會真的落下、翻滾、堆疊在容器裡，NEXT 卡
+> 顯示的與實際掉落的必然是同一顆；也支援方向鍵瞄準與空白／Enter 投放。
+> 第 3 步之後的合成與結算尚未實作（M4 起）。
+
 ## <span style="color:#569CD6">🧩 合成鏈（10 級）</span>
 拿起最小的萊萬汀，一路疊到梨諾：
 
@@ -70,10 +75,13 @@ Techstack:<br>
 
 ## <span style="color:#569CD6">✨ 專案特色</span>
 - ✅ **真物理**：由 Matter.js 驅動，重力、碰撞、堆疊全部按真實力學公式計算，參數可調
+- ✅ **固定時間步**：物理以固定 1/60 秒推進，手感不隨螢幕更新率改變；單幀步數設上限，
+  分頁回到前景時不會一次補完而炸開
 - ✅ **配置驅動**：等級、技能、容器外框、品牌文案全放在 `public/config/`，改完即時生效
 - ✅ **手繪角色**：方團團原稿為手繪向量圖，導出為 512×512 無損 WebP；輪廓白框緊貼角色剪影而非圖片邊界
-- ✅ **橫向 16:9 響應式**：容器不設固定像素尺寸，等比縮放並填滿可用空間
+- ✅ **畫面與碰撞對齊**：sprite 依碰撞半徑等比縮放，畫面中的身體與物理圓完全重合
 - ✅ **退化優先**：素材或配置缺失時會降級顯示，絕不白畫面
+- ✅ **可測試**：確定性邏輯（配置載入、佈局、幾何、抽樣、時間步）都有單元測試
 - ✅ **開源免費**：MIT 授權，隨便玩、隨便改
 
 ## 💻 如何在本地運行
@@ -99,6 +107,8 @@ npm run dev
 npm run build      # 型別檢查 + 打包
 npm run preview    # 預覽打包結果
 npm run typecheck  # 只跑型別檢查
+npm test           # 跑單元測試（Vitest，單次）
+npm run test:watch # 單元測試監看模式
 ```
 
 需要 Node.js 20 或以上。
@@ -112,6 +122,7 @@ EndchiMerge
 ├─docs                          # 說明文件
 │  ├─physics.md                 # 物理參數的推導與暫定數值說明
 │  ├─asset-signatures.md        # 素材元數據簽名機制
+│  ├─CHANGELOG.md               # 各里程碑的變更紀錄
 │  └─design-main-screen.jpg     # 主畫面設計稿
 ├─public                        # 原樣 serve，不經打包器
 │  ├─config                     # 遊戲配置（外部化，改完不需重新 build）
@@ -127,14 +138,40 @@ EndchiMerge
 ├─src
 │  ├─core                       # 無業務邏輯的地基
 │  │  ├─types.ts                # 配置與狀態的型別定義
-│  │  ├─constants.ts            # 全域常數
-│  │  └─rng.ts                  # 可注入種子的亂數（供測試）
+│  │  ├─constants.ts            # 全域常數（含 sprite 正規化三常數）
+│  │  ├─rng.ts                  # 可注入種子的亂數（供測試）
+│  │  ├─configLoader.ts         # 執行期配置載入與逐欄退回
+│  │  ├─physics.ts              # Matter.js 引擎封裝
+│  │  └─input.ts                # 投放輸入（指標與鍵盤）
+│  ├─game                       # 單局邏輯
+│  │  ├─session.ts              # 投放、瞄準、剛體回收
+│  │  ├─spawnQueue.ts           # 掉落佇列（NEXT 的單一真實來源）
+│  │  ├─containerBox.ts         # 物理邊界（牆與地板）
+│  │  └─loop.ts                 # 固定時間步的畫面迴圈
+│  ├─render                     # 畫面繪製
+│  │  ├─viewport.ts             # 虛擬座標系與縮放
+│  │  ├─container.ts            # 容器 3D 線框幾何
+│  │  ├─stage.ts                # 容器與方團團的畫布繪製
+│  │  ├─spriteLoader.ts         # 素材載入與降級
+│  │  └─placeholder.ts          # 程式化佔位方團團
+│  ├─ui                         # DOM 介面
+│  │  ├─layout.ts               # 七區域版面骨架
+│  │  ├─meltingList.ts          # 蛇形名冊
+│  │  ├─serpentine.ts           # 蛇形佈局演算法
+│  │  ├─hud.ts                  # NEXT／SCORE 卡更新
+│  │  ├─icons.ts                # 內嵌 SVG 圖示
+│  │  ├─notice.ts               # 非官方聲明
+│  │  └─dom.ts                  # DOM 小工具
 │  ├─styles
-│  │  ├─main.css                # reset 與版面宿主
+│  │  ├─main.css                # reset、版面宿主與引入順序
 │  │  ├─tokens.css              # 顏色／間距／圓角變數
-│  │  └─panels.css              # 面板共用樣式
-│  ├─main.ts                    # 應用入口
+│  │  ├─panels.css              # 面板共用樣式（Liquid Glass）
+│  │  ├─layout.css              # 七區域版面樣式
+│  │  ├─melting-list.css        # 名冊格與箭頭
+│  │  └─sprite.css              # 輪廓白框
+│  ├─main.ts                    # 應用入口（只做組裝）
 │  └─vite-env.d.ts
+├─tests                         # Vitest 單元測試（確定性邏輯）
 ├─scripts
 │  ├─sign-assets.mjs            # 角色素材元數據簽名（SVG / PNG / WebP）
 │  └─install-git-hooks.mjs      # 設定 core.hooksPath（npm install 後自動執行）
@@ -144,22 +181,29 @@ EndchiMerge
 │  └─workflows                  # CI（素材簽名後備驗證）
 ├─index.html
 ├─package.json
-├─tsconfig.json / tsconfig.app.json / tsconfig.node.json
-└─vite.config.ts
+├─tsconfig.json / tsconfig.app.json / tsconfig.node.json / tsconfig.test.json
+├─vite.config.ts
+└─vitest.config.ts
 ```
 
-> 遊戲邏輯（`src/game/`、`src/render/`、`src/ui/`）會隨開發進度陸續加入。完整里程碑見 `docs/`。
+> 依賴方向固定為 `core/` ← `game/` ← `render/` ← `ui/` ← `main.ts`：
+> 底層不知道上層存在。`render/` 不認識 Matter.js，`render/stage.ts` 吃的是純資料。
 </details>
 
 ## <span style="color:#569CD6">🚦 開發進度</span>
 | 階段 | 範圍 | 狀態 |
 |:--|:--|:--:|
-| M0 | 腳手架、配置系統、WebP 素材載入與碰撞半徑校準 | 🚧 進行中 |
-| M1–M2 | 版面骨架、視覺系統、蛇形名冊與輪廓白框 | ⏳ 待辦 |
-| M3–M4 | 容器渲染、投放輸入、合成核心與 Combo | ⏳ 待辦 |
+| M0 | 腳手架、配置系統、WebP 素材載入 | ✅ 已完成（**描邊快取與半徑校準原型仍缺**） |
+| M1 | 版面骨架（7 區域）、座標系、視覺系統、響應式 | ✅ 已完成 |
+| M2 | 蛇形名冊（自動佈局）＋ 輪廓白框 | ✅ 已完成 |
+| M3 | 容器渲染（3D 外框）、投放輸入、NEXT 佇列 | ✅ 已完成 |
+| M4 | 合成核心、冷卻、Combo、彈跳動畫 | 🚧 進行中 |
 | M5–M6 | 技力與技能、解鎖系統與圖鑑 | ⏳ 待辦 |
 | M7–M9 | 存檔與後端同步、排行榜、分析與反作弊 | ⏳ 待辦 |
 | M10 | 部署、音效、無障礙 | ⏳ 待辦 |
+
+> M0 尚未收尾的是**描邊快取**與**碰撞半徑校準原型**：`levels.json` 的半徑與物理參數
+> 目前全是暫定值，待校準原型定案後會整表重算。詳細變更見 [`docs/CHANGELOG.md`](docs/CHANGELOG.md)。
 
 ## 🙏 特別鳴謝
 - 玩法靈感來自《明日方舟：終末地》的「山團團」，版權歸 **鷹角網絡 / Gryphline** 所有
