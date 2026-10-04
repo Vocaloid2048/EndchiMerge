@@ -21,7 +21,7 @@
  */
 
 import Matter from 'matter-js';
-import { createCircleBody, Physics } from '../core/physics';
+import { createCircleBody, lockRotation, Physics } from '../core/physics';
 import { computeContainerBounds, createContainerBodies } from './containerBox';
 import { SpawnQueue } from './spawnQueue';
 import { computeContainerGeometry, type ContainerGeometry } from '../render/container';
@@ -196,6 +196,9 @@ export class GameSession {
       /* 標記起來，除錯時看得出這顆是哪一級。 */
       label: `level-${String(id)}`,
     });
+
+    /* design.md §4.1：sprite 必須保持直立，理由見 `lockRotation`。 */
+    lockRotation(body);
 
     this.physics.add(body);
     this.dropped.push({ body, level });
