@@ -136,6 +136,14 @@ export interface ContainerConfig {
   aspectMax: number;
 }
 
+/** 軸對齊矩形，虛擬座標。放置於 core 是為了讓 `game/` 與 `render/` 共用而不互相依賴。 */
+export interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /** 品牌與法務文案。 */
 export interface BrandingConfig {
   gameName: string;
