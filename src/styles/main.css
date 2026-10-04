@@ -2,16 +2,16 @@
  * 全域樣式入口。
  * Global stylesheet entry.
  *
- * 這支檔案只負責「重設 + 版面宿主」。設計 token 在 tokens.css，面板外觀在
- * panels.css。七個區域的實際版面（Row / Col 切換）會在 M1 建立 ui/layout.ts
- * 時一併補上。
+ * 這支只負責「重設 + 版面宿主」。設計 token 在 tokens.css、面板外觀在
+ * panels.css、七區域的幾何在 layout.css。
  * This file owns only the reset and the layout host. Design tokens live in
- * tokens.css and panel appearance in panels.css. The real seven-region layout,
- * including the Row-to-Col switch, arrives with ui/layout.ts in M1.
+ * tokens.css, panel appearance in panels.css, and the seven-region geometry in
+ * layout.css.
  */
 
 @import './tokens.css';
 @import './panels.css';
+@import './layout.css';
 
 *,
 *::before,
@@ -33,22 +33,10 @@ body {
 }
 
 /*
- * 根容器：填滿視窗，作為版面骨架的 flex 宿主。置中只是為了讓開發期的佔位文字
- * 好讀，M1 會改為七個區域的實際排列。
- * Root container: fills the viewport and acts as the flex host for the layout
- * skeleton. The centring is only so the development placeholder is readable; M1
- * replaces it with the real seven-region arrangement.
+ * 版面宿主。高度以 dvh 為單位，讓手機的動態工具列不會把容器推出畫面。
+ * Layout host. The height uses dvh so a mobile browser's dynamic toolbars never
+ * push the board out of view.
  */
 #app {
-  display: flex;
-  min-height: 100%;
-  align-items: center;
-  justify-content: center;
-}
-
-.boot-placeholder {
-  margin: 0;
-  color: var(--color-fg-muted);
-  font-size: var(--text-sm);
-  letter-spacing: 0.02em;
+  min-height: 100dvh;
 }

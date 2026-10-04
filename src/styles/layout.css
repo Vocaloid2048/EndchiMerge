@@ -1,0 +1,299 @@
+/*
+ * 七區域版面的幾何。
+ * Geometry for the seven-region layout.
+ *
+ * 這一支只管**位置與尺寸**，面板的玻璃外觀在 panels.css，顏色在 tokens.css。
+ * 分開的理由是版面幾乎不會變，而外觀會隨背景美術（design.md Q1）反覆調整。
+ * This file owns position and size only. Panel appearance lives in panels.css and
+ * colours in tokens.css, because layout barely changes while appearance will be
+ * revised repeatedly once the background art (design.md Q1) lands.
+ *
+ * 區域編號對照 design.md §2.2：① SCORE ② 工具列 ③ NEXT ④ COMBO
+ * ⑤ SKILL LIST ⑥ 容器 ⑦ MELTING LIST。
+ * Region numbers follow design.md §2.2.
+ */
+
+.layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 100dvh;
+  padding: var(--space-3) var(--space-4);
+}
+
+/* ── ① SCORE 卡 ／ ② 工具列 ＋ ③ NEXT ／ ④ COMBO ─────────────────────── */
+
+.layout__top {
+  display: flex;
+  gap: var(--space-4);
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.layout__top-right {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  align-items: flex-end;
+}
+
+.layout__top-cards {
+  display: flex;
+  gap: var(--space-3);
+  align-items: stretch;
+}
+
+.card--score {
+  width: clamp(150px, 22%, 260px);
+  padding: var(--space-3) var(--space-4);
+  gap: var(--space-1);
+}
+
+.card__label {
+  margin: 0;
+  color: var(--color-fg-muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+}
+
+.card__value {
+  margin: 0;
+  color: var(--color-fg);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.card__rule {
+  width: 100%;
+  margin: var(--space-2) 0;
+  border: 0;
+  border-top: 1px dashed var(--color-border);
+}
+
+.card__stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.card__stat {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.card__stat-label {
+  color: var(--color-fg-dim);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+}
+
+.card__stat-value {
+  margin: 0;
+  color: var(--color-fg-muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.card--next {
+  min-width: 96px;
+  align-items: center;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+
+.card--combo {
+  min-width: 118px;
+  align-items: center;
+  padding: var(--space-2) var(--space-4) var(--space-3);
+}
+
+.card__preview {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+}
+
+.card__multiplier {
+  margin: 0;
+  color: var(--color-accent);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 工具列：五圖示共用一個膠囊群組，音符獨立在外（design.md D23）。 */
+.toolbar {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.toolbar__group {
+  display: flex;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-panel);
+}
+
+.toolbar__button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-fg-muted);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.toolbar__button:hover:not(:disabled) {
+  background: var(--color-panel-strong);
+  color: var(--color-fg);
+}
+
+.toolbar__button:disabled {
+  color: var(--color-fg-dim);
+  cursor: not-allowed;
+}
+
+.toolbar__button[aria-pressed='true'] {
+  color: var(--color-accent);
+}
+
+.icon {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ── ⑤ SKILL LIST ／ ⑥ 容器 ／ ⑦ MELTING LIST ────────────────────────── */
+
+.layout__main {
+  display: flex;
+  flex: 1 1 auto;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+/*
+ * 左右欄不對稱是刻意的（design.md §2.3）：左欄放技能格，右欄放較小的名冊格。
+ * 兩者都用 clamp 依視窗縮放，但設下下限，避免窄視窗把格子壓到看不清。
+ */
+.panel--skill {
+  flex: 0 0 clamp(176px, 23%, 300px);
+}
+
+.panel--melting {
+  flex: 0 0 clamp(150px, 18%, 240px);
+}
+
+.stage {
+  display: grid;
+  flex: 1 1 auto;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+}
+
+.stage__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* 技力條：技能欄頂部那條黃色橫條（design.md §5.3）。 */
+.sp-bar {
+  flex: none;
+  height: 8px;
+  margin: 0 var(--space-3) var(--space-3);
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--color-panel-strong);
+}
+
+.sp-bar__fill {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent);
+  transition: width var(--transition-base);
+}
+
+/* 技能格網格；平板會退成 2 欄（design.md §2.6）。 */
+.skill-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-3);
+  align-content: start;
+}
+
+.melting__body {
+  padding: 0 var(--space-2) var(--space-3);
+}
+
+/* ── 響應式 / Responsive ─────────────────────────────────────────────── */
+
+@media (max-width: 1023px) {
+  .panel--skill {
+    flex-basis: clamp(150px, 26%, 240px);
+  }
+
+  .panel--melting {
+    flex-basis: clamp(132px, 22%, 200px);
+  }
+
+  .skill-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/*
+ * 手機直向：改為單欄堆疊，容器在最上。design.md §2.6 的「提示橫向」方案尚未定案
+ * （Q6），這裡先給一個可用的直向排列，等方案確定再收斂。
+ * Portrait phones stack into one column with the board on top. The "please rotate"
+ * proposal in design.md §2.6 (Q6) is still open, so this is a usable stopgap.
+ */
+@media (max-width: 767px) {
+  .layout {
+    padding: var(--space-2);
+  }
+
+  .layout__top {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .layout__top-right {
+    align-items: stretch;
+  }
+
+  .layout__main {
+    flex-direction: column;
+  }
+
+  .panel--skill,
+  .panel--melting {
+    flex: 0 0 auto;
+    max-height: 32dvh;
+  }
+
+  .stage {
+    order: -1;
+    min-height: 48dvh;
+  }
+}

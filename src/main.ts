@@ -1,23 +1,25 @@
 import './styles/main.css';
+import { createLayout } from './ui/layout';
 
 /**
- * 應用程式入口：掛載根節點並顯示骨架就緒狀態。
- * Application entry point: mount the root node and report scaffold readiness.
+ * 應用程式入口。
+ * Application entry point.
  *
- * 目前僅建立最小可執行骨架。實際子系統（core / game / render / ui / audio）
- * 與 public/config、public/assets 結構將於 repo 結構定案後陸續加入。
- * Only the minimal runnable skeleton lives here. The real subsystems
- * (core / game / render / ui / audio) plus public/config and public/assets
- * will be added once the repo structure is settled.
+ * 目前只掛載七區域版面骨架。M0 的配置／素材載入與 M2／M3 的名冊、容器、投放
+ * 會在後續步驟接進來，屆時這裡負責把它們組裝起來（agent-readme §0.2：`main.ts`
+ * 是組裝點，不含遊戲邏輯）。
+ * For now this mounts the seven-region skeleton only. Config/sprite loading and
+ * the M2/M3 roster, container and dropping are wired in by later steps; this file
+ * stays the assembly point and holds no game logic.
  */
-const root: HTMLElement | null = document.querySelector('#app');
+function bootstrap(): void {
+  const host = document.querySelector<HTMLElement>('#app');
 
-if (root === null) {
-  throw new Error('Root element "#app" is missing from index.html.');
+  if (host === null) {
+    throw new Error('Root element "#app" is missing from index.html.');
+  }
+
+  createLayout(host);
 }
 
-const placeholder: HTMLParagraphElement = document.createElement('p');
-placeholder.className = 'boot-placeholder';
-placeholder.textContent = 'EndchiMerge — 骨架就緒 / scaffold ready';
-
-root.append(placeholder);
+bootstrap();
