@@ -586,6 +586,8 @@ export class GameSession {
     if (this.over) return;
 
     const bodies = this.entries.map((entry) => ({
+      id: entry.body.id,
+      x: entry.body.position.x,
       y: entry.body.position.y,
       radius: entry.level.radius,
       entered: entry.entered,
@@ -690,9 +692,26 @@ export class GameSession {
     return this.overflow.progress;
   }
 
-  /** 這一步是否處於「有東西越線」的危險狀態。 */
+  /**
+   * 溢位警戒是否**已經起算**（＝越線而且停定了）。
+   * Whether the overflow warning has actually **started**, i.e. the breach has settled.
+   *
+   * 畫面靠它決定要不要亮紅線與倒數：還在動的越線完全不出現提示（使用者定案）。
+   * The view uses this to decide whether to show the line and countdown: a breach that is
+   * still moving shows nothing at all (the user's decision).
+   */
+  get overflowSettled(): boolean {
+    return !this.over && this.overflow.settled;
+  }
+
+  /** 溢位倒數剩餘秒數（整數，1 起跳）；未起算時為 0。 */
+  get overflowSecondsLeft(): number {
+    return this.overflow.settled ? this.overflow.remainingSeconds : 0;
+  }
+
+  /** 這一步是否處於「已越線且已停定」的危險狀態。 */
   get overflowDanger(): boolean {
-    return !this.over && this.overflow.elapsed > 0;
+    return !this.over && this.overflow.settled;
   }
 
   /** 這一局是否已結束（溢位逾時）。 */

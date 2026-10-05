@@ -249,6 +249,7 @@ export class FrameLoop {
     width: number;
     danger: boolean;
     pulse: number;
+    secondsLeft: number;
   } {
     const frame = this.session.containerGeometry.frame;
     /* 0..1 的餘弦脈動；週期 520ms，肉眼剛好讀成「一呼一吸」而不刺眼。 */
@@ -260,8 +261,15 @@ export class FrameLoop {
       zoneBottom: frame.y,
       x: frame.x,
       width: frame.width,
+      /*
+       * `danger` 只在**越線且停定**時為真。尚未停定時整個警戒（線、區、倒數）都不畫，
+       * 所以玩家不會在方團團還在掉的時候看到警告。
+       * `danger` is true only once the breach has **settled**; before that the whole warning
+       * (line, zone, countdown) stays hidden, so nothing shows while a dumpling is falling.
+       */
       danger: this.session.overflowDanger,
       pulse,
+      secondsLeft: this.session.overflowSecondsLeft,
     };
   }
 }

@@ -51,8 +51,9 @@ const DEBUG_STYLE = {
  * 溢位線與警戒區的樣式。
  * Overflow line and warning-zone style.
  *
- * **調參入口**：紅線的粗幼／顏色、警戒區的填色都在這裡改。
- * **The tuning entry point** for the line's weight and colour and the zone's fill.
+ * **調參入口**：紅線的粗幼／顏色、警戒區的填色、以及中央倒數徽章的尺寸都在這裡改。
+ * **The tuning entry point** for the line's weight and colour, the zone's fill, and the
+ * centred countdown badge's size.
  */
 const OVERFLOW_STYLE = {
   /** 紅線線寬，虛擬單位。 */
@@ -65,7 +66,29 @@ const OVERFLOW_STYLE = {
   zoneColor: '226, 100, 95',
   /** 警戒區的峰值 alpha 與谷值 alpha。 */
   zoneAlphaMax: 0.28,
+  /** 警戒區的谷值 alpha。未起算時完全不上色（`zoneAlphaIdle`）。 */
   zoneAlphaMin: 0.1,
+  /**
+   * 尚未起算（越線但還在動）時的填色 alpha。**0 ＝ 完全不顯示** —— 使用者定案：
+   * 停定之前不該有任何提示，否則玩家會看到「還在掉就出現」的警告。
+   * Fill alpha before the breach has settled. **0 means invisible** — the user's decision:
+   * nothing should show until it settles, or the player sees a warning about a falling
+   * dumpling.
+   */
+  zoneAlphaIdle: 0,
+  /** 倒數徽章的底／邊框／文字顏色。 */
+  badgeFill: 'rgba(226, 100, 95, 0.82)',
+  badgeStroke: 'rgba(255, 255, 255, 0.95)',
+  badgeText: '#FFFFFF',
+  /** 徽章邊框粗細，虛擬單位。 */
+  badgeStrokeWidth: 3,
+  /** 徽章最小寬高，虛擬單位。數字為一位數時仍是一個圓。 */
+  badgeMinSize: 56,
+  /** 徽章內距，虛擬單位。 */
+  badgePaddingX: 18,
+  badgePaddingY: 10,
+  /** 徽章字級，虛擬單位。 */
+  badgeFontSize: 32,
 } as const;
 
 /**
@@ -115,8 +138,13 @@ export interface StageFrame {
   /** 輔助線的顏色（預覽用）；未提供時用 `AIM_GUIDE_STYLE.color`。 */
   guideColor?: string;
   /**
-   * 溢位警戒；`danger` 為真時啟動脈動。未提供時不畫線也不畫區。
-   * Overflow warning; when `danger` is true the zone pulses. Omitted means nothing is drawn.
+   * 溢位警戒；`danger` 為真時顯示紅線、警戒區與中央倒數。
+   * Overflow warning; when `danger` is true the line, the zone and the centred countdown show.
+   *
+   * 未提供時不畫線也不畫區。`danger` 為假時**完全不畫**（不只是淡化）—— 使用者定案：
+   * 停定之前不該有任何提示。
+   * Omitted means nothing is drawn; a false `danger` also draws nothing rather than a faint
+   * wash, because the user's rule is that nothing shows until the breach settles.
    */
   overflow?: {
     /** 紅虛線的 Y（虛擬單位）。 */
@@ -129,10 +157,12 @@ export interface StageFrame {
     x: number;
     /** 線的寬度。 */
     width: number;
-    /** 是否處於越線狀態；真＝脈動。 */
+    /** 是否處於「越線且已停定」的狀態；真＝顯示脈動與倒數。 */
     danger: boolean;
     /** 脈動相位 `0..1`，由迴圈以時間驅動；`0` 代表谷值。 */
     pulse: number;
+    /** 剩餘秒數（整數）；畫在警戒區的正中央。 */
+    secondsLeft: number;
   };
   /**
    * 除錯輔助。提供時額外畫出容器的外框、物理空腔與投放線。
@@ -227,18 +257,75 @@ function drawOverflowZone(
   ctx: CanvasRenderingContext2D,
   overflow: NonNullable<StageFrame['overflow']>,
 ): void {
+  /* 尚未起算就整段跳過：不畫線、不畫區、不畫倒數（使用者定案）。 */
+  if (!overflow.danger) return;
+
   const top = Math.min(overflow.zoneTop, overflow.zoneBottom);
   const height = Math.abs(overflow.zoneBottom - overflow.zoneTop);
   if (height <= 0) return;
 
-  const alpha = overflow.danger
-    ? OVERFLOW_STYLE.zoneAlphaMin +
-      (OVERFLOW_STYLE.zoneAlphaMax - OVERFLOW_STYLE.zoneAlphaMin) * overflow.pulse
-    : OVERFLOW_STYLE.zoneAlphaMin;
+  const alpha =
+    OVERFLOW_STYLE.zoneAlphaMin +
+    (OVERFLOW_STYLE.zoneAlphaMax - OVERFLOW_STYLE.zoneAlphaMin) * overflow.pulse;
 
   ctx.save();
   ctx.fillStyle = `rgba(${OVERFLOW_STYLE.zoneColor}, ${alpha.toFixed(3)})`;
   ctx.fillRect(overflow.x, top, overflow.width, height);
+  ctx.restore();
+}
+
+/**
+ * 畫警戒區正中央的倒數徽章：圓角深紅底、白色邊框、白色數字。
+ * Draw the countdown badge at the centre of the warning zone: rounded deep-red fill, white
+ * border, white number.
+ *
+ * 位置取警戒區的**垂直與水平中心**（使用者定案），所以容器一改尺寸它就自己跟著置中，
+ * 不需要另一組座標。徽章的圓角半徑取 `height / 2`，因此一位數時是一個正圓、兩位數時
+ * 自動變成左右延伸的膠囊。
+ * The position is the zone's **vertical and horizontal centre** (the user's decision), so it
+ * re-centres itself when the container changes size without a second set of coordinates. The
+ * corner radius is `height / 2`, which makes a single digit a circle and lets two digits
+ * stretch into a capsule on their own.
+ */
+function drawOverflowCountdown(
+  ctx: CanvasRenderingContext2D,
+  overflow: NonNullable<StageFrame['overflow']>,
+): void {
+  if (!overflow.danger) return;
+
+  const text = String(overflow.secondsLeft);
+  const centreX = overflow.x + overflow.width / 2;
+  const centreY = (overflow.zoneTop + overflow.zoneBottom) / 2;
+
+  ctx.save();
+  ctx.font = `700 ${String(OVERFLOW_STYLE.badgeFontSize)}px system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  const textWidth = ctx.measureText(text).width;
+  const width = Math.max(
+    OVERFLOW_STYLE.badgeMinSize,
+    textWidth + OVERFLOW_STYLE.badgePaddingX * 2,
+  );
+  const height = Math.max(
+    OVERFLOW_STYLE.badgeMinSize,
+    OVERFLOW_STYLE.badgeFontSize + OVERFLOW_STYLE.badgePaddingY * 2,
+  );
+  const left = centreX - width / 2;
+  const top = centreY - height / 2;
+  const radius = height / 2;
+
+  ctx.beginPath();
+  ctx.roundRect(left, top, width, height, radius);
+  ctx.fillStyle = OVERFLOW_STYLE.badgeFill;
+  ctx.fill();
+  ctx.lineWidth = OVERFLOW_STYLE.badgeStrokeWidth;
+  ctx.strokeStyle = OVERFLOW_STYLE.badgeStroke;
+  ctx.stroke();
+
+  ctx.fillStyle = OVERFLOW_STYLE.badgeText;
+  ctx.fillText(text, centreX, centreY);
+
   ctx.restore();
 }
 
@@ -251,6 +338,9 @@ function drawOverflowLine(
   ctx: CanvasRenderingContext2D,
   overflow: NonNullable<StageFrame['overflow']>,
 ): void {
+  /* 尚未起算就不畫；這條線本身也是提示的一部分。 */
+  if (!overflow.danger) return;
+
   ctx.save();
   ctx.strokeStyle = OVERFLOW_STYLE.lineColor;
   ctx.lineWidth = OVERFLOW_STYLE.lineWidth;
@@ -332,6 +422,11 @@ export function drawStage(
   /* 5. 溢位紅線壓在最上層，任何時候都讀得到。 */
   if (overflow !== undefined) {
     drawOverflowLine(ctx, overflow);
+  }
+
+  /* 5b. 中央倒數徽章：畫在紅線之上，因為它是最需要被讀到的數字。 */
+  if (overflow !== undefined) {
+    drawOverflowCountdown(ctx, overflow);
   }
 
   /* 6. 投放預覽畫在最上層：它應該壓在線框上，因為它還沒進到槽裡。 */

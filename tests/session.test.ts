@@ -626,6 +626,75 @@ describe('GameSession — 溢位與結束 / overflow and game over', () => {
     expect(session.dropCount).toBe(before);
   });
 
+  it('does not raise the warning while the breaching stack is still moving', () => {
+    /*
+     * 「停定後才提示」的整合層證明：一顆方團團從上方掉下來、掠過紅線時，`overflowSettled`
+     * 必須維持為假 —— 畫面上的線、警戒區與倒數都靠它決定要不要出現。
+     * End-to-end proof of "settle before warning": while a dumpling falls through the line,
+     * `overflowSettled` must stay false — the line, the zone and the countdown all key off it.
+     */
+    const session = makeOverflowRoom({}, { overflowGraceMs: 5000 });
+
+    session.drop();
+
+    /* 下墜途中：任何一幀都不該已停定。 */
+    let sawSettledDuringFall = false;
+    for (let frame = 0; frame < 24; frame += 1) {
+      session.step(1000 / 60);
+      if (session.overflowSettled) sawSettledDuringFall = true;
+    }
+
+    expect(sawSettledDuringFall).toBe(false);
+    expect(session.overflowDanger).toBe(false);
+    expect(session.overflowSecondsLeft).toBe(0);
+  });
+
+  it('reports the countdown in whole seconds once the breach settles', () => {
+    /*
+     * 極淺容器 + 兩顆接觸 → 入堆且越線。放著不動之後倒數應該起算，且秒數由 5 遞減。
+     * A shallow container plus two touching dumplings gives a settled breach, so the countdown
+     * starts and the whole seconds tick down from 5.
+     */
+    const session = makeOverflowRoom(
+      { topOffset: 980, overflowAboveRim: 0 },
+      { overflowGraceMs: 5000 },
+    );
+
+    session.setAim(250);
+    session.drop();
+    runFrames(session, 90);
+    session.setAim(250);
+    session.drop();
+    runFrames(session, 90);
+
+    const seconds = session.overflowSecondsLeft;
+    expect(seconds).toBeGreaterThanOrEqual(1);
+    expect(seconds).toBeLessThanOrEqual(5);
+
+    /* 再放一段時間，秒數必須單調下降。 */
+    runFrames(session, 120);
+    expect(session.overflowSecondsLeft).toBeLessThan(seconds);
+  });
+
+  it('never shows a warning for a shallow container with a single lone dumpling', () => {
+    /*
+     * 對照：同樣極淺，但只有一顆（永不接觸）→ 連停定都不會成立，倒數永遠是 0。
+     * Control: same shallow container with a single, never-touching dumpling, so it never even
+     * settles and the countdown stays at zero forever.
+     */
+    const session = makeOverflowRoom(
+      { topOffset: 980, overflowAboveRim: 0 },
+      { overflowGraceMs: 5000 },
+    );
+
+    session.drop();
+    runFrames(session, 240);
+
+    expect(session.overflowSettled).toBe(false);
+    expect(session.overflowSecondsLeft).toBe(0);
+    expect(session.isOver).toBe(false);
+  });
+
   it('clears the board on reset but keeps the unlocks', () => {
     const gate = makeGate([1]);
     const session = makeCustom(ALL_DROPPABLE, {}, gate);

@@ -61,7 +61,7 @@ const DEFAULT_SETTINGS: GameSettings = {
   spawnBlockEnabled: false,
   overflowPenalty: false,
   mergeCooldownMs: 100,
-  overflowGraceMs: 3000,
+  overflowGraceMs: 5000,
   comboWindowMs: 1000,
 };
 
