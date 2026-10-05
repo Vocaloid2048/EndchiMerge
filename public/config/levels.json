@@ -13,7 +13,7 @@
     "overflowPenalty": false,
     "mergeCooldownMs": 100,
     "overflowGraceMs": 5000,
-    "comboWindowMs": 1000
+    "dropCooldownMs": 1000
   },
 
   "levels": [

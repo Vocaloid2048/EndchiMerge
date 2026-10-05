@@ -62,7 +62,7 @@ const DEFAULT_SETTINGS: GameSettings = {
   overflowPenalty: false,
   mergeCooldownMs: 100,
   overflowGraceMs: 5000,
-  comboWindowMs: 1000,
+  dropCooldownMs: 1000,
 };
 
 /** 合成鏈 10 級（design.md D2）。順序即等級順序。 */
@@ -205,7 +205,7 @@ function sanitizeSettings(raw: unknown, warn: ConfigWarning): GameSettings {
     overflowPenalty: read.boolean(raw, 'overflowPenalty', DEFAULT_SETTINGS.overflowPenalty),
     mergeCooldownMs: read.number(raw, 'mergeCooldownMs', DEFAULT_SETTINGS.mergeCooldownMs, { min: 0 }),
     overflowGraceMs: read.number(raw, 'overflowGraceMs', DEFAULT_SETTINGS.overflowGraceMs, { min: 0 }),
-    comboWindowMs: read.number(raw, 'comboWindowMs', DEFAULT_SETTINGS.comboWindowMs, { min: 0 }),
+    dropCooldownMs: read.number(raw, 'dropCooldownMs', DEFAULT_SETTINGS.dropCooldownMs, { min: 0 }),
   };
 }
 

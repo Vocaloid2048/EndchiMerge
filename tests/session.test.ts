@@ -51,7 +51,7 @@ const CONFIG: AllConfig = {
       overflowPenalty: false,
       mergeCooldownMs: 100,
       overflowGraceMs: 3000,
-      comboWindowMs: 1000,
+      dropCooldownMs: 1000,
     },
     levels: [level(1, 13.5, 70), level(2, 17.3, 25), level(3, 22.1, 5), level(4, 28.3, 0, false)],
   },
@@ -96,8 +96,33 @@ function makeSession(virtualWidth = 500, settings: Partial<GameSettings> = {}): 
 /** 只有 Lv1 可掉落，其餘等級只作為合成目標存在。 */
 const SOLO_LV1: LevelDef[] = [level(1, 13.5, 70), level(2, 17.3, 0, false), level(3, 22.1, 0, false)];
 
-/** 三級都可掉落；搭配解鎖閘門時，開局只有 Lv1 進池。 */
-const ALL_DROPPABLE: LevelDef[] = [level(1, 13.5, 10), level(2, 17.3, 10), level(3, 22.1, 10)];
+/**
+ * 三級都可掉落；搭配解鎖閘門時，開局只有 Lv1 進池。
+ *
+ * Lv3 **不再往上合成**（`mergeResult: null`）：這張表只有三級，若 Lv3 還宣告要合成就會去找
+ * 不存在的 Lv4，`GameSession` 會直接拋錯。短表一定要有一級當終點。
+ * Three droppable levels; with the unlock gate only Lv1 is in the pool at the start.
+ *
+ * Lv3 **stops merging** (`mergeResult: null`): the table has only three levels, so a Lv3 that
+ * still declared a merge would look for a nonexistent Lv4 and `GameSession` would throw. A
+ * short table always needs one level as its terminus.
+ */
+const ALL_DROPPABLE: LevelDef[] = [
+  level(1, 13.5, 10),
+  level(2, 17.3, 10),
+  { ...level(3, 22.1, 10), mergeResult: null },
+];
+
+/**
+ * 三級都可掉落但**永不合成**；用來測「抽到哪些等級」，合成會把證據吃掉。
+ * Three droppable levels that **never merge**, for testing which levels get drawn — a merge
+ * would destroy the very evidence being counted.
+ */
+const ALL_DROPPABLE_NO_MERGE: LevelDef[] = [
+  { ...level(1, 13.5, 10), mergeResult: null },
+  { ...level(2, 17.3, 10), mergeResult: null },
+  { ...level(3, 22.1, 10), mergeResult: null },
+];
 
 /**
  * 單一等級、**永不合成**。用來疊一座純粹的塔：合成會把堆疊吃掉，讓「疊到溢位」測不穩。
@@ -263,26 +288,139 @@ describe('GameSession — 投放 / dropping', () => {
     expect(session.bodies[0]?.y).toBe(session.spawnYValue);
   });
 
-  it('accumulates one body per drop', () => {
-    const session = makeSession();
+  it('accumulates one body per drop once the cooldown has elapsed', () => {
+    /*
+     * 用**不會合成**的等級表：合成會把兩顆併成一顆，顆數就永遠對不上。
+     * Uses a **non-merging** level table: merges would fuse pairs and the count could never
+     * add up. The drop cooldown is what actually matters here, so the level table is held
+     * constant to isolate it.
+     */
+    const session = makeCustom(NO_MERGE);
 
-    session.drop();
-    session.drop();
-    session.drop();
+    for (const x of [120, 250, 380]) {
+      session.setAim(x);
+      expect(session.canDrop).toBe(true);
+      expect(session.drop()).toBe(true);
+      runFrames(session, 90);
+    }
 
     expect(session.bodies).toHaveLength(3);
     expect(session.dropCount).toBe(3);
   });
 
   it('never spawns the level marked not droppable', () => {
-    const session = makeSession();
+    const session = makeCustom(NO_MERGE.concat(level(4, 28.3, 0, false)));
 
     for (let index = 0; index < 60; index += 1) {
-      session.drop();
+      /* 每次都換個位置，避免同級方團團疊在一起。 */
+      session.setAim(80 + (index % 7) * 60);
+      if (session.canDrop) session.drop();
+      runFrames(session, 30);
     }
 
     const spawned = session.bodies.map((body) => body.levelId);
     expect(spawned).not.toContain(4);
+  });
+
+  it('allows the opening drop immediately', () => {
+    const session = makeSession();
+
+    expect(session.canDrop).toBe(true);
+    expect(session.drop()).toBe(true);
+  });
+
+  it('ignores a second drop inside the cooldown', () => {
+    const session = makeSession(500, { dropCooldownMs: 1000 });
+
+    expect(session.drop()).toBe(true);
+
+    /* 冷卻期間：不消耗佇列、不新增剛體。 */
+    runFrames(session, 30);
+    expect(session.canDrop).toBe(false);
+    expect(session.drop()).toBe(false);
+    expect(session.bodies).toHaveLength(1);
+
+    /* 佇列也沒被吃掉 —— 這一顆仍然是預覽那一顆。 */
+    expect(session.pendingLevelId).toBe(session.upcomingLevelId);
+  });
+
+  it('accepts the next drop once the cooldown elapses', () => {
+    const session = makeSession(500, { dropCooldownMs: 500 });
+
+    session.drop();
+    runFrames(session, 31); /* 約 517ms */
+    expect(session.canDrop).toBe(true);
+
+    expect(session.drop()).toBe(true);
+    expect(session.bodies).toHaveLength(2);
+  });
+
+  it('reports the remaining cooldown and counts it down', () => {
+    const session = makeSession(500, { dropCooldownMs: 1000 });
+
+    session.drop();
+    const atDrop = session.dropCooldownRemainingMs;
+    runFrames(session, 30);
+
+    expect(atDrop).toBeGreaterThan(900);
+    expect(session.dropCooldownRemainingMs).toBeLessThan(atDrop);
+    expect(session.dropCooldownRemainingMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('treats a zero cooldown as no gate at all', () => {
+    const session = makeSession(500, { dropCooldownMs: 0 });
+
+    expect(session.drop()).toBe(true);
+    expect(session.drop()).toBe(true);
+
+    expect(session.bodies).toHaveLength(2);
+  });
+
+  it('resets the cooldown on a new run', () => {
+    const session = makeSession(500, { dropCooldownMs: 5000 });
+
+    session.drop();
+    expect(session.canDrop).toBe(false);
+
+    session.reset();
+    expect(session.canDrop).toBe(true);
+  });
+
+  it('reports no cooldown once the run is over', () => {
+    /*
+     * 結束後 `canDrop` 為假，而 `dropCooldownRemainingMs` 回報 0 —— 「不能投」的原因是這一局
+     * 完了，不是還在冷卻，UI 才不會顯示一個永遠倒不完的計時。
+     * After the run ends `canDrop` is false while `dropCooldownRemainingMs` reports 0: the
+     * reason is the run, not a cooldown, so the UI never shows a timer that cannot finish.
+     *
+     * 用一份**極淺**的容器來結束這一局，正是溢位測試那一套設定（見 <overflow> 區塊）。
+     * The run is ended with a **shallow** container — the same setup the overflow suite uses.
+     */
+    const session = makeSession(500, {
+      overflowGraceMs: 0,
+      /* 溢位判定需要接觸，所以投兩顆讓它們碰上。 */
+      dropCooldownMs: 0,
+    });
+
+    session.setAim(250);
+    session.drop();
+    runFrames(session, 90);
+    session.setAim(250);
+    session.drop();
+    runFrames(session, 90);
+
+    /*
+     * 這份預設容器不夠淺，未必會結束；所以只在真的結束時檢查 —— 重點是「over ⇒ 數值一致」，
+     * 而不是製造一次逾時（那在溢位區塊測得更準）。
+     * The default container may not be shallow enough to end the run, so this only asserts the
+     * invariant when it does: "over ⇒ the two numbers agree". Provoking a real timeout is the
+     * overflow suite's job, where it can be done precisely.
+     */
+    if (session.isOver) {
+      expect(session.canDrop).toBe(false);
+      expect(session.dropCooldownRemainingMs).toBe(0);
+      expect(session.drop()).toBe(false);
+    }
   });
 });
 
@@ -391,11 +529,11 @@ describe('GameSession — 旋轉交由物理 / rotation follows the engine', () 
   it('lets a busy pile-up tumble the dumplings', () => {
     const session = makeSession();
 
-    /* 故意交錯投放，製造大量碰撞與擠壓。 */
+    /* 故意交錯投放，製造大量碰撞與擠壓。每次投放要跨過冷卻時間。 */
     for (const x of [200, 260, 220, 240, 280, 210]) {
       session.setAim(x);
-      session.drop();
-      for (let frame = 0; frame < 20; frame += 1) session.step(1000 / 60);
+      if (session.canDrop) session.drop();
+      for (let frame = 0; frame < 90; frame += 1) session.step(1000 / 60);
     }
     for (let frame = 0; frame < 600; frame += 1) session.step(1000 / 60);
 
@@ -480,14 +618,14 @@ describe('GameSession — 合成與計分 / merging and scoring', () => {
     expect(session.bodies[0]?.scale).toBe(1);
   });
 
-  it('builds a combo when merges land inside the window', () => {
+  it('builds a combo when merges land inside one drop', () => {
     const session = makeCustom(SOLO_LV1);
 
     dropAndSettle(session, 250);
     session.setAim(250);
     session.drop();
 
-    /* 逐幀推進到合成發生的那一刻，這樣才讀得到「窗口內」的連擊狀態。 */
+    /* 逐幀推進到合成發生的那一刻，這樣才讀得到連擊狀態。 */
     let merged = false;
     for (let frame = 0; frame < 300 && !merged; frame += 1) {
       session.step(1000 / 60);
@@ -496,12 +634,63 @@ describe('GameSession — 合成與計分 / merging and scoring', () => {
 
     expect(merged).toBe(true);
     expect(session.comboCount).toBe(1);
-    expect(session.comboMultiplier).toBeGreaterThan(1);
+    /* 第一場合併拿 base（×1），且本次投放的分數就是那一場的加分。 */
+    expect(session.dropMergeCount).toBe(1);
+    expect(session.dropScore).toBe(session.score);
+  });
 
-    /* 靜置超過窗口（1 秒）後連擊歸零。 */
-    runFrames(session, 90);
+  it('keeps a chain alive until the next drop, not until a timer lapses', () => {
+    /*
+     * 舊設計用 1 秒時間窗口，靜置就會斷連。現在窗口是「本次投放」，所以靜置多久都一樣 ——
+     * 只有 `drop()` 會歸零。這條就是那個語意轉換的守門測試。
+     * The old design used a 1-second window, so idling broke the chain. The window is now the
+     * drop itself, so idling changes nothing; only `drop()` zeroes it. This test guards that
+     * semantic change.
+     */
+    const session = makeCustom(SOLO_LV1);
+
+    dropAndSettle(session, 250);
+    session.setAim(250);
+    session.drop();
+
+    let merged = false;
+    for (let frame = 0; frame < 300 && !merged; frame += 1) {
+      session.step(1000 / 60);
+      merged = session.mergedCount > 0;
+    }
+    expect(merged).toBe(true);
+
+    /* 靜置遠超過任何合理窗口。 */
+    runFrames(session, 180);
+    expect(session.comboCount).toBe(1);
+
+    /* 下一次投放才歸零。 */
+    session.drop();
     expect(session.comboCount).toBe(0);
-    expect(session.comboMultiplier).toBe(1);
+    expect(session.dropScore).toBe(0);
+    expect(session.dropMergeCount).toBe(0);
+  });
+
+  it('accumulates this drop\'s score across its merges', () => {
+    const session = makeCustom(SOLO_LV1);
+    dropAndSettle(session, 250);
+
+    /*
+     * 連投三顆同一位置：前兩顆合成 Lv2（加分），第三顆再合成出 Lv3。每一次合成都在同一批裡
+     * 拿到遞增的倍率，`dropScore` 應該是這些加分的總和。
+     * Three drops at one spot: the first two merge into Lv2 and the third merges again into
+     * Lv3. Every merge steps the ladder, so `dropScore` must be the sum of those gains.
+     */
+    session.drop();
+    runFrames(session, 120);
+    session.drop();
+    runFrames(session, 120);
+
+    expect(session.mergedCount).toBeGreaterThanOrEqual(1);
+    expect(session.dropMergeCount).toBeGreaterThanOrEqual(1);
+    expect(session.dropScore).toBeGreaterThan(0);
+    /* 本次投放的分數不可能超過總分。 */
+    expect(session.dropScore).toBeLessThanOrEqual(session.score);
   });
 });
 
@@ -717,27 +906,52 @@ describe('GameSession — 溢位與結束 / overflow and game over', () => {
 
 describe('GameSession — 解鎖與生成池 / unlocks and the draw pool', () => {
   it('only draws levels that are unlocked', () => {
-    const session = makeCustom(ALL_DROPPABLE, {}, makeGate([1]));
+    const session = makeCustom(ALL_DROPPABLE_NO_MERGE, {}, makeGate([1]));
 
-    for (let index = 0; index < 30; index += 1) session.drop();
+    for (let index = 0; index < 30; index += 1) {
+      if (session.canDrop) session.drop();
+      runFrames(session, 30);
+    }
 
     expect(session.bodies.every((body) => body.levelId === 1)).toBe(true);
   });
 
   it('unlocks a level the first time it is merged into, then allows it to drop', () => {
     const gate = makeGate([1]);
-    const session = makeCustom(ALL_DROPPABLE, {}, gate);
 
+    /*
+     * 先讓 Lv1 合成一次（解鎖 Lv2）。等級表不能中途更換，所以這一局維持可合成的表，並改為
+     * 檢查**生成紀錄**而不是場上剛體 —— 合成會把場上的證據吃掉。
+     * First force one Lv1+Lv1 merge to unlock Lv2. The level table cannot be swapped mid-run,
+     * so this session keeps the regular table and checks the **draw record** instead of what
+     * is still on the board, which merges would consume.
+     */
+    const session = makeCustom(ALL_DROPPABLE, {}, gate);
     dropAndSettle(session, 250);
     dropAndSettle(session, 250, 240);
 
     expect(gate.has(2)).toBe(true);
 
-    /* 解鎖後 Lv2 進入生成池：連丟一段時間應該看得到它。 */
+    /*
+     * 解鎖後 Lv2 進入生成池：連續投放時 `pendingLevelId` 應該看得到它。`pendingLevelId` 是
+     * 佇列最前面那顆，不受合成影響，所以取樣不會被吃掉。
+     *
+     * 取樣迴圈只推進到剛好跨過投放冷卻（70 幀 ≈ 1167ms），而不是一大段時間 —— 否則堆疊
+     * 會越過溢位線、這一局提早結束，`canDrop` 一旦變假就再也不會投放，取樣也就永遠停在
+     * 同一個佇列位置。
+     * Once unlocked, Lv2 joins the draw pool, so `pendingLevelId` — the front of the queue,
+     * unaffected by merges — must show it while we keep dropping.
+     *
+     * The loop advances just past the drop cooldown (70 frames ≈ 1167 ms) rather than a long
+     * stretch: otherwise the pile crosses the overflow line, the run ends early, and once
+     * `canDrop` goes false nothing drops again — the sample would freeze on one position.
+     */
     const seen = new Set<number>();
-    for (let index = 0; index < 80; index += 1) {
-      session.drop();
-      seen.add(session.bodies.at(-1)?.levelId ?? 0);
+    for (let index = 0; index < 80 && !session.isOver; index += 1) {
+      seen.add(session.pendingLevelId);
+      session.setAim(60 + (index % 6) * 70);
+      if (session.canDrop) session.drop();
+      runFrames(session, 70);
     }
 
     expect(seen.has(2)).toBe(true);

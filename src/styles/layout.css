@@ -194,6 +194,14 @@
   top: 45px;
 }
 
+/*
+ * 第二行＝「本次加分 (×倍率)」，可能長成 `3 連 · +256 (×10.0)`。
+ * 原本 32px 只夠放 `×1.0`；加了串長與加分之後會撞出 255px 的卡片寬度，所以縮到 22px 並
+ * 保留 `tabular-nums`，數字變動時不會左右跳動。
+ * The second line is "this gain (×multiplier)" and can read `3 連 · +256 (×10.0)`. The
+ * original 32px only fit `×1.0`; with the chain length and gain added it overflows the card's
+ * 255px, so it drops to 22px while keeping `tabular-nums` so the digits do not jitter.
+ */
 .card__multiplier {
   position: absolute;
   top: 121px;
@@ -201,10 +209,21 @@
   width: 100%;
   margin: 0;
   color: var(--color-fg-muted);
-  font-size: 32px;
+  font-size: 22px;
   line-height: 32px;
   font-variant-numeric: tabular-nums;
   text-align: center;
+}
+
+/*
+ * 投放冷卻態：投下之後的 1 秒內卡片變暗，玩家一眼看得出「現在還不能投」。
+ * 只調不透明度而不改尺寸，避免冷卻結束時卡片「彈」一下。
+ * Drop-cooldown state: the card dims for the second after a drop so it is obvious at a glance
+ * that dropping is not accepted yet. Only opacity changes, so nothing jumps when it ends.
+ */
+.card--cooling {
+  opacity: 0.55;
+  transition: opacity 140ms ease-out;
 }
 
 /* ── ② 工具列 / Toolbar（`1408:2064`，450×96）────────────────────────── */

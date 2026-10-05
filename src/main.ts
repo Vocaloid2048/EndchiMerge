@@ -108,8 +108,11 @@ async function bootstrap(): Promise<void> {
       nextLevelId: session.upcomingLevelId,
       score: session.score,
       mergedCount: session.mergedCount,
-      comboCount: session.comboCount,
-      comboMultiplier: session.comboMultiplier,
+      /* COMBO 卡：本次投放的合共得分 + 合成次數 + 最近一次的加分與倍率。 */
+      dropScore: session.dropScore,
+      dropMergeCount: session.dropMergeCount,
+      lastGain: session.lastMergeGain,
+      canDrop: session.canDrop,
       bestTry: progress.highScore,
     });
   };
@@ -173,7 +176,9 @@ async function bootstrap(): Promise<void> {
     target: canvas,
     viewport,
     onAim: (x): void => session.setAim(x),
-    onDrop: (): void => session.drop(),
+    onDrop: (): void => {
+      session.drop();
+    },
     initialAim: session.aimXValue,
   });
 

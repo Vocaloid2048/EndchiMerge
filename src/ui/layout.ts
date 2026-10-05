@@ -142,14 +142,33 @@ function buildNextCard(): HTMLElement {
   return card;
 }
 
+/**
+ * COMBO 卡。
+ * The COMBO card.
+ *
+ * 兩個數字，回答兩個不同的問題（使用者定案）：
+ * - 大數字：**本次投放合共賺了多少分**（`combo-score`，顯示成 `+87`）。
+ * - 下面一行：**本次加分**與它拿到的倍率，前面帶串長（`combo-detail`，`3 連 · +16 (×2.0)`）。
+ *
+ * 兩者都隨投放歸零，所以「本次投放」的界線與連擊一致，不會出現大數字還在跳、
+ * 倍率卻已經換了一批的錯覺。
+ *
+ * Two numbers answering two different questions (the user's decision):
+ * - the big one: **how much this drop earned in total** (`combo-score`, shown as `+87`);
+ * - the line below: **this gain** and its multiplier, prefixed by the chain length
+ *   (`combo-detail`, `3 連 · +16 (×2.0)`).
+ *
+ * Both reset on a drop, so "this drop" spans the same window as the chain and the big number
+ * can never run ahead of the multiplier.
+ */
 function buildComboCard(): HTMLElement {
   const card = el('section', 'panel card card--combo');
   card.dataset['region'] = 'combo';
-  const count = el('p', 'card__value', '0');
-  count.dataset['hook'] = 'combo-count';
-  const multiplier = el('p', 'card__multiplier', '×1.0');
-  multiplier.dataset['hook'] = 'combo-multiplier';
-  appendChildren(card, el('h2', 'card__label', 'COMBO'), count, multiplier);
+  const score = el('p', 'card__value', '+0');
+  score.dataset['hook'] = 'combo-score';
+  const detail = el('p', 'card__multiplier', '+0 (×1.0)');
+  detail.dataset['hook'] = 'combo-detail';
+  appendChildren(card, el('h2', 'card__label', 'COMBO'), score, detail);
   return card;
 }
 

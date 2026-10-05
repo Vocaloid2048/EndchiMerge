@@ -125,6 +125,7 @@ export class GameSession {
   private readonly levels: readonly LevelDef[];
   private readonly unlocks: UnlockSource | undefined;
   private readonly mergeCooldownMs: number;
+  private readonly dropCooldownMs: number;
   private readonly silhouettes: SilhouetteCache | undefined;
   private readonly combo: ComboTracker;
   private readonly overflow: OverflowMonitor;
@@ -149,6 +150,29 @@ export class GameSession {
   private mergedCountValue = 0;
   private over = false;
 
+  /**
+   * 最後一次投放的時刻；`-Infinity` 代表「還沒投過」，所以開局第一顆不受冷卻限制。
+   * When the last drop happened; `-Infinity` means "never", so the opening drop is never
+   * gated by the cooldown.
+   */
+  private lastDropAtMs = Number.NEGATIVE_INFINITY;
+
+  /**
+   * **本次投放**累積的分數，以及本次投放目前為止的合成次數。
+   * The score earned **by this drop** so far, and how many merges it has produced.
+   *
+   * 這兩個數字就是 COMBO 卡要顯示的東西：大數字是本次投放的**合共得分**，下面一行是
+   * 最近一次合成的加分與倍率。它們由 `drop()` 歸零，所以「本次投放」的邊界與連擊一致。
+   * These are exactly what the COMBO card shows: the big number is this drop's **total
+   * score** and the line below is the latest merge's gain and multiplier. `drop()` zeroes
+   * them, so "this drop" spans the same window as the combo chain.
+   */
+  private dropScoreValue = 0;
+  private dropMergeCountValue = 0;
+  /** 最近一次合成的加分（未乘倍率前的等級分）與它拿到的倍率。 */
+  private lastGainBase = 0;
+  private lastGainMultiplier = 1;
+
   constructor(options: GameSessionOptions) {
     this.config = options.config;
     this.levels = options.config.levels.levels;
@@ -156,6 +180,7 @@ export class GameSession {
     this.silhouettes = options.silhouettes;
     this.virtualHeight = options.virtualHeight ?? 1000;
     this.mergeCooldownMs = Math.max(0, this.config.levels.settings.mergeCooldownMs);
+    this.dropCooldownMs = Math.max(0, this.config.levels.settings.dropCooldownMs);
 
     this.physics = new Physics({ gravityY: this.config.levels.settings.gravityY });
     this.spawnQueue = new SpawnQueue({
@@ -163,7 +188,7 @@ export class GameSession {
       rng: options.rng ?? createRng(options.seed ?? 1),
       unlocked: this.unlocks?.unlocked,
     });
-    this.combo = new ComboTracker(this.config.levels.settings.comboWindowMs);
+    this.combo = new ComboTracker();
     this.overflow = new OverflowMonitor(this.config.levels.settings.overflowGraceMs);
 
     /* 先建一次，讓 `aimX` 與牆壁在任何 resize 之前就有合法值。 */
@@ -313,9 +338,19 @@ export class GameSession {
    *
    * 因為等級是 `take()` 出來的，**掉下來的必然就是 NEXT 卡顯示的那一顆**（D22）。
    * 這一局已結束（溢位逾時）時直接忽略，讓輸入層不必自己判斷遊戲狀態。
+   *
+   * **投放冷卻**：兩次投放至少相隔 `dropCooldownMs`，間隔內的呼叫直接回傳、不消耗佇列。
+   * 這裡是唯一的閘門 —— 滑鼠、空白鍵、觸控都走同一條路，所以不可能出現「某個輸入管道
+   * 繞過冷卻」的情況。
+   * **Drop cooldown**: two drops must be `dropCooldownMs` apart; calls inside the gap return
+   * without consuming the queue. This is the only gate — mouse, space bar and touch all come
+   * through here, so no input path can bypass it.
+   *
+   * @returns 這次呼叫是否真的投下了一顆。
    */
-  drop(): void {
-    if (this.over) return;
+  drop(): boolean {
+    if (this.over) return false;
+    if (!this.canDrop) return false;
 
     /*
      * 先 `take()` 再查定義：等級只讀一次，就不存在「peek 與 take 之間被換掉」的
@@ -336,6 +371,41 @@ export class GameSession {
 
     this.physics.add(body);
     this.addEntry({ body, level, bornAtMs: this.elapsedMs });
+
+    /*
+     * 開新一批：連擊歸零、本次投放的計分歸零。
+     * 順序很重要 —— 先記時間再歸零，才不會把「這一顆」算進上一批的連擊。
+     */
+    this.lastDropAtMs = this.elapsedMs;
+    this.combo.reset();
+    this.dropScoreValue = 0;
+    this.dropMergeCountValue = 0;
+    this.lastGainBase = 0;
+    this.lastGainMultiplier = 1;
+
+    return true;
+  }
+
+  /**
+   * 現在可以投放嗎（＝這一局還在進行，且已過投放冷卻）。
+   * Whether a drop is accepted right now: the run is live and the cooldown has elapsed.
+   *
+   * 輸入層靠它決定要不要把點擊當成投放，HUD 也可以拿它顯示冷卻狀態。
+   * The input layer uses this to decide whether a click counts as a drop, and the HUD can use
+   * it to show the cooldown.
+   */
+  get canDrop(): boolean {
+    if (this.over) return false;
+    return this.elapsedMs - this.lastDropAtMs >= this.dropCooldownMs;
+  }
+
+  /**
+   * 距離下一次可投放還剩多少毫秒；可以投放時為 0。
+   * Milliseconds until the next drop is accepted, 0 when a drop is already allowed.
+   */
+  get dropCooldownRemainingMs(): number {
+    if (this.over) return 0;
+    return Math.max(0, this.dropCooldownMs - (this.elapsedMs - this.lastDropAtMs));
   }
 
   /**
@@ -503,8 +573,24 @@ export class GameSession {
 
     this.mergedCountValue += 1;
 
-    const combo = this.combo.record(atMs);
-    this.scoreValue += level.score * combo.multiplier;
+    /*
+     * 連擊：一次投放裡的第 n 場合併拿 ×n（`COMBO_LADDER`）。倍率由 tracker 算，這裡只管
+     * 把它乘上等級分數 —— 「第幾次拿幾倍」的規則全在 `game/combo.ts`，可以在單元測試裡
+     * 逐條釘住。
+     * Combo: the nth merge inside one drop takes ×n. The tracker owns the ladder; this only
+     * multiplies the level score by it, so "which merge gets which multiplier" stays in
+     * `game/combo.ts` where it can be pinned down test by test.
+     */
+    const snapshot = this.combo.record();
+    const gain = level.score * snapshot.multiplier;
+
+    this.scoreValue += gain;
+
+    /* 本次投放的計分：大數字（合共）與下面一行（最近一次）都從這裡來。 */
+    this.dropScoreValue += gain;
+    this.dropMergeCountValue += 1;
+    this.lastGainBase = level.score;
+    this.lastGainMultiplier = snapshot.multiplier;
 
     this.registerUnlock(level.id);
   }
@@ -618,6 +704,16 @@ export class GameSession {
     this.mergedCountValue = 0;
     this.over = false;
     this.elapsedMs = 0;
+    /*
+     * 冷卻時間也歸零：新的一局第一顆不該被上一局的投放時間擋住。
+     * The cooldown resets too, so a new run's opening drop is never blocked by the previous
+     * run's last drop.
+     */
+    this.lastDropAtMs = Number.NEGATIVE_INFINITY;
+    this.dropScoreValue = 0;
+    this.dropMergeCountValue = 0;
+    this.lastGainBase = 0;
+    this.lastGainMultiplier = 1;
     this.spawnQueue.reset();
     this.aimX = this.clampAimX(this.aimX, this.pendingLevel().radius);
   }
@@ -677,14 +773,50 @@ export class GameSession {
     return this.mergedCountValue;
   }
 
-  /** 目前連擊串長；窗口已過為 0。 */
+  /**
+   * **本次投放**已經合成過幾次。投放時歸零。
+   * How many merges **this drop** has produced; zeroed on each drop.
+   */
   get comboCount(): number {
-    return this.combo.snapshotAt(this.elapsedMs).count;
+    return this.combo.count;
   }
 
-  /** 目前連擊倍率；窗口已過為 1。 */
-  get comboMultiplier(): number {
-    return this.combo.snapshotAt(this.elapsedMs).multiplier;
+  /**
+   * **本次投放**累積的總分（每次合成各自乘上它的階梯倍率後相加）。
+   * The total score **this drop** has earned, each merge multiplied by its own ladder step.
+   *
+   * 這是 COMBO 卡的大數字：使用者定案「展示本次投放合共賺了多少分」。
+   * This is the COMBO card's big number — the user's "how much this drop earned in total".
+   */
+  get dropScore(): number {
+    return Math.round(this.dropScoreValue);
+  }
+
+  /** 本次投放計分的原始值（未取整）；測試用。 */
+  get dropScoreRaw(): number {
+    return this.dropScoreValue;
+  }
+
+  /**
+   * 最近一次合成的「加分 + 倍率」，例如 `{ base: 8, multiplier: 2, gain: 16 }`。
+   * The latest merge's gain and multiplier, e.g. `{ base: 8, multiplier: 2, gain: 16 }`.
+   *
+   * `base` 是等級分數（未乘倍率），`gain` 是實際加進去的分數。HUD 用它渲染
+   * `+16 (×2.0)` 這一行。
+   * `base` is the level score before the multiplier and `gain` is what was actually added;
+   * the HUD renders the `+16 (×2.0)` line from it.
+   */
+  get lastMergeGain(): { base: number; multiplier: number; gain: number } {
+    return {
+      base: this.lastGainBase,
+      multiplier: this.lastGainMultiplier,
+      gain: Math.round(this.lastGainBase * this.lastGainMultiplier),
+    };
+  }
+
+  /** 本次投放已合成的次數；與 `comboCount` 同義，但語意上強調「本次投放」。 */
+  get dropMergeCount(): number {
+    return this.dropMergeCountValue;
   }
 
   /** 溢位寬限的進度 `0..1`；給 UI 顯示倒數。 */

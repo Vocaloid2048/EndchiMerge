@@ -83,10 +83,16 @@ export interface GameSettings {
    */
   overflowGraceMs: number;
   /**
-   * 連擊窗口，毫秒。兩次合成相隔在此之內算同一串。
-   * Combo window in milliseconds; merges closer than this belong to one chain.
+   * 兩次投放之間的最短間隔，毫秒。間隔內的投放輸入一律忽略。
+   * Minimum spacing between two drops in milliseconds; drop input inside the gap is ignored.
+   *
+   * 這個數字同時是**連擊的界線**：一串連擊 ＝ 一次投放，所以「1 秒間隔」既防止連點，
+   * 也決定了「同一批」的範圍，兩者共用同一個常數而不是各自為政。
+   * The value doubles as the **combo boundary**: a chain *is* one drop, so the 1-second gap
+   * both blocks spam-clicking and defines "the same batch" — one constant rather than two
+   * notions that could drift apart.
    */
-  comboWindowMs: number;
+  dropCooldownMs: number;
 }
 
 export interface LevelsConfig {

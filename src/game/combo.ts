@@ -2,79 +2,63 @@
  * 連擊（Combo）追蹤。
  * Combo tracking.
  *
- * 連擊只做兩件事：**判斷兩次合成是否屬於同一串**，以及**把串長換成倍率**。它不碰物理、
- * 不碰分數，所以可以在單元測試裡把「1 秒窗口的邊界」逐一釘住，而不必去猜畫面。
- * Combo does two things: decide whether two merges belong to one chain, and turn the chain
- * length into a multiplier. It touches neither physics nor score, so the window's edges can
- * be pinned in unit tests instead of guessed from the screen.
+ * **計數語意（使用者定案）**：一串連擊 ＝ **一次投放**。窗口不是時間，而是「本次投放到
+ * 下次投放之間」—— 因此 `reset()` 只在投放時被呼叫，不會因為時間過去而歸零。
+ * 一次投放裡合成了幾次，就是 `count`；每一次合成各自拿一個**遞增**的倍率
+ * （第 1 次 ×1、第 2 次 ×2…），這也是本模組唯一的輸出。
+ * **Counting semantics** (the user's decision): one chain *is* one drop. The window is not a
+ * duration but "this drop until the next drop", so `reset()` is driven by `drop()` and time
+ * alone never ends a chain. `count` is how many merges happened inside that drop, and each
+ * merge takes a **stepped** multiplier (the 1st ×1, the 2nd ×2, …). That is the module's only
+ * output.
  *
- * **計數語意 / Counting semantics**
+ * 為什麼**不是**時間窗口：舊版用 `comboWindowMs`（1 秒），但投放本身已經有 1 秒間隔，
+ * 兩個時間概念會互相打架 —— 「同一批」究柢是「同一次投放」，用投放當界線比用毫秒誠實。
+ * Why **not** a time window: the older version used `comboWindowMs` (1 s), but drops are
+ * already spaced 1 s apart, so the two notions fight each other. "The same batch" really means
+ * "the same drop", and a drop boundary is more honest than a millisecond count.
  *
- * `count` 是「目前這一串裡有幾次合成」，一串的第一顆就讓它變成 `1`，所以畫面上看到的是
- * 1、2、3…（而不是 0 起跳）。窗口一過就歸零，倍率跟著回到 `×1.0`。
- * `count` is how many merges the current chain contains; the first merge already makes it
- * `1`, so the card reads 1, 2, 3… rather than starting at zero. Letting the window lapse
- * resets it and the multiplier returns to `×1.0`.
- *
- * **同一物理步只算一次 / One count per physics step**
- *
- * 一次碰撞可能在同一物理步內同時觸發好幾場合併。舊草案用「相隔 <0.1 秒視為同一批」處理，
- * 但那會連合法的一串連鎖反應一起吞掉 —— 而草案自己的註解又說連鎖反應**應該**堆出高倍率，
- * 兩句互相矛盾。這裡改用**時間戳相同即同一批**：同一物理步的分析合併共用一個時間戳，
- * 因此只計一次；跨步的連鎖反應則正常累加。這正是「同批」真正要防的東西。
- * One collision can fire several merges inside the same physics step. The old draft treated
- * anything under 0.1 s as "the same batch", but that would also swallow a legitimate
- * multi-step cascade — and the draft's own note says cascades *should* build the multiplier,
- * so the two lines contradict each other. Instead, merges that share a timestamp (i.e. the
- * same physics step) count once, while a cascade spread over several steps accumulates
- * normally. That is what "same batch" is actually protecting against.
+ * 這個模組不碰物理、不碰分數，所以「第幾次合成拿幾倍」可以在單元測試裡逐條釘住。
+ * This module touches neither physics nor score, so "which merge gets which multiplier" can be
+ * pinned down test by test.
  */
 
 /**
- * Combo 倍率曲線常數。
- * Combo-multiplier curve constants.
+ * Combo 倍率的階梯。
+ * The combo-multiplier ladder.
  *
- * ```
- * multiplier(n) = min( e^(coefficient × n) / divisor, cap ) + base
- * ```
+ * 使用者定案的語意是「每一次合成各自拿一個遞增的倍率」：
+ * 一次投放裡第 1 場合併 ×1、第 2 場 ×2、第 3 場 ×3……而不是像指數曲線那樣平滑爬升。
+ * The user's semantics are "each merge takes its own stepped multiplier": inside one drop the
+ * 1st merge is ×1, the 2nd ×2, the 3rd ×3, … rather than a smooth exponential climb.
  *
- * 依使用者指定：**緩慢上升**，`n = 60` 時到達上限 `×10.0`。
- * 想調手感就改這裡（`coefficient` 越小上升越慢；`cap + base` 就是天花板）。
- * Per the requested curve: it climbs slowly and reaches the `×10.0` ceiling at `n = 60`.
- * Tune the feel here — a smaller `coefficient` rises more slowly, and `cap + base` is the
- * ceiling.
- *
- * `n = 0`（沒有連擊）時直接回傳 `×1.0`，而不是公式算出的 `×1.1`：靜止狀態顯示 1.1 會讓
- * 玩家以為一直有加成。這是一處刻意偏離公式的地方，只影響「沒有連擊」那一格。
- * At `n = 0` (no chain) this returns `×1.0` rather than the formula's `×1.1`, because an
- * idle card reading 1.1 looks like a permanent bonus. That is a deliberate departure from
- * the raw formula and only affects the no-combo case.
+ * `step` 是每一場合併往上加多少；`cap` 是天花板，避免一次超長連鎖把分數炸開。
+ * `step` is how much each merge adds and `cap` is the ceiling, so one very long cascade cannot
+ * blow the score up.
  */
-export const COMBO_CURVE = {
-  /** 指數係數；越小上升越慢。 */
-  coefficient: 0.075,
-  /** 除數，把指數拉回 1 附近。 */
-  divisor: 10,
-  /** 指數項的上限。 */
-  cap: 9,
-  /** 加的基數；`cap + base` ＝ 倍率天花板。 */
+export const COMBO_LADDER = {
+  /** 開頭倍率（第一場合併）。 */
   base: 1,
+  /** 每一場合併往上加的量。 */
+  step: 1,
+  /** 倍率上限。 */
+  cap: 10,
 } as const;
 
-/** 由串長算出倍率。`count <= 0` 回傳 `1`（見上方說明）。 */
+/** 由「本次投放的第幾場合併」算出倍率。`count <= 0` 回傳 `1`。 */
 export function comboMultiplier(count: number): number {
-  if (!Number.isFinite(count) || count <= 0) return 1;
+  if (!Number.isFinite(count) || count <= 0) return COMBO_LADDER.base;
 
-  const raw = Math.exp(COMBO_CURVE.coefficient * count) / COMBO_CURVE.divisor;
+  const raw = COMBO_LADDER.base + (count - 1) * COMBO_LADDER.step;
 
-  return Math.min(raw, COMBO_CURVE.cap) + COMBO_CURVE.base;
+  return Math.min(raw, COMBO_LADDER.cap);
 }
 
 /** 某一刻的連擊狀態快照。 */
 export interface ComboSnapshot {
-  /** 串長；窗口外為 0。 */
+  /** 本次投放已經合成過幾次；尚未合成為 0。 */
   count: number;
-  /** 對應倍率；窗口外為 1。 */
+  /** 下一場合併會拿到的倍率；尚未合成為 `1`。 */
   multiplier: number;
 }
 
@@ -82,67 +66,50 @@ export interface ComboSnapshot {
  * 連擊計數器。
  * The combo counter.
  *
- * 只認識兩個輸入：**這次合成發生在什麼時刻**，以及**窗口多長**。時間由外部（`GameSession`
- * 的模擬時鐘）提供，所以同一組種子與投放可以完全重播。
- * It knows two inputs only: when the merge happened and how long the window is. Time comes
- * from the outside (`GameSession`'s simulated clock), so a seed and a drop sequence replay
- * exactly.
+ * 只認識一個事件：**這一步發生了一場合併**。因為窗口就是「本次投放」，所以不需要時鐘，
+ * 也不需要「同一批」的判準 —— 同一物理步的多場合併自然就落在同一次投放裡，各自遞增。
+ * It knows one event only: **a merge happened on this step**. Because the window *is* the
+ * drop, no clock and no "same batch" test is needed — several merges in one physics step fall
+ * inside the same drop and simply step the ladder.
  */
 export class ComboTracker {
-  private readonly windowMs: number;
   private chain = 0;
-  private lastAtMs: number | null = null;
 
-  constructor(windowMs: number) {
-    this.windowMs = Math.max(0, windowMs);
-  }
-
-  /** 目前串長（未考慮窗口是否過期；要考慮請用 `snapshotAt()`）。 */
+  /** 本次投放目前合成過幾次。 */
   get count(): number {
     return this.chain;
+  }
+
+  /** 下一場合併會用到的倍率（＝目前串長 + 1 對應的倍率）。 */
+  get pendingMultiplier(): number {
+    return comboMultiplier(this.chain + 1);
   }
 
   /**
    * 記錄一次合成，回傳記錄後的狀態。
    * Record one merge and return the resulting state.
    *
-   * @param atMs 這次合成的模擬時刻（毫秒）/ Simulated time of the merge, in ms.
+   * 回傳的 `multiplier` 是**這次**合成所用的倍率（第 1 次 ×1、第 2 次 ×2…），
+   * 呼叫端直接拿它去乘分數即可，不必自己推導。
+   * The returned `multiplier` is the one **this** merge used (the 1st ×1, the 2nd ×2, …), so
+   * the caller can multiply the score straight away without deriving anything.
    */
-  record(atMs: number): ComboSnapshot {
-    /*
-     * 時間戳相同＝同一物理步的多場合併。此時只更新「最後時刻」以外的東西都不動，
-     * 直接回傳現況即可。
-     */
-    if (this.lastAtMs !== null && atMs === this.lastAtMs) return this.snapshotAt(atMs);
-
-    const continues =
-      this.lastAtMs !== null && atMs > this.lastAtMs && atMs - this.lastAtMs <= this.windowMs;
-
-    this.chain = continues ? this.chain + 1 : 1;
-    this.lastAtMs = atMs;
-
-    return this.snapshotAt(atMs);
-  }
-
-  /**
-   * 某一刻的連擊狀態。窗口已過的串視為 0，倍率回到 1。
-   * The state at a given moment; a chain whose window has lapsed reads as zero.
-   *
-   * 這個查詢**不改變**內部狀態，所以 HUD 可以每幀問一次而不影響玩法。
-   * The query is side-effect free, so the HUD can call it every frame.
-   */
-  snapshotAt(atMs: number): ComboSnapshot {
-    const live =
-      this.lastAtMs !== null && atMs >= this.lastAtMs && atMs - this.lastAtMs <= this.windowMs;
-
-    if (!live) return { count: 0, multiplier: 1 };
+  record(): ComboSnapshot {
+    this.chain += 1;
 
     return { count: this.chain, multiplier: comboMultiplier(this.chain) };
   }
 
-  /** 歸零；開新局時呼叫。 */
+  /** 目前狀態。無副作用，HUD 可以每幀查詢。 */
+  snapshot(): ComboSnapshot {
+    return { count: this.chain, multiplier: this.pendingMultiplier };
+  }
+
+  /**
+   * 歸零。**由投放驅動**，不是時間 —— 這是「窗口＝本次投放」的落點。
+   * Reset. Driven by **dropping**, not by time — the point of "the window is the drop".
+   */
   reset(): void {
     this.chain = 0;
-    this.lastAtMs = null;
   }
 }
