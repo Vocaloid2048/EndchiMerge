@@ -33,6 +33,7 @@ import {
   MERGE_PUSH_FACTOR,
   MERGE_PUSH_MAX_DEPTH,
   MERGE_PUSH_SPEED,
+  MERGE_SETTLE_MAX_DROP,
   POP_ANIMATION_MS,
   POP_PEAK_SCALE,
   WALL_THICKNESS,
@@ -40,6 +41,7 @@ import {
 import { computeContainerBounds, computeWallOverhang, createContainerBodies } from './containerBox';
 import { ComboTracker } from './combo';
 import { mergeResultId } from './merge';
+import { boundsOf, circleMass, distanceToSupport, inheritMomentum } from './mergeSettle';
 import { outlinePenetration, outlinesWithinReach, toWorldPolygon } from './outlineProximity';
 import { OverflowMonitor } from './overflow';
 import { SpawnQueue } from './spawnQueue';
@@ -732,9 +734,9 @@ export class GameSession {
   }
 
   /**
-   * 把兩顆合成一顆：移除原本兩顆，在質心生成下一級，加分並記錄連擊。
-   * Merge two into one: remove both, spawn the next level at their midpoint, score it, and
-   * register the combo.
+   * 把兩顆合成一顆：移除原本兩顆，在質心生成下一級、繼承動量、向下投影找支撐，加分並記錄連擊。
+   * Merge two into one: remove both, spawn the next level at their midpoint, inherit momentum,
+   * project down onto the nearest support, score it, and register the combo.
    */
   private merge(a: Entry, b: Entry, atMs: number): void {
     const resultId = mergeResultId(a.level, b.level);
@@ -756,6 +758,41 @@ export class GameSession {
     this.addEntry({ body, level, bornAtMs: atMs });
 
     /*
+     * 繼承動量（使用者定案：質心 ＋ 動量平均）。
+     *
+     * 兩顆原料的動量不該因為合成而消失 —— 否則一顆正在下墜、或正被鄰居推擠的顆粒，合成後
+     * 會「憑空靜止」出現在質心，玩家看得出這不自然。這裡用質量加權平均把動量接過來，讓新顆粒
+     * 沿著原本的運動方向繼續走。
+     * Inherit momentum (the user's decision: midpoint plus averaged momentum).
+     *
+     * The inputs' momentum must not vanish on merging, or a falling or shoving dumpling would
+     * reappear motionless at the midpoint, which reads as unnatural. A mass-weighted average
+     * carries the momentum over so the new body keeps travelling the way its inputs did.
+     */
+    const velocity = inheritMomentum(
+      a.body.velocity,
+      circleMass(a.level.density, a.level.radius),
+      b.body.velocity,
+      circleMass(b.level.density, b.level.radius),
+    );
+    Matter.Body.setVelocity(body, velocity);
+
+    /*
+     * 向下投影找支撐（使用者定案：避免貿然凌空）。
+     *
+     * 質心中點有時落在半空中（兩顆原料原本堆在高處，或被推開後才合成）。這時把新顆粒往下
+     * 吸附到最近的支撐上，而不是讓它在空中定格等物理拉 —— 那會有肉眼可見的停頓。腳下沒有
+     * 夠近的支撐時不動它，維持自由落體。
+     * Project down onto support (the user's decision: avoid freezing in mid-air).
+     *
+     * The midpoint sometimes sits in mid-air (inputs stacked high, or pushed apart before the
+     * merge). Snapping the body down onto the nearest support avoids the visible stall of hanging
+     * there until physics pulls it down. When nothing close enough lies below, leave it to free
+     * fall.
+     */
+    this.settleOntoSupport(body, level);
+
+    /*
      * 推開被壓到的鄰居（使用者定案：按重疊深度推開）。
      *
      * 新顆粒比兩顆原料都大，卻生成在質心 —— 多出來的面積會陷進旁邊的方團團。這裡在生成後
@@ -766,6 +803,12 @@ export class GameSession {
      * sinks into the surrounding dumplings. This immediately displaces every overlapping
      * neighbour along the centre line by its overlap depth, so the interpenetration never
      * survives to the next frame where the player would see it.
+     *
+     * **順序要緊**：先吸附到支撐、再推鄰居。反過來的話，推力會把新顆粒推離支撐面，接著的
+     * 吸附又把它拉回去，兩個修正互相抵銷。
+     * **Order matters**: settle onto support first, then push neighbours. The other way round, the
+     * push would shove the body off its support and the settle would drag it back — the two
+     * corrections cancel out.
      */
     this.pushNeighboursApart(body, level);
 
@@ -887,6 +930,66 @@ export class GameSession {
         capped * MERGE_PUSH_SPEED,
       );
     }
+  }
+
+  /**
+   * 把新合成的顆粒往下吸附到最近的支撐（使用者定案：避免貿然凌空）。
+   * Snap a freshly merged body down onto the nearest support (the user's decision: avoid
+   * freezing in mid-air).
+   *
+   * 合成位置取質心中點，這個點有時半空 —— 兩顆原料原本堆在高處、或被推開後才合成，頭頂
+   * 忽然空掉。這時新顆粒若原地出現就會在空中「定格」一下才落下。補救是把它的圓底吸附到
+   * 底下最近的支撐上緣。
+   * The merge position is the inputs' midpoint, which is sometimes mid-air — inputs stacked high,
+   * or pushed apart before merging, so the space below opened up. A body appearing there would
+   * stall for a moment before dropping. The fix snaps its bottom onto the nearest support below.
+   *
+   * **支撐包含兩類**：容器地板（靜態），以及其他方團團（用包圍盒近似）。兩者都是「可以墊在
+   * 下面的東西」。
+   * **Two kinds of support**: the container floor (static) and the other dumplings (approximated
+   * by their bounding boxes). Both are things a body can rest on.
+   *
+   * **只在夠近時才吸附**：門檻是 `MERGE_SETTLE_MAX_DROP`。太遠的支撐不吸 —— 否則一顆在高處
+   * 合成的顆粒會「瞬移」到地面，那比凌空更怪異。
+   * **Only snap when close enough**, the `MERGE_SETTLE_MAX_DROP` threshold. A distant support is
+   * left alone, or a body merged high up would teleport to the floor — stranger than hovering.
+   *
+   * **吸附只改位置、不動速度**：動量由 `inheritMomentum` 決定，這裡若也動速度就會重複計。
+   * **Only position moves, never velocity**: momentum is already set by `inheritMomentum`, and
+   * touching velocity here would double-count it.
+   */
+  private settleOntoSupport(body: Matter.Body, level: LevelDef): void {
+    const bodies = this.entries.map((entry) => entry.body);
+
+    /* 其他方團團的包圍盒。 */
+    const supports = boundsOf(bodies, body.id);
+
+    /*
+     * 加上容器地板：一條橫跨整個遊戲區的厚板。
+     *
+     * **地板的上緣是 `cavity` 的底部，不是 `frame` 的底部** —— 牆體本身有厚度
+     * （`WALL_THICKNESS`），物理地板剛體就坐在 `cavity` 之下，所以「可站的平面」比外框底部
+     * 高一個牆厚。用外框底部會把顆粒塞進地板裡。
+     * **The floor's top is the cavity bottom, not the frame bottom** — the wall has thickness
+     * (`WALL_THICKNESS`) and the physics floor body sits below the cavity, so the surface to
+     * stand on is one wall-thickness above the frame's bottom. Using the frame bottom would push
+     * the body into the floor.
+     */
+    const floorTop = this.cavity.y + this.cavity.height;
+    supports.push({ x: this.cavity.x, y: floorTop, width: this.cavity.width, height: 1 });
+
+    const drop = distanceToSupport(
+      body.position.x,
+      body.position.y,
+      level.radius,
+      supports,
+      MERGE_SETTLE_MAX_DROP,
+    );
+
+    /* 沒有夠近的支撐（`Infinity`）→ 維持自由落體。 */
+    if (!Number.isFinite(drop) || drop <= 0) return;
+
+    Matter.Body.translate(body, { x: 0, y: drop });
   }
 
   /** 依世代註冊解鎖；成功時刷新生成池，讓新等級也能被抽到。 */
@@ -1038,6 +1141,7 @@ export class GameSession {
       radius: entry.level.radius,
       angle: entry.body.angle,
       scale: this.popScale(entry.body.id),
+      velocity: { x: entry.body.velocity.x, y: entry.body.velocity.y },
     }));
   }
 

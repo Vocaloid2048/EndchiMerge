@@ -163,6 +163,31 @@ export const MERGE_PUSH_SPEED = 0.05;
  */
 export const MERGE_PUSH_MAX_DEPTH = 12;
 
+/**
+ * 合成後「向下投影找支撐」的最大吸附距離，世界單位。
+ * The maximum snap distance for the post-merge downward projection, in world units.
+ *
+ * 合成的位置取兩顆原料的質心中點，這個點有時會落在半空中（兩顆原本堆在高處、或被推開後才
+ * 合成）。此時新顆粒若原地出現，就會在空中定格一下才落下 —— 肉眼可見的違和。
+ * A merge spawns at the inputs' midpoint, and that point sometimes sits in mid-air (inputs stacked
+ * high, or pushed apart before merging). A body appearing there would hang for a moment before
+ * falling — a visible stall.
+ *
+ * 補救是「往下找最近的支撐，太遠就直接落體」。這個常數就是「太遠」的門檻：只吸附
+ * 這個距離以內的支撐。設太大會讓合成結果「瞬間跳到」很遠的地面（更怪異），設太小則大多數
+ * 凌空情況都吸附不到、等於沒做事。
+ * The remedy is "find the nearest support below, and free-fall if it is too far". This constant is
+ * the "too far" threshold. Too large makes the result teleport to a distant floor (worse), too
+ * small fails to catch the very cases it exists for.
+ *
+ * 值取 80：約為最大常見等級的直徑量級 —— 夠涵蓋「一顆的高度忽然空掉」，又遠小於容器高度
+ * （見 `levels.json`），不會把高處的合成結果一把吸到地面。
+ * A value of 80 is on the order of a large level's diameter — enough to cover "one body's height
+ * suddenly removed", while far below the container height, so a high merge is never yanked to the
+ * floor.
+ */
+export const MERGE_SETTLE_MAX_DROP = 80;
+
 /** 本地儲存鍵的前綴，避免與同網域其他專案衝突。 */
 export const STORAGE_PREFIX = 'endchimerge';
 

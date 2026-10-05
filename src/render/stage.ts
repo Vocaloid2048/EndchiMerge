@@ -137,6 +137,17 @@ export interface RenderBody {
    * after a merge and settles back to 1.
    */
   scale?: number;
+  /**
+   * 目前速度（世界單位／步），選填。
+   * Current velocity in world units per step; optional.
+   *
+   * 供 QA 與除錯讀取用 —— 合成是否繼承動量（見 `game/mergeSettle.ts`）在畫面上看不出來，
+   * 但可以由這個欄位驗證。渲染器目前不強制使用它。
+   * Available for QA and debugging — whether a merge inherited momentum (see
+   * `game/mergeSettle.ts`) is invisible on screen but verifiable here. The renderer is not
+   * required to use it.
+   */
+  velocity?: { x: number; y: number };
 }
 
 /** 投放下落前的預覽。 */

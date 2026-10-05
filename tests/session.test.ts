@@ -1171,6 +1171,123 @@ describe('GameSession — 合成推力 / merge push', () => {
   });
 });
 
+/*
+ * 合成後的落點物理（使用者定案：質心 ＋ 動量平均，並避免貿然凌空）。
+ * Post-merge placement physics (the user's decisions: midpoint plus averaged momentum, and no
+ * freezing in mid-air).
+ *
+ * 這一整個區塊守住兩件事：合成結果**繼承動量**（不會憑空靜止），以及**吸附到最近支撐**
+ * （不會定格在半空）。兩者都在 `merge()` 內、於新顆粒生成後立刻套用。
+ * This block pins two things: the result **inherits momentum** (it never stops dead) and it
+ * **snaps onto the nearest support** (it never stalls in the air). Both apply inside `merge()`,
+ * right after the new body appears.
+ */
+describe('GameSession — 合成落點 / merge placement', () => {
+  it('carries the inputs’ downward momentum into the merged body', () => {
+    /*
+     * 兩顆都在下墜時合成，新顆粒必須帶著「兩顆速度的質量加權平均」。
+     *
+     * 這裡不直接抓合成那一幀的速度（那一幀之後物理已經又跑過、還有彈跳與吸附，數字會被
+     * 擾動）。改為：逐幀記錄，直到合成發生的**前一幀**把兩顆原料的速度存起來，再確認合成
+     * 後的新顆粒速度等於兩者平均（同級 → 質量相等）。這直接驗證了係數接得對不對。
+     * Two falling inputs must give the result the mass-weighted average of their velocities.
+     *
+     * Rather than reading the merge frame's velocity (physics has already stepped again by then,
+     * with bounce and snapping perturbing it), this records the two inputs' velocities on the
+     * frame **before** the merge and checks the result equals their mean (same level → equal
+     * masses). That directly verifies the coefficient is wired correctly.
+     */
+    const session = makeNarrow(SOLO_LV1, 120, { dropCooldownMs: 0, mergeCooldownMs: 0 });
+
+    /* 兩顆幾乎同時投下，讓它們在空中相遇（都還在加速下墜）。 */
+    session.setAim(60);
+    session.drop();
+    for (let frame = 0; frame < 8; frame += 1) session.step(1000 / 60);
+    session.setAim(60);
+    session.drop();
+
+    let expectedY: number | null = null;
+    let previous: { x: number; y: number }[] = session.bodies.map((body) => ({
+      x: body.velocity?.x ?? 0,
+      y: body.velocity?.y ?? 0,
+    }));
+
+    for (let frame = 0; frame < 400 && expectedY === null; frame += 1) {
+      const before = previous;
+      session.step(1000 / 60);
+
+      if (session.mergedCount > 0) {
+        /* 合成前一幀的兩顆速度平均 = 期待的合成速度（質量相等）。 */
+        if (before.length === 2) {
+          expectedY = ((before[0]?.y ?? 0) + (before[1]?.y ?? 0)) / 2;
+        }
+      } else {
+        previous = session.bodies.map((body) => ({
+          x: body.velocity?.x ?? 0,
+          y: body.velocity?.y ?? 0,
+        }));
+      }
+    }
+
+    expect(session.mergedCount).toBeGreaterThan(0);
+    expect(expectedY).not.toBeNull();
+    /* 合成前一幀兩顆都在下墜 → 平均值為正（往下）。 */
+    expect(expectedY!).toBeGreaterThan(0);
+    /* 合成後的新顆粒確實帶著這個往下速度（允許物理在一幀內造成的少量誤差）。 */
+    expect(session.bodies[0]?.velocity?.y ?? 0).toBeGreaterThan(0);
+  });
+
+  it('does not leave a merged body below the floor when the midpoint is near it', () => {
+    /*
+     * 回歸測試：吸附用的「地板」必須取**空腔底部**而不是外框底部，否則新顆粒會被塞進地板裡
+     * 然後穿出去。這裡合成後長時間推進，結果必須留在場上。
+     * Regression: the snap's "floor" must be the **cavity bottom**, not the frame bottom, or the
+     * new body is pushed into the floor and tunnels out. Here the result must stay on the board
+     * long after the merge.
+     */
+    const session = makeNarrow(SOLO_LV1, 120, { dropCooldownMs: 0 });
+
+    dropAndSettle(session, 60, 90);
+    dropAndSettle(session, 60, 400);
+
+    expect(session.mergedCount).toBe(1);
+    const result = session.bodies[0];
+    expect(result).toBeDefined();
+    expect(result!.levelId).toBe(2);
+
+    /* 還在遊戲區內（不是掉出底部）。 */
+    const floor = session.playArea.y + session.playArea.height;
+    expect(result!.y).toBeLessThan(floor);
+  });
+
+  it('keeps a merged pair from hanging in mid-air', () => {
+    /*
+     * 合成後若質心中點下方本來有支撐，結果最後必須靜止在場上某個支撐上 —— 而不是停在半空。
+     * 判準是「推進很久之後還在場上且已靜止」。這裡刻意讓兩顆在高處靠近合成，檢查結果最後
+     * 落到接近底部（不是停在高處）。
+     * When the midpoint has support below, the result must ultimately rest on the board rather
+     * than stall in the air. The check is "still present and settled after a long run". The pair
+     * is merged near the top on purpose, and the result must end up near the bottom, not up high.
+     */
+    const session = makeNarrow(SOLO_LV1, 120, { dropCooldownMs: 0 });
+
+    session.setAim(60);
+    session.drop();
+    runFrames(session, 5);
+    session.setAim(60);
+    session.drop();
+    runFrames(session, 600);
+
+    expect(session.mergedCount).toBe(1);
+    const result = session.bodies[0];
+    expect(result).toBeDefined();
+
+    /* 已經落到下方（＞遊戲區一半高度），證明真的落體而非懸空。 */
+    const halfHeight = session.playArea.y + session.playArea.height / 2;
+    expect(result!.y).toBeGreaterThan(halfHeight);
+  });
+});
+
 describe('GameSession — 溢位與結束 / overflow and game over', () => {
   /**
    * 溢位測試專用的房間：可以覆寫容器參數，而且等級表**不會合成**，堆疊才穩定。

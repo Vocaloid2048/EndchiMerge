@@ -13,6 +13,7 @@
 |---|---|
 | `src/game/merge.ts` | 純函式：兩顆等級 → 合成結果等級（或 `null`） |
 | `src/game/outlineProximity.ts` | 純幾何：兩組世界座標輪廓 → 是否相接／邊緣間隙 |
+| `src/game/mergeSettle.ts` | 純函式：動量繼承、質量、向下投影找支撐 |
 | `src/game/combo.ts` | 純函式 `comboMultiplier(n)` ＋ `ComboTracker`（串長與窗口） |
 | `src/game/overflow.ts` | `OverflowMonitor`：連續溢位計時與判定 |
 | `src/game/progress.ts` | `ProgressStore`：解鎖集合 ＋ 最高分，寫入 localStorage |
@@ -41,7 +42,9 @@ mergeResultId(a, b) = a.id === b.id ? a.mergeResult : null
 | 觸發條件（輪廓） | 同級 ＋ 輪廓邊緣間隙 ≤ `MERGE_OUTLINE_GAP` = 4 | **每步**掃描，補足「相鄰卻沒碰上」的縫隙 |
 | 物件對冷卻 | `mergeCooldownMs` = 100ms | 同一顆剛體**生成後**多久內不得合成，避免鏈式合成一步跑完 |
 | 一顆只能被用掉一次 | `claimed` Set | 同一批裡若有 A+B 與 A+C，A 只會被消耗一次 |
-| 生成位置 | 兩顆質心的中點 | 尚未實作動量繼承（見待辦） |
+| 生成位置 | 兩顆質心的中點 | — |
+| 生成動量 | 兩顆速度的質量加權平均 | 見 §2.4；質量 ＝ `密度 × π r²` |
+| 生成後找支撐 | 向下吸附到最近支撐，上限 `MERGE_SETTLE_MAX_DROP` = 80 | 見 §2.5；避免貿然凌空 |
 | 生成後推開鄰居 | 位移 ＝ 重疊深度 × `MERGE_PUSH_FACTOR` = 1.15 | 見 §2.3；深度上限 `MERGE_PUSH_MAX_DEPTH` = 12 |
 
 ### 2.1 為什麼除了碰撞還需要「近接掃描」
@@ -98,6 +101,48 @@ mergeResultId(a, b) = a.id === b.id ? a.mergeResult : null
 **位移與速度都要給**：位置位移讓穿透**立刻**消失（只給速度會留下一幀穿模），速度增量讓它
 繼續往外走而不是被推回原位。位置位移用 `Matter.Body.translate` 而非直接改 `position`，
 否則 `bounds` 與 `vertices` 會停在舊位置，下一次碰撞偵測就會拿過期幾何比對。
+
+### 2.4 合成結果繼承動量
+
+生成位置取兩顆原料的質心中點，但**速度不是零** —— 用兩顆的**質量加權平均**接過來（幾何在
+`src/game/mergeSettle.ts`）：
+
+```
+v_result = (m_a · v_a + m_b · v_b) / (m_a + m_b)
+m = 密度 × π r²         // 與 LevelDef 的宣告一致
+```
+
+**為什麼要繼承**：兩顆正在下墜、或正被鄰居推擠的顆粒，若合成後憑空靜止出現在質心，玩家
+一眼看得出不自然。動量守恆讓新顆粒沿著原本的運動方向繼續走。
+
+**為什麼用質量加權而非算術平均**：質量不同時，重的那顆話語權更大；同級合成時兩者質量相等
+（同 `radius`、同 `density`），結果自然退化為算術平均。
+
+### 2.5 向下投影找支撐（避免貿然凌空）
+
+質心中點有時落在半空中 —— 兩顆原料原本堆在高處、或被推開後才合成，頭頂忽然空掉。新顆粒若
+原地出現就會在空中「定格」一下才落下。
+
+補救在 `session.ts → settleOntoSupport()`，於生成後、**推開鄰居之前**執行：
+
+1. 收集候選支撐：其他顆粒的包圍盒（`boundsOf`）＋ 容器地板
+2. 用 `distanceToSupport()` 算出「圓底碰到支撐上緣」所需的下落距離
+3. 距離 ≤ `MERGE_SETTLE_MAX_DROP`（80）時才 `translate` 吸附；太遠則維持自由落體
+
+| 參數 | 值 | 為什麼 |
+|---|---|---|
+| `MERGE_SETTLE_MAX_DROP` | 80 | 超過就不吸；否則高處的合成結果會「瞬移」到地面，比凌空更怪 |
+
+**地板取空腔底部而非外框底部**：牆體有厚度（`WALL_THICKNESS`），物理地板剛體坐在 `cavity`
+之下，所以可站的平面比外框底部高一個牆厚。用外框底部會把顆粒塞進地板裡（回歸測試
+`does not leave a merged body below the floor when the midpoint is near it` 守住這點）。
+
+**用包圍盒而非真實輪廓**：這是「找最近的東西墊在下面」，不是碰撞解算。包圍盒只會讓投影
+偏保守（提早落地），不會讓顆粒穿過鄰居；真實輪廓的相交測試成本高，且對凹形鄰居容易出現
+「射線剛好穿過縫」的假陰性。
+
+**順序：先吸附、再推鄰居**。反過來的話，推力會把新顆粒推離支撐面，接著的吸附又把它拉回去，
+兩個修正互相抵銷。
 
 > 冷卻比對的是「**生成時刻**」而不是「上一次被誰碰過」。這樣同一顆球不論跟誰碰撞，
 > 都只在出生後 100ms 之後才可能合成，規則只有一條。
@@ -278,6 +323,9 @@ spawnY        = frame.y - dropAboveRim          // container.json，預設 40（
 | 溢位寬限秒數 | `levels.json → settings.overflowGraceMs` | `3000` |
 | 連擊窗口 | `levels.json → settings.comboWindowMs` | `1000` |
 | 合成冷卻 | `levels.json → settings.mergeCooldownMs` | `100` |
+| 近接合成的邊緣間隙容差 | `src/core/constants.ts → MERGE_OUTLINE_GAP` | `4` |
+| 合成後推開鄰居的力度 | `src/core/constants.ts → MERGE_PUSH_FACTOR / MERGE_PUSH_SPEED / MERGE_PUSH_MAX_DEPTH` | `1.15 / 0.05 / 12` |
+| 合成後找支撐的吸附上限 | `src/core/constants.ts → MERGE_SETTLE_MAX_DROP` | `80` |
 | 連擊曲線 | `src/game/combo.ts → COMBO_CURVE` | `coefficient 0.075 / cap 9 / base 1` |
 | 彈跳動畫時長與峰值 | `src/core/constants.ts → POP_ANIMATION_MS / POP_PEAK_SCALE` | `180ms / 1.3` |
 | 溢位紅線與警戒區樣式 | `src/render/stage.ts → OVERFLOW_STYLE` | 見 `rendering.md` |
