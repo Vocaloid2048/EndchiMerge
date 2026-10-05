@@ -454,12 +454,75 @@ describe('GameSession — D22 在整合層 / D22 at the integration level', () =
   });
 
   it('drives the aim preview from the pending level, not the NEXT card', () => {
-    const session = makeSession();
+    /* 冷卻設 0，才有一顆接一顆的連投空間可以檢查預覽指向。 */
+    const session = makeSession(500, { dropCooldownMs: 0 });
 
     for (let index = 0; index < 20; index += 1) {
-      expect(session.aimPreview.levelId).toBe(session.pendingLevelId);
+      expect(session.aimPreview?.levelId).toBe(session.pendingLevelId);
       session.drop();
     }
+  });
+
+  it('withholds the aim preview until the drop cooldown elapses', () => {
+    /*
+     * 使用者定案：投放之後、「即將投放」要先隱藏，等 `dropCooldownMs` 完結才展示下一順位。
+     * 這條把「回傳 `null`」與「冷卻結束後回來」兩半都釘住 —— 只釘一半的話，一個永遠
+     * 回傳 `null` 的 getter 也會通過。
+     * The user's rule: after a drop the "next up" preview stays hidden until `dropCooldownMs`
+     * elapses. Both halves are pinned — an always-null getter would otherwise pass.
+     */
+    const session = makeSession(500, { dropCooldownMs: 500 });
+
+    /* 開局沒有冷卻，预覽在場。 */
+    expect(session.aimPreview).not.toBeNull();
+
+    session.drop();
+
+    /* 冷卻中：預覽隱藏。 */
+    expect(session.canDrop).toBe(false);
+    expect(session.aimPreview).toBeNull();
+
+    /* 冷卻剛走完沒多久仍然隱藏。 */
+    runFrames(session, 15); /* 約 250ms */
+    expect(session.aimPreview).toBeNull();
+
+    /* 冷卻結束：下一順位回來了。 */
+    runFrames(session, 20); /* 合計約 583ms */
+    expect(session.canDrop).toBe(true);
+    expect(session.aimPreview?.levelId).toBe(session.pendingLevelId);
+  });
+
+  it('drops the aim preview once the run is over', () => {
+    /*
+     * 結束後預覽也必須消失：這一局已經不能投了，還畫著「即將投放」是在承諾一件不會發生的事。
+     * 用一份**極淺**的容器把這一局結束掉（`topOffset: 980` + 線貼頂緣），正是溢位那一套。
+     * The preview must also go away when the run ends: the run can no longer drop, so a preview
+     * would promise something that will not happen. A very shallow container ends the run.
+     */
+    const session = new GameSession({
+      config: {
+        ...CONFIG,
+        levels: {
+          ...CONFIG.levels,
+          /* 永不合成，證據不會被吃掉；`overflowGraceMs: 0` 一越線就結束。 */
+          levels: NO_MERGE,
+          settings: { ...CONFIG.levels.settings, overflowGraceMs: 0, dropCooldownMs: 0 },
+        },
+        container: { ...CONFIG.container, topOffset: 980, overflowAboveRim: 0 },
+      },
+      rng: createRng(20261004),
+      virtualWidth: 500,
+    });
+
+    session.setAim(250);
+    session.drop();
+    runFrames(session, 90);
+    session.setAim(250);
+    session.drop();
+    runFrames(session, 90);
+
+    expect(session.isOver).toBe(true);
+    expect(session.aimPreview).toBeNull();
   });
 
   it('keeps both lookahead slots populated after every drop', () => {
@@ -1110,3 +1173,4 @@ describe('GameSession — 輪廓碰撞體 / outline colliders', () => {
     expect(session.mergedCount).toBeGreaterThan(0);
   });
 });
+

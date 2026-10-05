@@ -787,8 +787,32 @@ export class GameSession {
     return 1 + (POP_PEAK_SCALE - 1) * eased;
   }
 
-  /** 投放預覽；`spawnYValue` 就是預覽圓心的高度。 */
-  get aimPreview(): RenderAim {
+  /**
+   * 投放預覽；`spawnYValue` 就是預覽圓心的高度。
+   *
+   * **冷卻中回傳 `null`**（使用者定案）：投放之後、冷卻結束之前不顯示「即將投放」——
+   * 那個位置本來就是剛剛掉下去的那一顆還沒走開，再畫一顆「即將投放」等於在欺騙眼睛。
+   * 等 `dropCooldownMs` 走完，下一個順位的方團團才會出現。
+   *
+   * 用 `null` 而不是「畫成透明」是刻意的：透明度是**風格**，可空是**狀態**。用透明的話，
+   * renderer 與 HUD 每個消費端都得自己記得處理 alpha=0 的情況；`null` 則讓「此刻沒有預覽」
+   * 成為型別層面的事實，`drawStage` 的 `aim` 參數本來就宣告成 `RenderAim | null`。
+   * The aim preview, `spawnYValue` being the circle's centre height.
+   *
+   * **`null` while the cooldown runs** (the user's decision): between a drop and the end of the
+   * cooldown no "next" dumpling is shown — that spot is still occupied by the one just dropped,
+   * so drawing a preview there would simply lie to the eye. The following queue entry appears
+   * only once `dropCooldownMs` has elapsed.
+   *
+   * `null` rather than "draw it transparent" is deliberate: opacity is *styling*, nullability
+   * is *state*. Transparency would make every consumer remember to handle alpha = 0, while
+   * `null` makes "no preview right now" a fact at the type level — `drawStage`'s `aim`
+   * parameter is already declared `RenderAim | null`.
+   */
+  get aimPreview(): RenderAim | null {
+    /* 冷卻中（以及遊戲結束後）沒有預覽。 */
+    if (!this.canDrop) return null;
+
     const level = this.pendingLevel();
 
     return {

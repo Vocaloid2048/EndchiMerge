@@ -467,17 +467,23 @@ export function drawStage(
    * 同樣套用遊戲區裁切：預覽生成在**溢位線之上**，而它的藝術又比圓心高 2.16 倍半徑，
    * 所以在高等級（半徑大）時會有一截落在畫布頂端之外。不裁的話那一截會被畫布靜默切掉，
    * 看起來像素材缺一角；裁了則是乾淨地沿著可見邊界收邊。
+   *
+   * **不透明**（使用者定案）：預覽是「這一顆確定會掉下去」的承諾，畫成半透明反而像在說
+   * 「可能會掉」。冷卻期間的隱藏由 `aim === null` 負責，不靠調 alpha —— 那是狀態而非風格。
    * The drop preview, drawn on top because it has not entered the trough yet.
    *
    * The same play-field clip applies: the preview spawns **above the overflow line** and its
    * art reaches 2.16 radii above the centre, so at high levels (larger radii) a slice lands
    * above the canvas top. Without the clip the canvas cuts it silently and the sprite appears
    * to be missing a corner; with it the edge is trimmed cleanly at the visible boundary.
+   *
+   * **Fully opaque** (the user's decision): the preview promises "this one *will* drop", and a
+   * translucent body reads as "maybe". Hiding during the cooldown is `aim === null`'s job, not
+   * an alpha trick — that is state, not styling.
    */
   if (aim !== null) {
     ctx.save();
     clipToPlayField(ctx, geometry, frame.clipTop ?? 0);
-    ctx.globalAlpha = 0.85;
     drawBody(ctx, { ...aim, angle: 0 }, sprites);
     ctx.restore();
   }
