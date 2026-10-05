@@ -168,6 +168,19 @@ export class GameSession {
    */
   private dropScoreValue = 0;
 
+  /**
+   * **本次投放**已經合成過幾次。這是連勝中斷的**唯一**判準：`drop()` 會先看這個值，
+   * 只有「上一顆什麼都沒合成」才把 `combo` 歸零。
+   * How many merges **this drop** has made. This is the sole signal for breaking a streak:
+   * `drop()` reads it and resets `combo` only when the previous drop merged nothing.
+   *
+   * 必須由 `merge()` 加、由 `drop()` 讀再清 —— 順序反了會把「這顆自己的合成」也算進
+   * 「上一顆的成績」，等於自己中斷自己。
+   * `merge()` must increment it and `drop()` must read-then-clear it; clearing first would let
+   * a drop count its own merges as the previous drop's record and break itself.
+   */
+  private dropMergeCountValue = 0;
+
   constructor(options: GameSessionOptions) {
     this.config = options.config;
     this.levels = options.config.levels.levels;
@@ -387,11 +400,27 @@ export class GameSession {
     this.addEntry({ body, level, bornAtMs: this.elapsedMs });
 
     /*
-     * 開新一批：連擊歸零、本次投放的計分歸零。
-     * 順序很重要 —— 先記時間再歸零，才不會把「這一顆」算進上一批的連擊。
+     * 連勝（streak）：**上一顆什麼都沒合成才中斷**。
+     *
+     * 使用者定案「在下一次投放前，若果這次投放沒有做成 combo，則重新由 0 開始」——
+     * 所以這裡的判準是「上一顆有沒有合成」，不是「有沒有投放」。上一顆有合成，串長就
+     * 跨投放累積下去，倍率繼續往上爬。
+     *
+     * 順序：先讀 `dropMergeCountValue`（上一顆的成績），再歸零（這顆從空白開始）。
+     * 反過來寫會讓這顆自己中斷自己。
+     *
+     * Streak: **the chain breaks only when the previous drop merged nothing.**
+     *
+     * The user's rule is "before the next drop, if this drop made no combo, restart from 0" —
+     * so the signal is "did the previous drop merge", not "was a drop made". A previous drop
+     * with merges carries the chain across drops and the multiplier keeps climbing.
+     *
+     * Order: read `dropMergeCountValue` (the previous drop's record) *before* zeroing it (this
+     * drop starts blank). Clearing first would let a drop break its own streak.
      */
     this.lastDropAtMs = this.elapsedMs;
-    this.combo.reset();
+    if (this.dropMergeCountValue === 0) this.combo.reset();
+    this.dropMergeCountValue = 0;
     this.dropScoreValue = 0;
 
     return true;
@@ -600,6 +629,12 @@ export class GameSession {
     /* 本次投放的計分；倍率曲線全在 `game/combo.ts`，這裡只累加。 */
     this.dropScoreValue += gain;
 
+    /*
+     * 連勝中斷判準：數「這顆有沒有合成」。`drop()` 讀這個值決定是否歸零。
+     * The streak-break signal: record that *this* drop merged, which `drop()` reads.
+     */
+    this.dropMergeCountValue += 1;
+
     this.registerUnlock(level.id);
   }
 
@@ -719,6 +754,7 @@ export class GameSession {
      */
     this.lastDropAtMs = Number.NEGATIVE_INFINITY;
     this.dropScoreValue = 0;
+    this.dropMergeCountValue = 0;
     this.spawnQueue.reset();
     this.aimX = this.clampAimX(this.aimX, this.pendingLevel().radius);
   }
@@ -779,8 +815,14 @@ export class GameSession {
   }
 
   /**
-   * **本次投放**已經合成過幾次。投放時歸零。
-   * How many merges **this drop** has produced; zeroed on each drop.
+   * 這串連勝累積到第幾次合成。
+   * How many merges this winning streak has accumulated.
+   *
+   * **跨投放累積**（使用者定案）：只有「上一顆什麼都沒合成」才歸零，所以這個數字會隨連勝
+   * 一直往上爬。它是 COMBO 卡中間那個大數字。
+   * **Accumulates across drops** (the user's decision): it only resets when the previous drop
+   * merged nothing, so the number climbs for as long as the streak lives. This is the big
+   * number in the middle of the COMBO card.
    */
   get comboCount(): number {
     return this.combo.count;
@@ -791,20 +833,24 @@ export class GameSession {
    * The total score **this drop** has earned, each merge multiplied by the curve value at its
    * own chain length.
    *
-   * 這是 COMBO 卡第二行的 `+ 18`：使用者定案「展示本次投放合共賺了多少分」。
-   * This is the COMBO card's `+ 18` on the second line — the user's "how much this drop earned
-   * in total".
+   * 這是 COMBO 卡第二行的 `+ 18`：使用者定案「展示本次投放合共賺了多少分」。注意它
+   * **仍是單顆的成績**，只是倍率的來源（串長）跨顆累積 —— 分母不變、分子變長。
+   * This is the COMBO card's `+ 18` on the second line — still **one drop's** earnings, but the
+   * multiplier feeding it (the streak length) now carries across drops.
    */
   get dropScore(): number {
     return Math.round(this.dropScoreValue);
   }
 
   /**
-   * 本次投放最後一次合成所用的倍率；尚未合成為 `1`。
-   * The multiplier the latest merge in this drop used; `1` before any merge.
+   * 這串連勝累積到目前為止所用的倍率；尚未合成過為 `1`。
+   * The multiplier this streak has reached; `1` before any merge.
    *
-   * COMBO 卡第二行的 `(×1.3)` 顯示的就是它。
-   * Exactly what the card's `(×1.3)` renders.
+   * COMBO 卡第二行的 `(×1.3)` 顯示的就是它。因為串長跨投放累積，這個倍率會**一路沿著曲線
+   * 往上爬**，直到某顆完全沒合成才被重設回 ×1.0。
+   * Exactly what the card's `(×1.3)` renders. Because the chain accumulates across drops, this
+   * multiplier climbs the curve for as long as the streak survives and only drops back to ×1.0
+   * when a drop merges nothing at all.
    */
   get comboMultiplier(): number {
     return this.combo.snapshot().multiplier;

@@ -18,6 +18,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { GameSession, type UnlockSource } from '../src/game/session';
+import { comboMultiplier } from '../src/game/combo';
 import { computeContainerBounds } from '../src/game/containerBox';
 import { WALL_THICKNESS } from '../src/core/constants';
 import { createRng } from '../src/core/rng';
@@ -639,13 +640,76 @@ describe('GameSession — 合成與計分 / merging and scoring', () => {
     expect(session.dropScore).toBe(session.score);
   });
 
-  it('keeps a chain alive until the next drop, not until a timer lapses', () => {
+  it('carries a chain across drops while every drop merges', () => {
     /*
-     * 舊設計用 1 秒時間窗口，靜置就會斷連。現在窗口是「本次投放」，所以靜置多久都一樣 ——
-     * 只有 `drop()` 會歸零。這條就是那個語意轉換的守門測試。
-     * The old design used a 1-second window, so idling broke the chain. The window is now the
-     * drop itself, so idling changes nothing; only `drop()` zeroes it. This test guards that
-     * semantic change.
+     * 連勝語意（使用者定案）：串長**跨投放累積**。上次投放有合成，下次投放就不歸零 ——
+     * 這是與舊語意（「每次投放歸零」）最直接的一條分野，也是這份測試存在的理由。
+     *
+     * 註：這裡的 `comboCount` 是「這串連勝累積到第幾次合成」，不是「本次投放合成了幾次」。
+     * Streak semantics (the user's decision): the chain **carries across drops**. As long as the
+     * previous drop merged something, the next drop does not zero it — the sharpest possible
+     * contrast with the old "every drop zeroes it".
+     *
+     * Note `comboCount` is now "how many merges this streak has accumulated", not "how many this
+     * drop merged".
+     */
+    const session = makeCustom(SOLO_LV1, { dropCooldownMs: 0 });
+
+    /* 先備兩顆 Lv1 在同一格 —— 它們各自靜止，尚未合成。 */
+    dropAndSettle(session, 250, 90);
+    dropAndSettle(session, 250, 90);
+
+    expect(session.bodies.map((body) => body.levelId)).toEqual([1, 1]);
+    expect(session.mergedCount).toBe(0);
+    expect(session.comboCount).toBe(0);
+
+    /* 第三顆：把備好的兩顆合成成 Lv2，串長開到 1。 */
+    session.drop();
+    runFrames(session, 90);
+
+    expect(session.mergedCount).toBe(1);
+    expect(session.comboCount).toBe(1);
+
+    /*
+     * 第四顆：投放**當下**還沒合成，但因為上一顆有合成，串長原封不動保留下來 ——
+     * `drop()` 在歸零前先讀了「上一顆的合成次數」。這是與舊語意（「每次投放歸零」）
+     * 最尖銳的一條分野，也是這份測試存在的理由。
+     *
+     * 註：`comboCount` 現在是「這串連勝累積到第幾次合成」，不是「本次投放合成了幾次」。
+     * The fourth drop: at the instant of dropping it has not merged yet, but the previous one
+     * did, so the chain survives untouched — `drop()` reads the previous drop's merge count
+     * before zeroing. This is the sharpest contrast with the old "every drop zeroes it".
+     *
+     * Note `comboCount` is now "how many merges this streak has accumulated", not "how many this
+     * drop merged".
+     */
+    session.drop();
+    expect(session.comboCount).toBe(1);
+    /* 本次投放的分數從 0 重新起算 —— 那是單顆的成績，與串長是兩件事。 */
+    expect(session.dropScore).toBe(0);
+
+    /* 這一顆也合成 → 串長**跨投放**累積到 2。 */
+    const before = session.mergedCount;
+    for (let frame = 0; frame < 400 && session.mergedCount === before; frame += 1) {
+      session.step(1000 / 60);
+    }
+
+    expect(session.mergedCount).toBe(2);
+    expect(session.comboCount).toBe(2);
+    /* 倍率沿著曲線爬升，不是每次都重算同一格。 */
+    expect(session.comboMultiplier).toBeGreaterThan(comboMultiplier(1));
+  });
+
+  it('breaks the chain only when a drop merges nothing at all', () => {
+    /*
+     * 中斷條件：**下一次投放前，若果這次投放沒有做成 combo，則重新由 0 開始**。
+     *
+     * 這顆是 `mergeResult: null` 的等級，永遠不會合成，所以它一定會中斷連勝。
+     * 這個「零合成」測試與上面「跨投放累積」測試是一對：兩邊都成立，規則才算寫對了。
+     * The break rule: "before the next drop, if that drop made no combo, restart from 0".
+     *
+     * This level has `mergeResult: null`, so it can never merge and must break the streak. It is
+     * the mirror image of the carry-across test above: both halves must hold.
      */
     const session = makeCustom(SOLO_LV1);
 
@@ -659,14 +723,23 @@ describe('GameSession — 合成與計分 / merging and scoring', () => {
       merged = session.mergedCount > 0;
     }
     expect(merged).toBe(true);
+    const before = session.comboCount;
+    expect(before).toBeGreaterThan(0);
 
-    /* 靜置遠超過任何合理窗口。 */
-    runFrames(session, 180);
-    expect(session.comboCount).toBe(1);
+    /* 讓這一顆完全不會碰到任何東西：移到容器最左邊的角落，且不與任何同級相鄰。 */
+    session.setAim(60);
+    session.drop();
 
-    /* 下一次投放才歸零。 */
+    /* 確認這顆真的什麼都沒合成 —— 前提成立，斷連才是規則而不是物理。 */
+    const mergesBefore = session.mergedCount;
+    runFrames(session, 300);
+    expect(session.mergedCount).toBe(mergesBefore);
+
+    /* 下一顆投放時讀到「上一顆零合成」→ 歸零。 */
+    session.setAim(60);
     session.drop();
     expect(session.comboCount).toBe(0);
+    expect(session.comboMultiplier).toBe(1);
     expect(session.dropScore).toBe(0);
   });
 

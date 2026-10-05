@@ -2,19 +2,24 @@
  * 連擊（Combo）追蹤。
  * Combo tracking.
  *
- * **計數語意（使用者定案）**：一串連擊 ＝ **一次投放**。窗口不是時間，而是「本次投放到
- * 下次投放之間」—— 因此 `reset()` 只在投放時被呼叫，不會因為時間過去而歸零。
- * 一次投放裡合成了幾次，就是 `count`；每一次合成各自拿「當下串長」對應的倍率。
- * **Counting semantics** (the user's decision): one chain *is* one drop. The window is not a
- * duration but "this drop until the next drop", so `reset()` is driven by `drop()` and time
- * alone never ends a chain. `count` is how many merges happened inside that drop, and each
- * merge takes the multiplier of the chain length it lands on.
+ * **計數語意（使用者定案）**：一串連擊 ＝ **連續成功的投放**。窗口不是時間，而是「這次
+ * 投放有沒有合成」—— 在下一次投放前，**若果上一顆什麼都沒合成，才重新由 0 開始**。
+ * 一旦某顆有合成過，串長就跨投放累積下去；倍率按「累積到第幾次」計算。
+ * **Counting semantics** (the user's decision): one chain is a **run of successful drops**.
+ * The window is not a duration but "did this drop merge anything" — before the next drop, the
+ * counter returns to 0 **only if the previous drop merged nothing**. Once a drop merges
+ * something the chain carries across drops, and the multiplier follows the accumulated count.
  *
- * 為什麼**不是**時間窗口：舊版用 `comboWindowMs`（1 秒），但投放本身已經有 1 秒間隔，
- * 兩個時間概念會互相打架 —— 「同一批」究柢是「同一次投放」，用投放當界線比用毫秒誠實。
- * Why **not** a time window: the older version used `comboWindowMs` (1 s), but drops are
- * already spaced 1 s apart, so the two notions fight each other. "The same batch" really means
- * "the same drop", and a drop boundary is more honest than a millisecond count.
+ * 這是「連勝」而不是「單次投放」：`drop()` 會先問「上一顆有沒有合成」，有的話保留串長。
+ * That is a streak, not a per-drop counter: `drop()` first asks "did the previous drop merge
+ * anything?" and keeps the chain when it did.
+ *
+ * 為什麼**不是**時間窗口：舊版用 `comboWindowMs`（1 秒），但投放本身已經有冷卻間隔，
+ * 兩個時間概念會互相打架。改成「有沒有合成」這個事件判準之後，時間完全退出這條規則，
+ * 連擊只由物理結果決定。
+ * Why **not** a time window: the older version used `comboWindowMs`, but drops are already
+ * spaced by a cooldown so the two notions fought each other. Keying on "did it merge" removes
+ * time from the rule entirely — physics alone decides the chain.
  *
  * 這個模組不碰物理、不碰分數，所以「第幾次合成拿幾倍」可以在單元測試裡逐條釘住。
  * This module touches neither physics nor score, so "which merge gets which multiplier" can be
@@ -25,29 +30,31 @@
  * Combo 倍率曲線。
  * The combo-multiplier curve.
  *
- * 使用者指定：`y = min(e^(0.05x) / 10, 9) + 1`，`x` 是當下的串長。原本的階梯
- * （第 1 次 ×1、第 2 次 ×2…）換成這條平滑曲線：起點貼著 ×1.1，之後緩慢上升，
- * `x = 90` 才碰到 `×10.0` 的天花板；`×1.3` 剛好落在 `x = 22`。
- * The user's curve: `y = min(e^(0.05x) / 10, 9) + 1` with `x` the current chain length. It
- * replaces the ×n ladder with a smooth climb that starts just above ×1.1 and only reaches the
- * ×10.0 ceiling at `x = 90`; ×1.3 lands exactly at `x = 22`.
+ * 使用者指定：`y = min(e^(0.25x) / 10, 9) + 1`，`x` 是當下的串長。原本的階梯
+ * （第 1 次 ×1、第 2 次 ×2…）換成這條平滑曲線。係數由 `0.05` 調到 `0.25` 之後上升快得多：
+ * `x = 4` 就剛好到 `×1.3`（`e^1 / 10 = 0.2718`），`x = 18` 碰到 `×10.0` 的天花板。
+ * The user's curve: `y = min(e^(0.25x) / 10, 9) + 1` with `x` the current chain length. The
+ * coefficient moved from `0.05` to `0.25`, so the climb is far steeper: ×1.3 lands exactly at
+ * `x = 4` (`e^1 / 10 = 0.2718`) and the ×10.0 ceiling is reached at `x = 18`.
  *
- * 註：使用者訊息裡寫的是 `max(...)`，但 `max(e^(0.05x)/10, 9) + 1` 在 `x ≤ 90` 時**恆等於
- * ×10**（e 項要 `x = 90` 才追上 9），與示例 `×1.3` 矛盾，也與「緩慢上升」的原設計相反；
- * 故按文檔原本的 `min` 結構實作。若真的要 `max`，把 `Math.min` 換成 `Math.max` 即可。
- * Note: the user's message wrote `max(...)`, but `max(e^(0.05x)/10, 9) + 1` is a flat ×10 for
- * every `x ≤ 90` (the exponential only overtakes 9 at x=90), which contradicts both the ×1.3
- * example and the original "climbs slowly" design; it is implemented as the documented `min`
- * form. If `max` really is wanted, swap `Math.min` for `Math.max`.
+ * 註：使用者訊息裡寫的是 `max(...)`，但 `max(e^(0.25x)/10, 9) + 1` 在 `x ≤ 18` 時**恆等於
+ * ×10**（e 項要 `x = 18` 才追上 9），與他舉的示例「4 / + 18 (×1.3)」直接矛盾 ——
+ * `x = 4` 時 `max` 會顯示 ×10 而不是 ×1.3。故按文檔原本的 `min` 結構實作。若真的要 `max`，
+ * 把 `Math.min` 換成 `Math.max` 即可。
+ * Note: the user's message wrote `max(...)`, but `max(e^(0.25x)/10, 9) + 1` is a flat ×10 for
+ * every `x ≤ 18` (the exponential only overtakes 9 at x=18), which contradicts his own
+ * example "4 / + 18 (×1.3)" — at `x = 4`, `max` would read ×10, not ×1.3. It is implemented
+ * as the documented `min` form. If `max` really is wanted, swap `Math.min` for `Math.max`.
  *
- * `count = 0`（沒有連擊）時直接回傳 `×1.0`，而不是公式算出的 `×1.1`：靜止狀態顯示 1.1
- * 會讓玩家以為一直有加成。這是一處刻意偏離公式的地方，只影響「沒有連擊」那一格。
- * At `count = 0` this returns ×1.0 rather than the formula's ×1.1, because an idle card
- * reading 1.1 looks like a permanent bonus. Deliberate, and it only affects the no-combo case.
+ * `count = 0`（沒有連擊）時直接回傳 `×1.0`，而不是公式算出的 `×1.0`（`e^0 = 1`，
+ * `1/10 + 1 = 1.1`）：靜止狀態顯示 1.1 會讓玩家以為一直有加成。這是一處刻意偏離公式
+ * 的地方，只影響「沒有連擊」那一格。
+ * At `count = 0` this returns ×1.0 rather than the formula's ×1.1, because an idle card reading
+ * 1.1 looks like a permanent bonus. Deliberate, and it only affects the no-combo case.
  */
 export const COMBO_CURVE = {
   /** 指數係數；越小上升越慢。 */
-  coefficient: 0.05,
+  coefficient: 0.25,
   /** 除數，把指數拉回 1 附近。 */
   divisor: 10,
   /** 指數項的上限。 */
@@ -67,7 +74,7 @@ export function comboMultiplier(count: number): number {
 
 /** 某一刻的連擊狀態快照。 */
 export interface ComboSnapshot {
-  /** 本次投放已經合成過幾次；尚未合成為 0。 */
+  /** 這串連勝累積到第幾次合成；尚未合成為 0。 */
   count: number;
   /** 目前串長對應的倍率（＝最後一次合成所用的）；尚未合成為 `1`。 */
   multiplier: number;
@@ -77,16 +84,15 @@ export interface ComboSnapshot {
  * 連擊計數器。
  * The combo counter.
  *
- * 只認識一個事件：**這一步發生了一場合併**。因為窗口就是「本次投放」，所以不需要時鐘，
- * 也不需要「同一批」的判準 —— 同一物理步的多場合併自然就落在同一次投放裡，各自遞增。
- * It knows one event only: **a merge happened on this step**. Because the window *is* the
- * drop, no clock and no "same batch" test is needed — several merges in one physics step fall
- * inside the same drop and each climbs the curve.
+ * 只認識兩個事件：**這一步發生了一場合併**（`record`）與**上一顆什麼都沒合成**
+ * （`reset`）。因為窗口是「有沒有合成」這個事件，所以不需要時鐘。
+ * It knows two events only: **a merge happened on this step** (`record`) and **the previous
+ * drop merged nothing** (`reset`). Because the window is that event, no clock is needed.
  */
 export class ComboTracker {
   private chain = 0;
 
-  /** 本次投放目前合成過幾次。 */
+  /** 這串連勝累積到第幾次。 */
   get count(): number {
     return this.chain;
   }
@@ -121,8 +127,8 @@ export class ComboTracker {
   }
 
   /**
-   * 歸零。**由投放驅動**，不是時間 —— 這是「窗口＝本次投放」的落點。
-   * Reset. Driven by **dropping**, not by time — the point of "the window is the drop".
+   * 歸零。**只由「上一顆零合成」驅動**，不是時間、也不是每次投放。
+   * Reset. Driven **only by "the previous drop merged nothing"** — not by time, not by dropping.
    */
   reset(): void {
     this.chain = 0;
