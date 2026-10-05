@@ -81,6 +81,9 @@
   position: absolute;
   top: 73px;
   left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   margin: 0;
   color: var(--color-fg);
@@ -88,7 +91,6 @@
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   line-height: 85px;
-  text-align: center;
 }
 
 /*
@@ -201,18 +203,33 @@
  * The second line is "this drop's total (×multiplier)" and at worst reads `+ 256 (×10.0)`.
  * 32px cannot fit that inside the card's 255px, so it uses 22px while keeping
  * `tabular-nums` so the digits do not jitter.
+ *
+ * 置中方式用 **flex + `justify-content: center`** 而不是 `text-align: center`。
+ * 兩者在一般情況下等價，但 `text-align` 會被任何後來加上的 `display` 覆蓋吃掉，而且
+ * 一旦字串放不下（例如 `+ 12345 (×10.0)`），`text-align: center` 會讓溢出那側對齊失效、
+ * 文字看起來偏左；flex 居中加上 `nowrap` 則是明確的「整行以卡片中心為軸」，行為不會被
+ * 內容長度影響。
+ * Centring uses **flex + `justify-content: center`** rather than `text-align: center`. They are
+ * equivalent in the common case, but `text-align` gets silently dropped by any later `display`
+ * change, and once the string no longer fits (e.g. `+ 12345 (×10.0)`) `text-align: center`
+ * degrades to edge-aligned on the overflowing side and the line reads as left-biased. Flex
+ * centring plus `nowrap` is an explicit "this whole line is centred on the card", independent
+ * of content width.
  */
 .card__detail {
   position: absolute;
   top: 121px;
   left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   margin: 0;
   color: var(--color-fg-muted);
   font-size: 22px;
   line-height: 32px;
   font-variant-numeric: tabular-nums;
-  text-align: center;
+  white-space: nowrap;
 }
 
 /* ── ② 工具列 / Toolbar（`1408:2064`，450×96）────────────────────────── */
