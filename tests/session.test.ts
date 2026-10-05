@@ -17,11 +17,11 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { GameSession } from '../src/game/session';
+import { GameSession, type UnlockSource } from '../src/game/session';
 import { computeContainerBounds } from '../src/game/containerBox';
 import { WALL_THICKNESS } from '../src/core/constants';
 import { createRng } from '../src/core/rng';
-import type { AllConfig, GameSettings, LevelDef } from '../src/core/types';
+import type { AllConfig, ContainerConfig, GameSettings, LevelDef } from '../src/core/types';
 
 function level(id: number, radius: number, spawnWeight: number, droppable = true): LevelDef {
   return {
@@ -50,6 +50,8 @@ const CONFIG: AllConfig = {
       spawnBlockEnabled: false,
       overflowPenalty: false,
       mergeCooldownMs: 100,
+      overflowGraceMs: 3000,
+      comboWindowMs: 1000,
     },
     levels: [level(1, 13.5, 70), level(2, 17.3, 25), level(3, 22.1, 5), level(4, 28.3, 0, false)],
   },
@@ -64,6 +66,8 @@ const CONFIG: AllConfig = {
     fill: 'rgba(255, 255, 255, 0.20)',
     topOffset: 80,
     spawnGap: 8,
+    dropAboveRim: 40,
+    overflowAboveRim: 30,
     aspectMin: 0.62,
     aspectMax: 1.45,
   },
@@ -89,6 +93,65 @@ function makeSession(virtualWidth = 500, settings: Partial<GameSettings> = {}): 
   });
 }
 
+/** 只有 Lv1 可掉落，其餘等級只作為合成目標存在。 */
+const SOLO_LV1: LevelDef[] = [level(1, 13.5, 70), level(2, 17.3, 0, false), level(3, 22.1, 0, false)];
+
+/** 三級都可掉落；搭配解鎖閘門時，開局只有 Lv1 進池。 */
+const ALL_DROPPABLE: LevelDef[] = [level(1, 13.5, 10), level(2, 17.3, 10), level(3, 22.1, 10)];
+
+/**
+ * 單一等級、**永不合成**。用來疊一座純粹的塔：合成會把堆疊吃掉，讓「疊到溢位」測不穩。
+ * A single level that never merges, so a plain tower can be stacked — merging would eat the
+ * pile and make "stack until it overflows" flaky.
+ */
+const NO_MERGE: LevelDef[] = [{ ...level(1, 13.5, 70), mergeResult: null }];
+
+/** 自訂等級表 ＋ settings ＋ 解鎖閘門的 session。 */
+function makeCustom(
+  levels: LevelDef[],
+  settings: Partial<GameSettings> = {},
+  unlocks?: UnlockSource,
+): GameSession {
+  return new GameSession({
+    config: {
+      ...CONFIG,
+      levels: { ...CONFIG.levels, settings: { ...CONFIG.levels.settings, ...settings }, levels },
+    },
+    rng: createRng(20261004),
+    virtualWidth: 500,
+    unlocks,
+  });
+}
+
+/** 最小的解鎖閘門；`unlocked` 是活的集合，解鎖後內容會變。 */
+function makeGate(initial: readonly number[]): UnlockSource {
+  const ids = new Set<number>(initial);
+
+  return {
+    get unlocked(): ReadonlySet<number> {
+      return ids;
+    },
+    has: (id: number): boolean => ids.has(id),
+    unlock: (id: number): boolean => {
+      if (ids.has(id)) return false;
+      ids.add(id);
+      return true;
+    },
+  };
+}
+
+/** 推進固定步數。 */
+function runFrames(session: GameSession, frames: number): void {
+  for (let frame = 0; frame < frames; frame += 1) session.step(1000 / 60);
+}
+
+/** 在 `aimX` 投放一顆並讓它落定。 */
+function dropAndSettle(session: GameSession, aimX: number, frames = 90): void {
+  session.setAim(aimX);
+  session.drop();
+  runFrames(session, frames);
+}
+
 describe('GameSession — 幾何與空腔 / geometry and cavity', () => {
   it('insets the cavity inside the container frame', () => {
     const session = makeSession();
@@ -105,9 +168,19 @@ describe('GameSession — 幾何與空腔 / geometry and cavity', () => {
     const frame = session.containerGeometry.frame;
 
     expect(frame.y).toBe(CONFIG.container.topOffset);
-    /* 投放高度＝頂緣上方一個 spawnGap，所以一定小於 frame.y。 */
-    expect(session.spawnYValue).toBe(frame.y - CONFIG.container.spawnGap);
+    /* 投放高度＝頂緣上方一個 dropAboveRim，所以一定小於 frame.y。 */
+    expect(session.spawnYValue).toBe(frame.y - CONFIG.container.dropAboveRim);
     expect(session.spawnYValue).toBeLessThan(frame.y);
+  });
+
+  it('puts the overflow line between the drop point and the rim', () => {
+    const session = makeSession();
+    const frame = session.containerGeometry.frame;
+
+    /* 線在頂緣上方；投放點必須比它更高，否則每一顆一出現就越線。 */
+    expect(session.overflowLineY).toBe(frame.y - CONFIG.container.overflowAboveRim);
+    expect(session.overflowLineY).toBeLessThan(frame.y);
+    expect(session.spawnYValue).toBeLessThan(session.overflowLineY);
   });
 
   it('recomputes geometry and cavity on resize', () => {
@@ -350,12 +423,334 @@ describe('GameSession — 旋轉交由物理 / rotation follows the engine', () 
   });
 });
 
-describe('GameSession — 尚未實作的部分 / not yet implemented', () => {
-  it('reports zero score until M4 wires merging up', () => {
-    const session = makeSession();
+describe('GameSession — 合成與計分 / merging and scoring', () => {
+  it('merges two same-level dumplings into the next level and scores it', () => {
+    const session = makeCustom(SOLO_LV1);
+
+    /* 先讓第一顆落定，再把第二顆丟在正上方 —— 比同時丟兩顆更確定會碰上。 */
+    dropAndSettle(session, 250);
+    dropAndSettle(session, 250, 240);
+
+    expect(session.mergedCount).toBe(1);
+    expect(session.bodies.map((body) => body.levelId)).toEqual([2]);
+    /* Lv2 的 score 是 4，乘上第一次連擊的倍率後取整至少 4。 */
+    expect(session.score).toBeGreaterThanOrEqual(4);
+  });
+
+  it('leaves a lone drop unmerged and unscored', () => {
+    const session = makeCustom(SOLO_LV1);
+
+    dropAndSettle(session, 250, 240);
+
+    expect(session.bodies.map((body) => body.levelId)).toEqual([1]);
+    expect(session.mergedCount).toBe(0);
+    expect(session.score).toBe(0);
+  });
+
+  it('honours the merge cooldown so a fresh body never merges instantly', () => {
+    /* 冷卻設成遠大於這一局的長度 → 兩顆永遠碰不出合成。 */
+    const session = makeCustom(SOLO_LV1, { mergeCooldownMs: 1_000_000 });
+
+    dropAndSettle(session, 250);
+    dropAndSettle(session, 250, 240);
+
+    expect(session.mergedCount).toBe(0);
+    expect(session.bodies).toHaveLength(2);
+  });
+
+  it('pops the merged dumpling and settles it back to its normal size', () => {
+    const session = makeCustom(SOLO_LV1);
+
+    dropAndSettle(session, 250);
+    session.setAim(250);
     session.drop();
 
+    let merged = false;
+    for (let frame = 0; frame < 300 && !merged; frame += 1) {
+      session.step(1000 / 60);
+      merged = session.mergedCount > 0;
+    }
+
+    expect(merged).toBe(true);
+    const popped = session.bodies[0];
+    expect(popped?.scale ?? 1).toBeGreaterThan(1);
+
+    /* 動畫（180ms）跑完後縮放回到 1。 */
+    runFrames(session, 60);
+    expect(session.bodies[0]?.scale).toBe(1);
+  });
+
+  it('builds a combo when merges land inside the window', () => {
+    const session = makeCustom(SOLO_LV1);
+
+    dropAndSettle(session, 250);
+    session.setAim(250);
+    session.drop();
+
+    /* 逐幀推進到合成發生的那一刻，這樣才讀得到「窗口內」的連擊狀態。 */
+    let merged = false;
+    for (let frame = 0; frame < 300 && !merged; frame += 1) {
+      session.step(1000 / 60);
+      merged = session.mergedCount > 0;
+    }
+
+    expect(merged).toBe(true);
+    expect(session.comboCount).toBe(1);
+    expect(session.comboMultiplier).toBeGreaterThan(1);
+
+    /* 靜置超過窗口（1 秒）後連擊歸零。 */
+    runFrames(session, 90);
+    expect(session.comboCount).toBe(0);
+    expect(session.comboMultiplier).toBe(1);
+  });
+});
+
+describe('GameSession — 溢位與結束 / overflow and game over', () => {
+  /**
+   * 溢位測試專用的房間：可以覆寫容器參數，而且等級表**不會合成**，堆疊才穩定。
+   * An overflow-only room: container overridable, and a non-merging level table so the pile
+   * stays put.
+   */
+  function makeOverflowRoom(
+    container: Partial<ContainerConfig> = {},
+    settings: Partial<GameSettings> = {},
+  ): GameSession {
+    return new GameSession({
+      config: {
+        ...CONFIG,
+        levels: {
+          ...CONFIG.levels,
+          levels: NO_MERGE,
+          settings: { ...CONFIG.levels.settings, ...settings },
+        },
+        container: { ...CONFIG.container, ...container },
+      },
+      rng: createRng(20261004),
+      virtualWidth: 500,
+    });
+  }
+
+  it('does not start the countdown for a dumpling that is still in flight', () => {
+    /*
+     * 回歸測試：投放點在溢位線**上方**（dropAboveRim 40 > overflowAboveRim 30），所以每顆
+     * 剛生成的方團團上緣都在線之上。若把它算進去，`overflowGraceMs: 0` 會在第一幀就結束
+     * 這一局 —— 而容器其實還是空的。
+     * Regression: the drop point is **above** the overflow line (dropAboveRim 40 >
+     * overflowAboveRim 30), so every fresh dumpling starts above it. Counting it would end the
+     * run on frame one with `overflowGraceMs: 0` — while the container is still empty.
+     */
+    const session = makeOverflowRoom({}, { overflowGraceMs: 0 });
+
+    session.drop();
+
+    /* 整段下墜都要維持「沒越線」；落地後停在線下，也不該越線。 */
+    for (let frame = 0; frame < 200; frame += 1) {
+      session.step(1000 / 60);
+      expect(session.isOver).toBe(false);
+      expect(session.overflowProgress).toBe(0);
+    }
+
+    expect(session.dropCount).toBe(1);
+  });
+
+  it('does not count a lone dumpling as overflow, however long it sits', () => {
+    /*
+     * 使用者定案的核心（本次改動的重點）：「從頂部跌下的不應該觸發警戒，直至觸碰到其他方團團」。
+     * 一顆孤零零的方團團落在空槽底，永遠碰不到別的顆粒，所以就算計時器為 0 也**不該**結束
+     * 這一局。容器刻意做得極淺（`topOffset` 很大），讓「上緣越線」這個幾何條件成立 —— 若判定
+     * 還依賴幾何，這一顆立刻就會被判出局；只有「必須接觸」才能讓它安然無事。
+     * The core of the user's rule (the point of this change): a falling dumpling must not raise
+     * the warning until it touches another dumpling. A lone dumpling resting on an empty floor
+     * never touches anything, so even with a zero grace timer the run must **not** end. The
+     * container is deliberately made very shallow (a large `topOffset`) so the geometric
+     * "top edge crosses the line" condition is already satisfied — if the test still leaned on
+     * geometry this dumpling would end the run at once; only "must touch" keeps it alive.
+     */
+    const session = makeOverflowRoom({ topOffset: 980, overflowAboveRim: 0 }, { overflowGraceMs: 0 });
+
+    /* 濫用第一顆：整個下墜與靜置全程都不該出局。 */
+    session.drop();
+
+    for (let frame = 0; frame < 240; frame += 1) {
+      session.step(1000 / 60);
+      expect(session.isOver).toBe(false);
+    }
+
+    expect(session.dropCount).toBe(1);
+  });
+
+  it('ends the run once a dumpling touches the pile and stays over the line', () => {
+    /*
+     * 對照組：同樣的極淺容器，第二顆落到第一顆身上**發生接觸**，兩者立刻入堆；因為堆疊已越線
+     * 而計時器為 0，這一局隨即結束。
+     * The counterpart: in the same shallow container, the second dumpling lands **on** the first
+     * and they touch, so both become piled; the stack is already over the line and the timer is
+     * zero, so the run ends immediately.
+     */
+    const session = makeOverflowRoom({ topOffset: 980, overflowAboveRim: 0 }, { overflowGraceMs: 0 });
+
+    expect(session.isOver).toBe(false);
+    /* 前設：容器真的極淺，且線就貼在頂緣上。 */
+    expect(session.playArea.height).toBeLessThan(60);
+    expect(session.overflowLineY).toBe(session.containerGeometry.frame.y);
+
+    session.setAim(250);
+    session.drop();
+    runFrames(session, 90);
+
+    /* 第一顆單獨存在時還安全。 */
+    expect(session.isOver).toBe(false);
+
+    session.setAim(250);
+    session.drop();
+    runFrames(session, 90);
+
+    expect(session.isOver).toBe(true);
+  });
+
+  it('ignores drops after the run is over', () => {
+    const session = makeOverflowRoom({ topOffset: 980, overflowAboveRim: 0 }, { overflowGraceMs: 0 });
+
+    /* 先讓兩顆接觸入堆，才會進入結束判定。 */
+    session.setAim(250);
+    session.drop();
+    runFrames(session, 90);
+    session.setAim(250);
+    session.drop();
+    runFrames(session, 90);
+
+    const before = session.dropCount;
+    session.drop();
+
+    expect(session.isOver).toBe(true);
+    expect(session.dropCount).toBe(before);
+  });
+
+  it('clears the board on reset but keeps the unlocks', () => {
+    const gate = makeGate([1]);
+    const session = makeCustom(ALL_DROPPABLE, {}, gate);
+
+    dropAndSettle(session, 250);
+    dropAndSettle(session, 250, 240);
+    const unlockedByMerge = gate.has(2);
+
+    session.reset();
+
+    expect(session.bodies).toHaveLength(0);
     expect(session.score).toBe(0);
     expect(session.mergedCount).toBe(0);
+    expect(session.isOver).toBe(false);
+    /* 解鎖屬 meta-progression，不隨新局重設（D5）。 */
+    expect(unlockedByMerge).toBe(true);
+    expect(gate.has(2)).toBe(true);
+  });
+});
+
+describe('GameSession — 解鎖與生成池 / unlocks and the draw pool', () => {
+  it('only draws levels that are unlocked', () => {
+    const session = makeCustom(ALL_DROPPABLE, {}, makeGate([1]));
+
+    for (let index = 0; index < 30; index += 1) session.drop();
+
+    expect(session.bodies.every((body) => body.levelId === 1)).toBe(true);
+  });
+
+  it('unlocks a level the first time it is merged into, then allows it to drop', () => {
+    const gate = makeGate([1]);
+    const session = makeCustom(ALL_DROPPABLE, {}, gate);
+
+    dropAndSettle(session, 250);
+    dropAndSettle(session, 250, 240);
+
+    expect(gate.has(2)).toBe(true);
+
+    /* 解鎖後 Lv2 進入生成池：連丟一段時間應該看得到它。 */
+    const seen = new Set<number>();
+    for (let index = 0; index < 80; index += 1) {
+      session.drop();
+      seen.add(session.bodies.at(-1)?.levelId ?? 0);
+    }
+
+    expect(seen.has(2)).toBe(true);
+  });
+});
+
+describe('GameSession — 輪廓碰撞體 / outline colliders', () => {
+  /**
+   * 一個明顯凹的輪廓（U 字，相對質心），保證 Matter 會把它分解成多個凸塊 —— 也就是變成
+   * **複合剛體**。這是本測試要壓的東西。
+   * A deliberately concave outline (a U, relative to the centre) so Matter decomposes it into
+   * multiple convex pieces, i.e. a **compound body**. That is what this block pins down.
+   */
+  const U_POLYGON = [
+    { x: -14, y: -14 },
+    { x: -4, y: -14 },
+    { x: -4, y: 4 },
+    { x: 4, y: 4 },
+    { x: 4, y: -14 },
+    { x: 14, y: -14 },
+    { x: 14, y: 14 },
+    { x: -14, y: 14 },
+  ];
+
+  /** 注入輪廓快取的 session；每一級都用同一份凹輪廓。 */
+  function makeOutlineSession(levels: LevelDef[], polygons: readonly { x: number; y: number }[]): GameSession {
+    const silhouettes = new Map<number, { x: number; y: number }[] | null>();
+    for (const lvl of levels) silhouettes.set(lvl.id, [...polygons]);
+
+    return new GameSession({
+      config: { ...CONFIG, levels: { ...CONFIG.levels, levels } },
+      rng: createRng(20261004),
+      virtualWidth: 500,
+      silhouettes,
+    });
+  }
+
+  it('still merges when the collider is a compound (decomposed) body', () => {
+    /*
+     * 回歸測試：輪廓碰撞體是**複合剛體**，碰撞事件帶的是子塊（子塊有各自的 `id`）。若
+     * `collectMerges` 直接以 `pair.bodyA.id` 查 `byBodyId`，所有配對都會 miss —— 合成與入堆
+     * 會**靜默全數失效**，沒有任何錯誤訊息，畫面只是「怎麼都不會合」。
+     * Regression: an outline collider is a **compound body**, so collision events carry child
+     * parts with their own ids. Looking up `pair.bodyA.id` directly would miss every pair —
+     * merging and piling would silently stop working with no error, just "nothing ever merges".
+     */
+    const session = makeOutlineSession(SOLO_LV1, U_POLYGON);
+
+    /* 兩顆丟在同一柱，必然接觸 → 合成。 */
+    dropAndSettle(session, 250);
+    dropAndSettle(session, 250, 240);
+
+    expect(session.mergedCount).toBeGreaterThan(0);
+  });
+
+  it('latches the piled flag when outline bodies touch', () => {
+    /*
+     * 同一件事的另一半：入堆（溢位警戒的前提）也必須靠 `resolveEntry()` 才看得見子塊。
+     * 用**不會合成**的等級表，兩顆才會留在場上，旗標也才讀得到。
+     * The other half of the same thing: piling (the premise of the overflow warning) also
+     * depends on `resolveEntry()` to see child parts. A **non-merging** level table keeps both
+     * bodies on the field so the flag can be read.
+     */
+    const session = makeOutlineSession([{ ...level(1, 13.5, 70), mergeResult: null }], U_POLYGON);
+
+    dropAndSettle(session, 250);
+    dropAndSettle(session, 244, 240);
+
+    const entries = (session as unknown as { entries: { entered: boolean }[] }).entries;
+    expect(entries.some((entry) => entry.entered)).toBe(true);
+  });
+
+  it('falls back to circles when a level has no outline', () => {
+    /* 沒有輪廓的等級（例如素材缺失）必須能玩，只是退回圓形碰撞體。 */
+    const session = makeOutlineSession(SOLO_LV1, U_POLYGON);
+    const silhouettes = (session as unknown as { silhouettes: Map<number, unknown> }).silhouettes;
+    silhouettes.set(1, null);
+
+    dropAndSettle(session, 250);
+    dropAndSettle(session, 250, 240);
+
+    /* 仍然合成得起來，證明退回路徑沒有把遊戲弄壞。 */
+    expect(session.mergedCount).toBeGreaterThan(0);
   });
 });

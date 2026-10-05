@@ -16,11 +16,23 @@
  */
 
 import Matter from 'matter-js';
+import decomp from 'poly-decomp';
 import {
   ENGINE_ENABLE_SLEEPING,
   ENGINE_POSITION_ITERATIONS,
   ENGINE_VELOCITY_ITERATIONS,
 } from './constants';
+
+/*
+ * 把 `poly-decomp` 註冊給 Matter，`Bodies.fromVertices` 才能分解凹多邊形（見
+ * `createPolygonBody`）。沒有這一步，「方形身體 ＋ 突出裝飾」的輪廓會被硬套成凸包，玩家
+ * 會在沒碰到的地方被推開 —— 那正是我們要避免的。註冊是全域且冪等的，放在模組頂層最單純。
+ * Register `poly-decomp` so `Bodies.fromVertices` can decompose concave outlines (see
+ * `createPolygonBody`). Without it a concave outline is forced into its convex hull and the
+ * player gets pushed apart while visibly clear of the body — the exact failure to avoid.
+ * Registration is global and idempotent, so the module top level is the simplest home.
+ */
+Matter.Common.setDecomp(decomp);
 
 export interface PhysicsOptions {
   /** 重力加速度；對應 `levels.json → settings.gravityY`。 */
@@ -31,11 +43,13 @@ export interface PhysicsOptions {
  * 建立圓形剛體。
  * Create a circular rigid body.
  *
- * 碰撞形狀一律是圓（design.md §4.3）：輪廓多為凹多邊形，需凸分解且在細碎頂點上
- * 抖動；圓是 Matter.js 的高效率路徑，而且畫面與物理的微小落差玩家幾乎無感。
- * Collision shapes are always circles: outlines are concave and jitter badly when
- * decomposed, while circles take Matter's fast path and the visual mismatch is
- * imperceptible.
+ * 這是**退回路徑**：輪廓多邊形載入失敗或退化時才用（design.md §4.3 的原始設計）。圓是
+ * Matter.js 的高效率路徑，但方團團的方形身體與裝飾讓它與畫面有落差，因此預設改用
+ * `createPolygonBody()`；圓只保留給「輪廓拿不到」的情況。
+ * This is the **fallback**: used when the outline polygon fails to load or is degenerate.
+ * Circles are Matter's fast path, but the square body and decorations make them visibly
+ * wrong, so `createPolygonBody()` is the default; the circle survives only for the case
+ * where no outline could be derived.
  *
  * @param x 圓心 X（虛擬單位）/ Centre X in virtual units.
  * @param y 圓心 Y（虛擬單位）/ Centre Y in virtual units.
@@ -56,6 +70,75 @@ export function createCircleBody(
     restitution: 0.15,
     ...definition,
   });
+}
+
+/**
+ * 共用的剛體材質參數。
+ * Shared body material defaults.
+ *
+ * 抽出來是為了讓圓形與多邊形**手感一致**：換碰撞形狀不該順便換掉摩擦與彈性，否則調參時
+ * 會分不清是形狀還是材質造成的差異。
+ * Extracted so circles and polygons **feel the same**: swapping the collider shape must not
+ * silently change friction or restitution, or tuning would confound the two.
+ */
+function materialDefaults(
+  definition: Matter.IChamferableBodyDefinition,
+): Matter.IChamferableBodyDefinition {
+  return {
+    /* 稍高的滑動摩擦讓堆疊不會像撞球一樣散開。 */
+    friction: 0.3,
+    frictionStatic: 0.5,
+    frictionAir: 0.005,
+    restitution: 0.15,
+    ...definition,
+  };
+}
+
+/**
+ * 建立**由輪廓多邊形**構成的剛體（光柵化輪廓法的落點）。
+ * Create a rigid body from an **outline polygon** (where rasterised contour tracing lands).
+ *
+ * `Matter.Bodies.fromVertices` 會用 `poly-decomp` 把凹多邊形切成數個凸塊，並把它們綁成
+ * 一個複合剛體 —— 這正是方團團「方形身體 ＋ 突出裝飾」需要的行為。
+ * `Matter.Bodies.fromVertices` uses `poly-decomp` to cut a concave polygon into convex
+ * pieces bound as one compound body — exactly what a square body with protruding
+ * decorations needs.
+ *
+ * @param x 質心 X（虛擬單位）/ Centre-of-mass X in virtual units.
+ * @param y 質心 Y（虛擬單位）/ Centre-of-mass Y in virtual units.
+ * @param polygon 相對質心的輪廓頂點（虛擬單位）/ Outline vertices relative to the centre.
+ * @param definition 覆寫密度、彈性、摩擦等 / Density, restitution, friction overrides.
+ * @returns 成功時回傳剛體；多邊形退化或引擎無法分解時回傳 `null`，呼叫端應退回圓形。
+ */
+export function createPolygonBody(
+  x: number,
+  y: number,
+  polygon: readonly { x: number; y: number }[],
+  definition: Matter.IChamferableBodyDefinition = {},
+): Matter.Body | null {
+  if (polygon.length < 3) return null;
+
+  const vertices = polygon.map((point) => ({ x: point.x, y: point.y }));
+
+  try {
+    const body = Matter.Bodies.fromVertices(x, y, [vertices], materialDefaults(definition), true);
+
+    /*
+     * 判準是**質量**而不是 `parts.length`：凸多邊形分解後只有一個 part（本體）也是合法的
+     * 剛體（實測 `parts.length === 1`、質量正常），而分解失敗才會得到零質量空殼。用
+     * `parts.length` 判斷會把所有正常凸輪廓誤判成失敗，全部退回圓形。
+     * The criterion is **mass**, not `parts.length`: a convex polygon legitimately yields one
+     * part (the body itself) with a normal mass, while only a failed decomposition produces a
+     * zero-mass shell. Testing `parts.length` would reject every valid convex outline and
+     * quietly fall back to circles for all of them.
+     */
+    if (body === undefined || body === null) return null;
+    if (!Number.isFinite(body.mass) || body.mass <= 0) return null;
+
+    return body;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -96,13 +179,14 @@ export function createStaticRect(
  * **left to the engine**: contact torques tumble the dumplings and roll them down slopes,
  * which is what makes a pile settle naturally.
  *
- * 代價要知道：碰撞形狀是**圓**而畫面是**方**。自由旋轉時，方形 sprite 在圓形碰撞體裡
- * 轉動，會讓「畫面與物理不完全一致」變得看得見。要換回舊的直立手感就打開
- * `lockRotation`，那一瞬間所有力矩都失效（慣量無限大），方團團永遠正立。
- * The cost is worth knowing: the collider is a **circle** while the art is a **square**, so
- * free rotation makes that mismatch visible as the square spins inside its circle. Flip
- * `lockRotation` on to get the old always-upright feel back — inertia becomes infinite, so
- * every torque produces zero angular acceleration.
+ * 代價要知道：碰撞體是**輪廓多邊形**而畫面是方形 sprite，自由旋轉時兩者角度一致，所以
+ * 落差反而變小（這正是採用輪廓碰撞框的理由）。要換回舊的直立手感就打開 `lockRotation`，
+ * 那一瞬間所有力矩都失效（慣量無限大），方團團永遠正立。
+ * The cost is worth knowing: the collider is an **outline polygon** while the art is a square
+ * sprite. Free rotation keeps the two at the same angle, so the mismatch is *smaller* than
+ * with a circle — which is why the outline collider was adopted. Flip `lockRotation` on to
+ * get the old always-upright feel back: inertia becomes infinite, so every torque produces
+ * zero angular acceleration.
  */
 export function lockRotation(body: Matter.Body): void {
   Matter.Body.setInertia(body, Number.POSITIVE_INFINITY);

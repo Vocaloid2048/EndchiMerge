@@ -11,7 +11,9 @@
     "lockRotation": false,
     "spawnBlockEnabled": false,
     "overflowPenalty": false,
-    "mergeCooldownMs": 100
+    "mergeCooldownMs": 100,
+    "overflowGraceMs": 3000,
+    "comboWindowMs": 1000
   },
 
   "levels": [

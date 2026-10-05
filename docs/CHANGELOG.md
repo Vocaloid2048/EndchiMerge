@@ -7,10 +7,180 @@
 
 ---
 
+## 未發佈 — `feat-drop-feature`（M4 合成核心 ＋ M6 解鎖與圖鑑 ＋ 輪廓碰撞）
+
+分支關係：`feat-ui-init` → `dev` → `feat-drop-feature`。M5（技力與技能）依使用者指示**跳過**，
+不在本節範圍；M6 不依賴 M5。`feat-drop-feature` 額外收錄兩項玩法修正：
+**溢位入堆改以接觸判定**、**碰撞框由圓形改為光柵化輪廓（凸分解）**。
+
+### 新增 — 合成核心、冷卻與計分
+
+兩顆同級接觸就合成下一級。合成判定拆成**兩段**：碰撞回呼只收集候選對，等這一步的物理
+跑完才由 `flushMerges()` 執行 —— 在碰撞回呼裡新增／移除剛體等於在引擎解算途中改動世界。
+
+- `src/game/merge.ts`：純函式 `mergeResultId(a, b)`。
+- `src/game/session.ts`：`collisionStart` → 收集（`claimed` 集合確保一顆只被用掉一次）
+  → `flushMerges()` → `merge()`；合成體生成在兩顆的質心中點。
+- **物件對冷卻** `mergeCooldownMs`（100ms，`levels.json`）：比對「生成時刻」而不是
+  「上次被誰碰過」，所以同一顆球不論跟誰碰撞，規則都只有一條。
+- 分數 ＝ `score[合成後等級] × 當下倍率`，累加後取整。
+- `tests/merge.test.ts`、`tests/session.test.ts` 的「合成與計分」。
+
+### 新增 — 連擊（Combo）與 HUD
+
+倍率改為**非線性、緩慢上升**，`n = 60` 時到達天花板 ×10.0：
+
+```
+comboMultiplier(n) = min( e^(0.075 × n) / 10, 9 ) + 1
+```
+
+- `src/game/combo.ts`：`COMBO_CURVE` ＋ `comboMultiplier()` ＋ `ComboTracker`。
+  `snapshotAt()` **無副作用**，所以 HUD 可以每幀查詢而不影響玩法。
+- **「同一批」的判準改為「時間戳相同」。** 舊草案寫「相隔 < 0.1s 視為同一批、不重複計數」，
+  但同一份草案又說連鎖反應**應該**堆出高倍率 —— 兩句互相矛盾：連鎖反應本來就落在極短間隔
+  內，0.1s 的門檻會把它整串吞掉。同一物理步的多場合併共用同一個時間戳，這才是「同一批」
+  真正要防的東西。為此 `session.step()` **先把時鐘往前推再跑物理**。
+- `n = 0` 回傳 `1.0` 而不是公式算出的 `1.1`：靜止狀態顯示 ×1.1 會讓玩家以為一直有加成。
+  這是唯一一處刻意偏離公式的地方，只影響「沒有連擊」那一格。
+- COMBO 卡顯示串長與倍率，倍率取一位小數（`×3.3`），避免 `×3.3000000000000003`
+  這種浮點尾巴（`src/ui/hud.ts`）。
+
+### 新增 — 彈跳動畫
+
+合成後新生成的那顆從峰值縮回原尺寸：`scale = 1 + (POP_PEAK_SCALE - 1) × (1 - t)²`。
+
+- `src/core/constants.ts`：`POP_ANIMATION_MS`（180ms）與 `POP_PEAK_SCALE`（1.3）（調參入口）。
+- `src/game/session.ts`：`pops` Map ＋ `popScale()`；`RenderBody.scale` 傳到渲染層。
+- `src/render/stage.ts`：`drawBody()` 把彈跳倍率與半徑換算**只在這一處**相乘；佔位圖也吃同一個倍率。
+- `tests/session.test.ts`：合成當步 `scale === 1.3`、播完回到 `1`。
+
+### 新增 — 溢位線、3 秒寬限與結算
+
+容器頂緣往上 `overflowAboveRim`（30）畫一條紅色虛線，線與頂緣之間是淺紅色警戒區；
+投放點在再往上 `dropAboveRim`（40）的位置。越線後連續倒數 `overflowGraceMs`（3000ms），
+逾時結束這一局。
+
+- `src/game/overflow.ts`：`OverflowMonitor`。**連續計時而非累計** —— 方團團正常落下時就會
+  短暫經過線上，累加那些瞬間會誤殺正常局面，所以場上沒有東西越線就立刻歸零。
+- `src/render/stage.ts`：`OVERFLOW_STYLE`。警戒區畫在方團團**之下**（它是背景提示），
+  紅線畫在**之上**（門檻必須隨時看得見）。脈動相位由 `game/loop.ts` 以時間驅動，渲染器不存狀態。
+- `src/ui/gameOver.ts` ＋ `src/styles/game-over.css`：結算覆蓋層（SCORE / MERGED / BEST
+  ＋ `NEW BEST` 徽章 ＋ 再玩一次）。`isOver` 一旦成立就永久為真，所以 `main.ts` 用
+  `shownGameOver` 旗標讓它**每局只彈一次** —— 少了它會每一幀重設焦點、重播新紀錄。
+- 「投放高度」與「溢位線高度」改為相對容器頂緣推導：
+  `spawnYValue = frame.y - dropAboveRim`、`overflowLineY = frame.y - overflowAboveRim`。
+  `container.json` 的 `spawnGap` 只負責瞄準範圍的左右內縮。載入器新增
+  `checkDropClearsOverflow`：`dropAboveRim ≤ overflowAboveRim` 時發出語意警告。
+
+### 修正 — 連續投放會把溢位寬限計時器自己填滿
+
+投放點刻意在溢位線**上方** 10 個單位，所以每顆剛生成的方團團上緣一開始就在線之上，
+要往下落 30 個單位才降到線下 —— 實測約 **14 個物理步（≈233ms）**。**間隔短於 233ms 的
+連續投放**會讓這些穿越首尾相接，計時器一路爬滿 3 秒：以每 100ms 投一顆實測，
+**第 31 顆、模擬時間 3.1 秒**就結束了這一局，而容器裡只有 24 顆散落的方團團，
+堆疊最高點離溢位線還很遠。**規則量到的是「投放」，不是「堆疊」。**
+
+修法是 `Entry.entered`：一顆方團團要先「入堆」，它的越線才被計入。
+「剛投下、下墜中」不算；「已入堆、被後來的堆疊擠到頂緣之上」**要算**（那正是溢出），
+所以旗標只能是單向鎖存，不能寫成「現在低於頂緣」這種即時判斷。
+
+**入堆的定義在 `feat-drop-feature` 上換成了「接觸」。** 第一代用幾何判斷
+（圓心曾經降到容器頂緣以下），但半空掠過頂緣、誰都還沒碰到的方團團也會被判成已入堆 ——
+玩家看到的是「明明還在掉，怎麼就警告了」。現行版本改由 `collisionStart` 觸發：
+一對碰撞中**雙方都是方團團**時，才把兩者的 `entered` 都鎖存為真。
+撞牆、撞地板、撞容器頂緣**一律不計**。
+
+- `src/game/overflow.ts`：`OverflowBody` 新增必要欄位 `entered`。
+- `src/game/session.ts`：`Entry.entered` ＋ `collectMerges()` 內以接觸鎖存。
+- `src/game/session.ts`：新增 `resolveEntry()` —— **輪廓碰撞體是複合剛體**，
+  `collisionStart` 配對帶的是子零件（`body.id` ≠ 母體 id），直接查 `byBodyId` 會全部落空，
+  合成與溢位偵測會一起**靜默失效**。先查 `body.id`，查不到就沿 `body.parent` 再查。
+- `tests/overflow.test.ts`：新增「還在下墜的不算」「整串下墜中的顆粒填不滿計時器」
+  「入堆之後被擠回頂緣之上仍要算」。
+- `tests/session.test.ts`：新增整合層回歸測試（以 `overflowGraceMs: 0`，任何一次誤判都會在
+  第一幀立刻結束該局）。**把 `resolveEntry()` 換回直接的 `byBodyId.get()`，
+  這兩處共 2 條測試會失敗。**
+
+### 改動 — 碰撞框由圓形改為光柵化輪廓
+
+方團團的碰撞體原本一律是圓。實際做起來落差比預期大：本體框 304×304，但
+**外輪廓有 6.5%–24.6% 落在框外**（`訣` Lv9 最誇張），用圓去包會出現「明明沒碰到卻黏住」，
+用圓去切翅膀又會穿模。因此改為**沿 sprite 的 alpha 輪廓建多邊形剛體**。
+
+- `src/render/silhouette.ts`（新）：純幾何、可在 node 測。Moore 鄰域邊界追蹤
+  （8 連通、`step = 2`、`threshold = 8`）＋ **RDP 簡化**（`epsilon = 3`，以顯式堆疊實作
+  而非遞迴）。原始輪廓約 1200–1500 點 → 簡化後 **30–46 個頂點**。附 `isDegenerate()`、
+  `toVirtualPolygon()`、`contourToPolygon()`。
+- `src/render/silhouetteLoader.ts`（新）：瀏覽器端膠水。`extractAlphaMask()` 用
+  `OffscreenCanvas` 讀 alpha；`buildSilhouetteCache()` 逐級以
+  `scale = (2 × radius) / SPRITE_BODY` 產生輪廓，失敗或素材缺失記 `null`。
+- `src/core/physics.ts`：新增 `createPolygonBody()`
+  （`Matter.Bodies.fromVertices(..., true)`）；有效性判準是**質量**
+  （`Number.isFinite(mass) && mass > 0`），**不是** `parts.length` ——
+  凸多邊形分解後本來就只有 1 個 part，用 parts 數量判斷會誤殺。
+  模組頂層註冊 `Matter.Common.setDecomp(decomp)`；**少了這行，`fromVertices`
+  對凹多邊形會直接回 `undefined`。**
+- `src/poly-decomp.d.ts`（新）：`poly-decomp` 是 CJS 且**上游沒有 TS 型別**
+  （`@types/poly-decomp` 不存在），手寫宣告。
+- `src/game/session.ts`：`GameSessionOptions.silhouettes`（**可選**）＋
+  `createBody()` 統一供 `drop()` / `merge()` 使用 —— 有輪廓就用多邊形，否則退回圓。
+- **旋轉不再鎖定**（`lockRotation: false`）：輪廓碰撞體與 sprite 同角度，兩者永遠對齊；
+  鎖住旋轉反而會讓 sprite 轉了、碰撞體沒轉。堆疊穩定後實測角度是散的，符合預期。
+- 回退路徑：素材缺失、載入失敗、輪廓退化（頂點 < 3 或面積 ≈ 0）時一律退回圓；
+  `silhouettes` 未注入時全場都是圓（測試沿用）。
+- `package.json`：新增相依 `poly-decomp`。
+- `tests/silhouette.test.ts`（16 條）、`tests/polygonBody.test.ts`（5 條）新增。
+- `docs/physics.md` §「碰撞形狀一律為圓」整節改寫；`docs/rendering.md` §2.3 補註。
+- **製圖注意**：輪廓取自 alpha 通道，所以 sprite 的透明區域必須**真的透明**。
+  畫在白底上再匯出，輪廓會退化成整個方框，等於白做。
+
+### 新增 — M6：解鎖系統與生成池過濾
+
+- `src/game/progress.ts`：`ProgressStore` —— 解鎖集合 ＋ 最高分。儲存體**可注入**
+  （`ProgressStorage`）：無痕模式或關閉 cookie 時 `localStorage` 光是存取就拋錯，此時退回
+  「只活在記憶體裡」；讀寫一律包 try/catch，壞掉的存檔視為空。
+- **鏈首一律解鎖**（`baseline` ＝編號最小的等級），否則開局完全沒有東西可掉。
+- **生成池過濾**：`src/game/spawnQueue.ts` 的進池條件為
+  `droppable && spawnWeight > 0 && unlocked.has(id)`。所以**即使 `levels.json` 標了
+  `droppable: true`，未解鎖的等級也不會出現在掉落佇列**；開局只有 Lv1 解鎖，初始只掉 Lv1，
+  每合出一級那一級才加入池。新增 `setUnlocked()` —— 接收新集合、剔除已不在池中的項目並補齊佇列。
+- **解鎖跨局不重設**（`design.md` D5）。`GameSession` 每局重建，所以解鎖不能存在裡面：
+  `session` 只在合出新等級時呼叫 `unlocks.unlock()`，並在成功時刷新生成池；
+  `reset()` 只清「這一局的東西」（剛體、分數、連擊、溢位計時），保留解鎖與最高分。
+- `tests/progress.test.ts`（14 條，含無痕模式與壞存檔）、`tests/spawnQueue.test.ts` 的閘門測試、
+  `tests/session.test.ts` 的「解鎖與生成池」。
+
+### 變更 — MELTING LIST 即圖鑑
+
+使用者定案：**MELTING LIST 就是圖鑑**，不另開頁面。
+
+- 解鎖判斷改為依**等級編號**（`unlocked.has(level.id)`），而不是「索引小於已解鎖數量」，
+  這樣不必假設等級表順序或編號連續。
+- `progress.onChange()` 是**唯一的通知路徑**：解鎖一發生就重畫名冊，把 `???` 換成角色圖。
+- `aria-label` 改為「合成鏈圖鑑，共 N 級，已解鎖 M 級」。
+
+### 新增 — 可供程式化驗證的 DOM hook
+
+`data-hook` 屬性（`combo-count`、`combo-multiplier`、`merged`、`best-try`）讓驗證腳本不必
+猜 class 名稱就能讀到 HUD 的值。
+
+### 已知缺口（本節仍未涵蓋）
+
+- **M5（技力與技能）依使用者指示跳過**：SKILL LIST 仍為空；`skills.json` 的 `fate_swap`
+  消耗 4 技力但 `sp.max` 只有 3，該技能永遠無法解鎖。
+- **容器容量與半徑的平衡尚未校準**：以 Lv1（r=20）對 730×784 的可用區，實測要連續投放
+  約 130 顆（每 100ms 一顆、模擬約 13 秒）才會真的堆到溢位線。半徑與物理參數全是暫定值
+  （`levels.json → _meta.provisional`），待 M0 的半徑校準原型定案後整表重算。
+- **嚴重溢出時堆疊會畫到畫布頂端之外**：牆只比頂緣高 `DEFAULT_WALL_OVERHANG`（240），
+  堆得比那更高時方團團會被畫布裁掉。
+- 其餘同前一節（描邊快取、半徑校準原型、設計稿 aspect、名冊走線 5px 等）。
+
+---
+
 ## 未發佈 — `feat-ui-init`（M0 前置缺口 + M1 + M2 + M3）
 
-分支關係：`feat-ui-init` → `dev` → `main`。本節涵蓋的範圍是「可以丟方團團」，
-合成、Combo 與彈跳動畫屬 M4，尚未進入。
+分支關係：`feat-ui-init` → `dev` → `main`。本節涵蓋的範圍是「可以丟方團團」；
+合成、Combo 與彈跳動畫已由上一節的 M4 補上。
 
 ### 修正 — 縮放 25% ↔ 500% 時整張畫布往右下漂
 
@@ -202,10 +372,12 @@ NEXT 卡改為顯示**放下手上這顆之後**才上場的那顆，而不是�
   已註明半徑與物理參數全是暫定值，待校準原型定案後整表重算。
 - **`skills.json` 的 `fate_swap` 消耗 4 技力，但 `sp.max` 只有 3**，該技能永遠無法解鎖。
   載入時會發出警告，屬內容設定問題，待 M5 一併處理。
-- **溢出規則**（`maxBodies`、`overflowPenalty`、溢出時長）依 `design.md` §10 尚未定案。
-  連帶的已知現象：把方團團投進已經擠滿的落點時，重疊解析的力量可能把它彈出容器上方
-  （牆只比前表面高 240 單位），飛到離場邊界後會被回收，該顆就此消失。正規解法是
-  「上一顆還沒離開投放區前禁止再投」，屬 M4 的溢出與投放節流規則。
+- ~~**溢出規則**（`maxBodies`、`overflowPenalty`、溢出時長）依 `design.md` §10 尚未定案。~~
+  **已由 M4 定案**（見上一節）：溢位線相對容器頂緣 30、寬限 3000ms、只看「已進槽」的顆粒。
+  原本連帶的現象是：把方團團投進已經擠滿的落點時，重疊解析的力量可能把它彈出容器上方
+  （牆只比前表面高 240 單位），飛到離場邊界後會被回收，該顆就此消失。這個現象**仍然存在**
+  （見上一節「嚴重溢出時堆疊會畫到畫布頂端之外」）；正規解法是「上一顆還沒離開投放區前
+  禁止再投」，屬後續的投放節流規則，M4 未實作。
 
 ---
 
@@ -218,14 +390,17 @@ NEXT 卡改為顯示**放下手上這顆之後**才上場的那顆，而不是�
 - 物理暫定參數推導文件（`docs/physics.md`）。
 - 中／英雙語 README 與設計稿。
 
-## 待辦 — M4 起
+## 里程碑狀態
 
-| 階段 | 範圍 |
-|:--|:--|
-| M4 | 合成核心、冷卻、Combo、彈跳動畫 |
-| M5 | 技力與技能（含點選選取、「」括號） |
-| M6 | 解鎖系統、`???`、圖鑑 |
-| M7 | 本地存檔與後端同步 |
-| M8 | 排行榜（全時／每日／每週）與用戶名驗證 |
-| M9 | 分析事件、反作弊檢查 |
-| M10 | 部署、音效、無障礙 |
+| 階段 | 範圍 | 狀態 |
+|:--|:--|:--|
+| M4 | 合成核心、冷卻、Combo、彈跳動畫 | ✅ 已完成（見上一節） |
+| M5 | 技力與技能（含點選選取、「」括號） | ⏭️ **依使用者指示跳過** |
+| M6 | 解鎖系統、`???`、圖鑑 | ✅ 已完成（見上一節） |
+| M7 | 本地存檔與後端同步 | ⏳ 待辦 |
+| M8 | 排行榜（全時／每日／每週）與用戶名驗證 | ⏳ 待辦 |
+| M9 | 分析事件、反作弊檢查 | ⏳ 待辦 |
+| M10 | 部署、音效、無障礙 | ⏳ 待辦 |
+
+> M6 不依賴 M5，所以跳過 M5 不影響圖鑑與解鎖。M7 會接手目前由 `game/progress.ts`
+> 獨力承擔的本地存檔（`endchimerge:unlocks` / `endchimerge:high-score`）。

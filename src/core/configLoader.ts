@@ -61,6 +61,8 @@ const DEFAULT_SETTINGS: GameSettings = {
   spawnBlockEnabled: false,
   overflowPenalty: false,
   mergeCooldownMs: 100,
+  overflowGraceMs: 3000,
+  comboWindowMs: 1000,
 };
 
 /** 合成鏈 10 級（design.md D2）。順序即等級順序。 */
@@ -99,6 +101,8 @@ const DEFAULT_CONTAINER: ContainerConfig = {
   fill: 'rgba(255, 255, 255, 0.20)',
   topOffset: 80,
   spawnGap: 8,
+  dropAboveRim: 40,
+  overflowAboveRim: 30,
   aspectMin: 0.62,
   aspectMax: 1.45,
 };
@@ -200,6 +204,8 @@ function sanitizeSettings(raw: unknown, warn: ConfigWarning): GameSettings {
     spawnBlockEnabled: read.boolean(raw, 'spawnBlockEnabled', DEFAULT_SETTINGS.spawnBlockEnabled),
     overflowPenalty: read.boolean(raw, 'overflowPenalty', DEFAULT_SETTINGS.overflowPenalty),
     mergeCooldownMs: read.number(raw, 'mergeCooldownMs', DEFAULT_SETTINGS.mergeCooldownMs, { min: 0 }),
+    overflowGraceMs: read.number(raw, 'overflowGraceMs', DEFAULT_SETTINGS.overflowGraceMs, { min: 0 }),
+    comboWindowMs: read.number(raw, 'comboWindowMs', DEFAULT_SETTINGS.comboWindowMs, { min: 0 }),
   };
 }
 
@@ -416,6 +422,8 @@ function sanitizeContainer(raw: unknown, warn: ConfigWarning): ContainerConfig {
     fill: read.string(raw, 'fill', DEFAULT_CONTAINER.fill),
     topOffset: read.number(raw, 'topOffset', DEFAULT_CONTAINER.topOffset, { min: 0 }),
     spawnGap: read.number(raw, 'spawnGap', DEFAULT_CONTAINER.spawnGap, { min: 0 }),
+    dropAboveRim: read.number(raw, 'dropAboveRim', DEFAULT_CONTAINER.dropAboveRim, { min: 0 }),
+    overflowAboveRim: read.number(raw, 'overflowAboveRim', DEFAULT_CONTAINER.overflowAboveRim, { min: 0 }),
     aspectMin: usableRange ? aspectMin : DEFAULT_CONTAINER.aspectMin,
     aspectMax: usableRange ? aspectMax : DEFAULT_CONTAINER.aspectMax,
   };
@@ -449,6 +457,25 @@ function checkSkillUnlockability(skills: SkillsConfig, warn: ConfigWarning): voi
         `skill "${skill.id}" costs ${skill.cost} SP but sp.max is ${skills.sp.max}; it can never be unlocked.`,
       );
     }
+  }
+}
+
+/**
+ * 載入期語意檢查：投放點必須高於溢位線。
+ * Semantic check: the drop point must sit above the overflow line.
+ *
+ * 兩者都量自 U 形頂緣上方，所以「投放高度 > 溢位高度」才對。倒過來的話每一顆方團團一
+ * 出現就越線，寬限倒數會從第一幀就開始跑。
+ * Both are measured upward from the rim, so the drop height must exceed the line height.
+ * Inverted, every dumpling crosses the line the instant it appears and the countdown starts
+ * on frame one.
+ */
+function checkDropClearsOverflow(container: ContainerConfig, warn: ConfigWarning): void {
+  if (container.dropAboveRim <= container.overflowAboveRim) {
+    warn(
+      `container.dropAboveRim (${container.dropAboveRim}) is not above overflowAboveRim ` +
+        `(${container.overflowAboveRim}); dumplings would overshoot from the drop point.`,
+    );
   }
 }
 
@@ -521,13 +548,15 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<AllCo
 
   const levels = sanitizeLevels(levelsRaw, warn);
   const skills = sanitizeSkills(skillsRaw, warn);
+  const container = sanitizeContainer(containerRaw, warn);
 
   checkSkillUnlockability(skills, warn);
+  checkDropClearsOverflow(container, warn);
 
   return {
     levels,
     skills,
-    container: sanitizeContainer(containerRaw, warn),
+    container,
     branding: sanitizeBranding(brandingRaw, warn),
   };
 }

@@ -1,0 +1,104 @@
+/*
+ * 結算覆蓋層。
+ * The end-of-run overlay.
+ *
+ * 蓋在整個設計畫布上（1920×1080），所以裡面的尺寸都是**設計稿像素**，會跟著畫布一起被
+ * `ui/scale.ts` 等比縮放 —— 與其他面板用同一套座標語言，不必另外處理響應式。
+ * It covers the whole design canvas (1920×1080), so its sizes are **design pixels** scaled
+ * along with everything else by `ui/scale.ts` — the same coordinate language as every panel,
+ * with no separate responsive path.
+ */
+
+.game-over {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(12, 13, 18, 0.66);
+  backdrop-filter: blur(6px);
+  z-index: 20;
+}
+
+/* `[hidden]` 一定要蓋掉上面的 `display: grid`，否則覆蓋層會永遠顯示。 */
+.game-over[hidden] {
+  display: none;
+}
+
+.game-over__card {
+  display: grid;
+  justify-items: center;
+  gap: 30px;
+  min-width: 620px;
+  padding: 64px 88px;
+  border-radius: 32px;
+  background: var(--glass-fill);
+  border: 1px solid var(--glass-stroke);
+  box-shadow: var(--glass-shadow);
+}
+
+.game-over__title {
+  margin: 0;
+  font-size: 72px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+/* 「新紀錄」只在一件事為真時出現，預設不佔位。 */
+.game-over__badge {
+  margin: 0;
+  color: var(--color-accent);
+  font-size: 24px;
+  letter-spacing: 0.08em;
+}
+
+.game-over__badge[hidden] {
+  display: none;
+}
+
+.game-over__stats {
+  display: flex;
+  gap: 72px;
+  margin: 0;
+}
+
+.game-over__stat {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+}
+
+.game-over__stat-label {
+  color: var(--color-fg-muted);
+  font-size: 22px;
+  letter-spacing: 0.08em;
+}
+
+.game-over__stat-value {
+  margin: 0;
+  font-size: 48px;
+  font-variant-numeric: tabular-nums;
+}
+
+.game-over__restart {
+  padding: 18px 56px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+  font-family: inherit;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: transform var(--transition-fast), filter var(--transition-fast);
+}
+
+.game-over__restart:hover {
+  filter: brightness(1.06);
+  transform: translateY(-2px);
+}
+
+.game-over__restart:focus-visible {
+  outline: 3px solid var(--color-fg);
+  outline-offset: 4px;
+}

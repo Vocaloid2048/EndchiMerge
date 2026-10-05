@@ -157,6 +157,8 @@ export class FrameLoop {
 
   private handle: number | null = null;
   private lastTime = 0;
+  /** 最近一幀的時間戳，驅動溢位警戒區的脈動。 */
+  private nowMs = 0;
 
   constructor(options: FrameLoopOptions) {
     this.viewport = options.viewport;
@@ -196,6 +198,7 @@ export class FrameLoop {
    * loop, so nothing is left ticking.
    */
   renderOnce(): void {
+    this.nowMs = performance.now();
     this.draw();
   }
 
@@ -205,6 +208,7 @@ export class FrameLoop {
 
     const steps = this.stepper.advance(now - this.lastTime);
     this.lastTime = now;
+    this.nowMs = now;
 
     for (let index = 0; index < steps; index += 1) {
       this.session.step(this.stepMs);
@@ -223,11 +227,41 @@ export class FrameLoop {
         geometry: this.session.containerGeometry,
         bodies: this.session.bodies,
         aim: this.session.aimPreview,
+        overflow: this.overflowFrame(),
         debug: this.debug
           ? { cavity: this.session.playArea, spawnY: this.session.spawnYValue }
           : undefined,
       },
       this.sprites,
     );
+  }
+
+  /**
+   * 溢位警戒區的畫面資料；脈動相位由時間推導，所以畫面本身不必保存狀態。
+   * The overflow zone's frame data. The pulse phase is derived from time, so the renderer
+   * itself keeps no state.
+   */
+  private overflowFrame(): {
+    lineY: number;
+    zoneTop: number;
+    zoneBottom: number;
+    x: number;
+    width: number;
+    danger: boolean;
+    pulse: number;
+  } {
+    const frame = this.session.containerGeometry.frame;
+    /* 0..1 的餘弦脈動；週期 520ms，肉眼剛好讀成「一呼一吸」而不刺眼。 */
+    const pulse = 0.5 + 0.5 * Math.sin(this.nowMs / 260);
+
+    return {
+      lineY: this.session.overflowLineY,
+      zoneTop: this.session.overflowLineY,
+      zoneBottom: frame.y,
+      x: frame.x,
+      width: frame.width,
+      danger: this.session.overflowDanger,
+      pulse,
+    };
   }
 }

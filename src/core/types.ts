@@ -74,8 +74,19 @@ export interface GameSettings {
   spawnBlockEnabled: boolean;
   /** 溢出時是否直接扣分結束，或僅提示。 */
   overflowPenalty: boolean;
-  /** 同一組合成後的冷卻時間，毫秒。 */
+  /** 同一顆剛體生成後多久內不得合成，毫秒。 */
   mergeCooldownMs: number;
+  /**
+   * 堆疊越過溢位線後，玩家還有多少時間處理，毫秒。逾時即結束這一局。
+   * How long the player has to clear a pile that crossed the overflow line, in ms. Running
+   * out ends the run.
+   */
+  overflowGraceMs: number;
+  /**
+   * 連擊窗口，毫秒。兩次合成相隔在此之內算同一串。
+   * Combo window in milliseconds; merges closer than this belong to one chain.
+   */
+  comboWindowMs: number;
 }
 
 export interface LevelsConfig {
@@ -145,12 +156,28 @@ export interface ContainerConfig {
   /** U 形頂緣距畫布頂端的距離，虛擬單位。留出投放用的頭部空間。 */
   topOffset: number;
   /**
-   * 投放留白，虛擬單位。同時決定兩件事：投放高度在 U 形頂緣**上方**多少、
-   * 以及瞄準範圍距離左右邊緣各內縮多少（再各讓開一個半徑）。
-   * Drop padding in virtual units. It sets both how far above the U's rim the drop starts
-   * and how far the aim range is inset from the left/right edges (plus one radius each).
+   * 投放留白，虛擬單位。決定瞄準範圍距離左右邊緣各內縮多少（再各讓開一個半徑）。
+   * Drop padding in virtual units: how far the aim range is inset from the left/right edges
+   * (plus one radius each). It no longer sets the drop height — that is `dropAboveRim`.
    */
   spawnGap: number;
+  /**
+   * 投放高度：方團團出現的位置距離 U 形**頂緣上方**多遠，虛擬單位。
+   * Drop height: how far **above** the U's rim a dumpling appears, in virtual units.
+   *
+   * 需要它比預覽線更高的理由與溢位線相同 —— 預覽應該懸在容器之上，而不是藏在槽裡。
+   * It needs its own knob so the preview can hover above the box rather than inside it.
+   */
+  dropAboveRim: number;
+  /**
+   * 溢位線距 U 形**頂緣上方**多遠，虛擬單位。
+   * How far **above** the U's rim the overflow line sits, in virtual units.
+   *
+   * 一律比 `dropAboveRim` 小：投放點必須高於溢位線，否則每一顆一出現就立刻觸發溢位。
+   * Always smaller than `dropAboveRim`: the drop point must sit above the line, or every
+   * dumpling would trigger overflow the instant it appears.
+   */
+  overflowAboveRim: number;
   /** 容器寬高比下限。 */
   aspectMin: number;
   /** 容器寬高比上限。 */

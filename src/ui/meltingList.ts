@@ -1,6 +1,6 @@
 /**
- * MELTING LIST 名冊渲染。
- * MELTING LIST roster rendering.
+ * MELTING LIST 名冊渲染（＝圖鑑）。
+ * MELTING LIST roster rendering (the compendium).
  *
  * 把 `ui/serpentine.ts` 算出來的幾何畫成 DOM。因為格網是**固定設計尺寸**（4 欄 × 5 列、
  * 單格 84.25×94.4），這裡用絕對定位而不是 CSS Grid：絕對定位讓「演算法給什麼座標就放
@@ -12,9 +12,12 @@
  *
  * 三個設計約束 / Three design constraints:
  *
- * 1. **未解鎖顯示 `???`**（design.md D5），且解鎖後永久保留。
+ * 1. **未解鎖顯示 `???`**（design.md D5），解鎖後永久保留。這一支不解鎖任何東西 ——
+ *    它只是把 `game/progress.ts` 的結果畫出來。
+ *    Locked cells show `???` and stay unlocked forever once revealed. This module unlocks
+ *    nothing; it only draws what `game/progress.ts` reports.
  * 2. **素材等比放入、不拉伸**（D26）。素材已在導出時正規化過（512×512、body 304、
- *    body 中心 (256, 328)），所以所有角色共用同一個縮放就會對齊 —— 不必逐格處理。
+ *    body 中心 (256, 328)），所以所有角色共用同一個縮放就會對齊。
  * 3. **連接線由演算法給**，這裡只負責畫；走位規則不重算。
  */
 
@@ -38,8 +41,13 @@ export interface MeltingListOptions {
   /** 合成鏈等級表，順序即名冊順序。 */
   levels: readonly LevelDef[];
   sprites: SpriteLoader;
-  /** 已解鎖的前綴長度；預設 1（只知道 Lv1）。 */
-  unlockedCount?: number;
+  /**
+   * 已解鎖的**等級編號**。未提供時視為只有第一級解鎖（最保守的預設，寧可少顯示也不要
+   * 把未解鎖的角色畫出來）。
+   * The unlocked **level ids**. When omitted only the first level counts as unlocked — the
+   * conservative default, since leaking a locked character is the worse failure.
+   */
+  unlocked?: ReadonlySet<number>;
   /** 覆寫欄數；預設取自設計稿。 */
   cols?: number;
   /** 覆寫列數；預設取自設計稿。 */
@@ -49,16 +57,19 @@ export interface MeltingListOptions {
 export interface MeltingList {
   /** 重畫名冊。 */
   render(): void;
+  /** 換一批解鎖集合並重畫；由 `game/progress.ts` 的解鎖事件呼叫。 */
+  setUnlocked(unlocked: ReadonlySet<number>): void;
   /** 卸下；目前沒有需要監看的東西，保留是為了介面穩定。 */
   destroy(): void;
 }
 
 export function createMeltingList(options: MeltingListOptions): MeltingList {
   const { host, levels, sprites } = options;
-  const unlockedCount = options.unlockedCount ?? 1;
 
   const grid = el('div', 'roster');
   host.replaceChildren(grid);
+
+  let unlocked: ReadonlySet<number> = options.unlocked ?? new Set([levels[0]?.id ?? 1]);
 
   /** 素材不可用時的替代：等級色塊 + 數字，與 Canvas 佔位圖同一套配色。 */
   function buildFallback(level: LevelDef): HTMLElement {
@@ -67,7 +78,7 @@ export function createMeltingList(options: MeltingListOptions): MeltingList {
     return fallback;
   }
 
-  function buildCell(slot: RosterSlot, unlocked: boolean): HTMLElement {
+  function buildCell(slot: RosterSlot): HTMLElement {
     const level = levels[slot.index];
     const origin = cellOrigin(slot.col, slot.row);
 
@@ -77,10 +88,16 @@ export function createMeltingList(options: MeltingListOptions): MeltingList {
 
     if (level === undefined) return node;
 
-    if (!unlocked) {
+    /*
+     * 依**等級編號**判斷，而不是「索引小於幾」：解鎖沿合成鏈單調遞增，但用編號判斷就
+     * 不必假設 `levels` 的順序或編號連續。
+     * Gated by **level id** rather than "index below N": the chain unlocks monotonically, and
+     * keying on the id avoids assuming the array order or contiguous ids.
+     */
+    if (!unlocked.has(level.id)) {
       node.classList.add('roster-cell--locked');
       node.textContent = '???';
-      node.setAttribute('aria-label', `第 ${String(slot.index + 1)} 級，尚未解鎖`);
+      node.setAttribute('aria-label', `${level.name}，尚未解鎖`);
       return node;
     }
 
@@ -117,9 +134,6 @@ export function createMeltingList(options: MeltingListOptions): MeltingList {
  *
  * `overflow: visible` 是必要的：箭頭比內容區右緣再突出約 18px（設計稿也是如此，只是仍在
  * 面板之內）。SVG 預設會裁掉視埠外的內容，那會把箭頭切一半。
- * `overflow: visible` matters: the arrow sticks out about 18px past the content box's right
- * edge (the mock does the same, still inside the panel). SVG clips to its viewport by
- * default, which would slice the arrowhead in half.
  */
 function buildTrack(track: RosterTrack): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, 'svg');
@@ -147,28 +161,39 @@ function buildTrack(track: RosterTrack): SVGSVGElement {
   return svg;
 }
 
-function render(): void {
-  const layout = computeRosterLayout({
-    count: levels.length,
-    cols: options.cols,
-    rows: options.rows,
-    unlockedCount,
-  });
+  function render(): void {
+    const unlockedCount = levels.filter((level) => unlocked.has(level.id)).length;
 
-  grid.replaceChildren();
-  if (layout.track !== null) grid.append(buildTrack(layout.track));
+    const layout = computeRosterLayout({
+      count: levels.length,
+      cols: options.cols,
+      rows: options.rows,
+      unlockedCount,
+    });
 
-  for (const slot of layout.slots) {
-    grid.append(buildCell(slot, slot.index < layout.unlockedCount));
+    grid.replaceChildren();
+    if (layout.track !== null) grid.append(buildTrack(layout.track));
+
+    for (const slot of layout.slots) {
+      grid.append(buildCell(slot));
+    }
+
+    grid.setAttribute(
+      'aria-label',
+      `合成鏈圖鑑，共 ${String(layout.slots.length)} 級，已解鎖 ${String(unlockedCount)} 級`,
+    );
   }
-
-  grid.setAttribute('aria-label', `合成鏈名冊，共 ${String(layout.slots.length)} 級`);
-}
 
   render();
 
   return {
     render,
+
+    setUnlocked(next: ReadonlySet<number>): void {
+      unlocked = next;
+      render();
+    },
+
     destroy: (): void => undefined,
   };
 }

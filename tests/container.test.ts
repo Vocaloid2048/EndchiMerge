@@ -23,6 +23,8 @@ const CONFIG: ContainerConfig = {
   fill: 'rgba(255, 255, 255, 0.20)',
   topOffset: 80,
   spawnGap: 8,
+  dropAboveRim: 40,
+  overflowAboveRim: 30,
   aspectMin: 0.62,
   aspectMax: 1.45,
 };

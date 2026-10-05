@@ -1,6 +1,6 @@
 /**
- * HUD：NEXT 卡與 SCORE 卡的 DOM 更新。
- * The HUD: DOM updates for the NEXT and SCORE cards.
+ * HUD：NEXT、SCORE 與 COMBO 卡的 DOM 更新。
+ * The HUD: DOM updates for the NEXT, SCORE and COMBO cards.
  *
  * 這個模組只**讀取**狀態並寫進 DOM，不碰遊戲邏輯。它每幀都會被呼叫，所以每個欄位
  * 都先比對上次的值，只有真的變了才動 DOM —— 每幀重設 `src` 會讓圖片不停重新解碼，
@@ -36,6 +36,10 @@ export interface HudState {
   nextLevelId: number;
   score: number;
   mergedCount: number;
+  /** 目前連擊串長；窗口已過為 0。 */
+  comboCount: number;
+  /** 目前連擊倍率；窗口已過為 1。 */
+  comboMultiplier: number;
   /** 最高分；M7 接上存檔前固定為 0。 */
   bestTry?: number;
 }
@@ -47,12 +51,16 @@ export class Hud {
   private readonly scoreValue: HTMLElement;
   private readonly mergedValue: HTMLElement;
   private readonly bestTryValue: HTMLElement;
+  private readonly comboCountValue: HTMLElement;
+  private readonly comboMultiplierValue: HTMLElement;
 
   /** 上次寫入的值；初值用不可能的數字，保證第一次一定更新。 */
   private lastNextId = Number.NaN;
   private lastScore = Number.NaN;
   private lastMerged = Number.NaN;
   private lastBestTry = Number.NaN;
+  private lastComboCount = Number.NaN;
+  private lastComboMultiplier = Number.NaN;
 
   constructor(options: HudOptions) {
     this.sprites = options.sprites;
@@ -63,6 +71,8 @@ export class Hud {
     this.scoreValue = hook<HTMLElement>(regions.score, 'score-value');
     this.mergedValue = hook<HTMLElement>(regions.score, 'merged');
     this.bestTryValue = hook<HTMLElement>(regions.score, 'best-try');
+    this.comboCountValue = hook<HTMLElement>(regions.combo, 'combo-count');
+    this.comboMultiplierValue = hook<HTMLElement>(regions.combo, 'combo-multiplier');
   }
 
   /** 套用一份新狀態。只有變動的欄位會被寫入 DOM。 */
@@ -80,6 +90,18 @@ export class Hud {
     if (state.mergedCount !== this.lastMerged) {
       this.mergedValue.textContent = String(state.mergedCount);
       this.lastMerged = state.mergedCount;
+    }
+
+    if (state.comboCount !== this.lastComboCount) {
+      this.comboCountValue.textContent = String(state.comboCount);
+      this.lastComboCount = state.comboCount;
+    }
+
+    /* 倍率固定一位小數（`×9.4`），避免 `×9.400000000000001` 這種浮點尾巴。 */
+    const multiplier = Math.round(state.comboMultiplier * 10) / 10;
+    if (multiplier !== this.lastComboMultiplier) {
+      this.comboMultiplierValue.textContent = `×${multiplier.toFixed(1)}`;
+      this.lastComboMultiplier = multiplier;
     }
 
     const bestTry = state.bestTry ?? 0;

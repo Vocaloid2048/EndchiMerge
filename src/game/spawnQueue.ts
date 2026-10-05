@@ -43,13 +43,22 @@ export interface SpawnQueueOptions {
   rng: Rng;
   /** 佇列深度；預設 2（見上方說明）。 */
   depth?: number;
+  /**
+   * 已解鎖的等級。未提供時**不套用**解鎖過濾 —— 那讓這個類別在測試與沒有存檔的場合
+   * 仍然只靠 `levels.json` 就能運作。
+   * The unlocked levels. When omitted, no unlock filter is applied, which keeps the class
+   * usable from `levels.json` alone in tests and where no save exists.
+   */
+  unlocked?: ReadonlySet<number>;
 }
 
 export class SpawnQueue {
-  private readonly pool: readonly LevelDef[];
+  private readonly levels: readonly LevelDef[];
   private readonly rng: Rng;
   private readonly depth: number;
   private items: LevelDef['id'][] = [];
+  private unlocked: ReadonlySet<number> | undefined;
+  private pool: readonly LevelDef[];
 
   constructor(options: SpawnQueueOptions) {
     const depth = options.depth ?? DEFAULT_SPAWN_QUEUE_DEPTH;
@@ -61,22 +70,64 @@ export class SpawnQueue {
     }
 
     /*
-     * 只有「標記為可投放」且「權重為正」的等級能進池。兩個條件都要，因為
-     * `droppable` 是作者的意圖、`spawnWeight` 是實際機率，只檢查其中一個會讓
-     * 配置寫錯時悄悄改變掉落表。
-     * A level must be both flagged droppable and weighted above zero. Both checks are
-     * needed: the flag is intent, the weight is the actual odds.
+     * 只有「可投放」且「權重為正」且（套用過濾時）「已解鎖」的等級能進池。前兩個條件都要，
+     * 因為 `droppable` 是作者的意圖、`spawnWeight` 是實際機率，只檢查其中一個會讓配置
+     * 寫錯時悄悄改變掉落表。解鎖則是**遊戲進行中的狀態**：作者說「這一級可以被生成」，
+     * 但玩家還沒解鎖它，仍然不該出現。
+     * A level must be droppable, positively weighted, and (when gating is on) unlocked. The
+     * first two are both needed because the flag is intent and the weight is the odds. The
+     * unlock gate is different in kind: the author says a level *may* spawn, but a level the
+     * player has not unlocked must not appear.
      */
-    this.pool = options.levels.filter((level) => level.droppable && level.spawnWeight > 0);
+    this.rng = options.rng;
+    this.depth = depth;
+    this.levels = options.levels;
+    this.unlocked = options.unlocked;
 
-    if (this.pool.length === 0) {
+    const pool = this.computePool();
+
+    if (pool.length === 0) {
       throw new RangeError(
         'SpawnQueue found no droppable level with a positive spawnWeight, so nothing could ever drop.',
       );
     }
 
-    this.rng = options.rng;
-    this.depth = depth;
+    this.pool = pool;
+    this.refill();
+  }
+
+  /** 依「可投放 ＋ 權重為正 ＋（已解鎖）」篩出抽取池。 */
+  private computePool(): readonly LevelDef[] {
+    return this.levels.filter(
+      (level) =>
+        level.droppable &&
+        level.spawnWeight > 0 &&
+        (this.unlocked === undefined || this.unlocked.has(level.id)),
+    );
+  }
+
+  /**
+   * 更新解鎖集合並重算抽取池。
+   * Update the unlocked set and recompute the pool.
+   *
+   * 解鎖在遊戲中只會**增加**，所以池只會變大，已經抽出的佇列項目仍然合法。這裡仍順手把
+   * 不再合法的項目剔除並補滿，好讓日後若有人做「重設進度」也不會留下孤兒。
+   * Unlocks only ever grow during play, so the pool only grows and queued items stay valid.
+   * Stale items are pruned and the queue refilled anyway, so a future "reset progress"
+   * cannot leave orphans behind.
+   *
+   * @param unlocked 新的解鎖集合；傳 `undefined` 可關掉過濾。
+   */
+  setUnlocked(unlocked: ReadonlySet<number> | undefined): void {
+    this.unlocked = unlocked;
+
+    const pool = this.computePool();
+
+    /* 空池會讓抽取爆掉；寧可保留舊池也不要讓遊戲停擺。 */
+    if (pool.length === 0) return;
+
+    this.pool = pool;
+    this.items = this.items.filter((id) => pool.some((level) => level.id === id));
     this.refill();
   }
 

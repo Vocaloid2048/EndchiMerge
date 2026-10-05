@@ -10,9 +10,9 @@
  * renderer from quietly mutating game state.
  *
  * 繪製順序本身就是「裝在容器內」這個效果的全部來源（見 `render/container.ts`）：
- * 內部填充 → 輔助線 → 方團團 → U 形線框 → 投放預覽。
- * The draw order is the whole effect (see `render/container.ts`): interior fill → guide →
- * dumplings → U outline → drop preview.
+ * 內部填充 → 溢位警戒區 → 輔助線 → 方團團 → U 形線框 → 溢位紅線 → 投放預覽。
+ * The draw order is the whole effect (see `render/container.ts`): interior fill → overflow
+ * zone → guide → dumplings → U outline → overflow line → drop preview.
  */
 
 import type { Rect } from '../core/types';
@@ -48,6 +48,27 @@ const DEBUG_STYLE = {
 } as const;
 
 /**
+ * 溢位線與警戒區的樣式。
+ * Overflow line and warning-zone style.
+ *
+ * **調參入口**：紅線的粗幼／顏色、警戒區的填色都在這裡改。
+ * **The tuning entry point** for the line's weight and colour and the zone's fill.
+ */
+const OVERFLOW_STYLE = {
+  /** 紅線線寬，虛擬單位。 */
+  lineWidth: 4,
+  /** 紅線顏色。 */
+  lineColor: 'rgba(226, 100, 95, 0.95)',
+  /** 紅線節奏 `[實線, 空白]`，虛擬單位。 */
+  dash: [16, 14] as const,
+  /** 警戒區填色（淺紅），實際 alpha 由脈動調變。 */
+  zoneColor: '226, 100, 95',
+  /** 警戒區的峰值 alpha 與谷值 alpha。 */
+  zoneAlphaMax: 0.28,
+  zoneAlphaMin: 0.1,
+} as const;
+
+/**
  * 一顆要被畫出來的方團團。
  * One dumpling to be drawn.
  *
@@ -64,6 +85,12 @@ export interface RenderBody {
   radius: number;
   /** 弧度。 */
   angle: number;
+  /**
+   * 額外的畫面縮放倍率（相對於「半徑對應的尺寸」）。合成剛產生時大於 1，播完回到 1。
+   * An extra draw-scale multiplier on top of the radius-derived size. It is above 1 right
+   * after a merge and settles back to 1.
+   */
+  scale?: number;
 }
 
 /** 投放下落前的預覽。 */
@@ -88,9 +115,28 @@ export interface StageFrame {
   /** 輔助線的顏色（預覽用）；未提供時用 `AIM_GUIDE_STYLE.color`。 */
   guideColor?: string;
   /**
+   * 溢位警戒；`danger` 為真時啟動脈動。未提供時不畫線也不畫區。
+   * Overflow warning; when `danger` is true the zone pulses. Omitted means nothing is drawn.
+   */
+  overflow?: {
+    /** 紅虛線的 Y（虛擬單位）。 */
+    lineY: number;
+    /** 警戒區的上緣（＝線）。 */
+    zoneTop: number;
+    /** 警戒區的下緣（＝容器頂緣）。 */
+    zoneBottom: number;
+    /** 線的左緣 X。 */
+    x: number;
+    /** 線的寬度。 */
+    width: number;
+    /** 是否處於越線狀態；真＝脈動。 */
+    danger: boolean;
+    /** 脈動相位 `0..1`，由迴圈以時間驅動；`0` 代表谷值。 */
+    pulse: number;
+  };
+  /**
    * 除錯輔助。提供時額外畫出容器的外框、物理空腔與投放線。
-   * Debug overlay. When present, the frame, the physics cavity and the spawn line are
-   * outlined as well. Only wired up behind `?debug=1` in development.
+   * Only wired up behind `?debug=1` in development.
    */
   debug?: {
     cavity: Rect;
@@ -113,13 +159,15 @@ function drawBody(
   sprites: SpriteSource,
 ): void {
   const entry = sprites.get(body.levelId);
-  const scale = spriteScaleForRadius(body.radius);
+  /* 彈跳倍率與半徑換算相乘，兩者只在這一處合流。 */
+  const pop = body.scale ?? 1;
+  const scale = spriteScaleForRadius(body.radius) * pop;
 
   if (entry === undefined || !entry.ok) {
     drawPlaceholderDumpling(ctx, {
       x: body.x,
       y: body.y,
-      radius: body.radius,
+      radius: body.radius * pop,
       levelId: body.levelId,
     });
     return;
@@ -162,6 +210,54 @@ function drawAimGuide(
   ctx.beginPath();
   ctx.moveTo(aim.x, aim.y + aim.radius);
   ctx.lineTo(aim.x, floorY);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * 畫溢位警戒區：紅線與容器頂緣之間的淺紅色帶。越線時脈動，平常只是很淡的一層。
+ * Draw the overflow warning zone: the pale red band between the line and the container's
+ * rim. It pulses while breached and stays a faint wash otherwise.
+ *
+ * 畫在方團團**之下**，因為它是背景提示而不是遮罩；紅線本身則畫在最上層（見 `drawStage`）。
+ * Drawn **under** the dumplings because it is a background cue, not an overlay; the line
+ * itself goes on top in `drawStage`.
+ */
+function drawOverflowZone(
+  ctx: CanvasRenderingContext2D,
+  overflow: NonNullable<StageFrame['overflow']>,
+): void {
+  const top = Math.min(overflow.zoneTop, overflow.zoneBottom);
+  const height = Math.abs(overflow.zoneBottom - overflow.zoneTop);
+  if (height <= 0) return;
+
+  const alpha = overflow.danger
+    ? OVERFLOW_STYLE.zoneAlphaMin +
+      (OVERFLOW_STYLE.zoneAlphaMax - OVERFLOW_STYLE.zoneAlphaMin) * overflow.pulse
+    : OVERFLOW_STYLE.zoneAlphaMin;
+
+  ctx.save();
+  ctx.fillStyle = `rgba(${OVERFLOW_STYLE.zoneColor}, ${alpha.toFixed(3)})`;
+  ctx.fillRect(overflow.x, top, overflow.width, height);
+  ctx.restore();
+}
+
+/**
+ * 畫溢位紅線（虛線）。畫在方團團**之上**，因為它是一條必須隨時看得見的門檻。
+ * Draw the dashed overflow line, above the dumplings, because it is a threshold that must
+ * stay readable at all times.
+ */
+function drawOverflowLine(
+  ctx: CanvasRenderingContext2D,
+  overflow: NonNullable<StageFrame['overflow']>,
+): void {
+  ctx.save();
+  ctx.strokeStyle = OVERFLOW_STYLE.lineColor;
+  ctx.lineWidth = OVERFLOW_STYLE.lineWidth;
+  ctx.setLineDash([...OVERFLOW_STYLE.dash]);
+  ctx.beginPath();
+  ctx.moveTo(overflow.x, overflow.lineY);
+  ctx.lineTo(overflow.x + overflow.width, overflow.lineY);
   ctx.stroke();
   ctx.restore();
 }
@@ -210,25 +306,35 @@ export function drawStage(
   frame: StageFrame,
   sprites: SpriteSource,
 ): void {
-  const { geometry, bodies, aim } = frame;
+  const { geometry, bodies, aim, overflow } = frame;
 
   /* 1. 槽的內部填充。必須先畫，否則方團團會看起來在外面。 */
   drawContainerBack(ctx, geometry);
+
+  /* 2. 溢位警戒區：背景提示，壓在方團團之下。 */
+  if (overflow !== undefined) {
+    drawOverflowZone(ctx, overflow);
+  }
 
   /* 輔助線在 sprite 之下，才不會蓋住方團團。 */
   if (aim !== null) {
     drawAimGuide(ctx, aim, geometry, frame.guideColor ?? AIM_GUIDE_STYLE.color);
   }
 
-  /* 2. 全部方團團（依物理角度翻滾）。 */
+  /* 3. 全部方團團（依物理角度翻滾、依彈跳動畫縮放）。 */
   for (const body of bodies) {
     drawBody(ctx, body, sprites);
   }
 
-  /* 3. U 形線框。少了這步就沒有「裝在槽內」的感覺。 */
+  /* 4. U 形線框。少了這步就沒有「裝在槽內」的感覺。 */
   drawContainerFront(ctx, geometry);
 
-  /* 4. 投放預覽畫在最上層：它應該壓在線框上，因為它還沒進到槽裡。 */
+  /* 5. 溢位紅線壓在最上層，任何時候都讀得到。 */
+  if (overflow !== undefined) {
+    drawOverflowLine(ctx, overflow);
+  }
+
+  /* 6. 投放預覽畫在最上層：它應該壓在線框上，因為它還沒進到槽裡。 */
   if (aim !== null) {
     ctx.save();
     ctx.globalAlpha = 0.85;
@@ -236,7 +342,7 @@ export function drawStage(
     ctx.restore();
   }
 
-  /* 5. 除錯輔助線永遠在最上層，否則看不到。 */
+  /* 7. 除錯輔助線永遠在最上層，否則看不到。 */
   if (frame.debug !== undefined) {
     drawDebugOverlay(ctx, geometry, frame.debug);
   }

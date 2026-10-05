@@ -44,9 +44,38 @@ Techstack:<br>
 4. Merges in quick succession build a **Combo**, raising the score multiplier
 5. The container overflowing ends the run and banks your score
 
-> **Current state**: steps 1–2 are playable — dumplings really fall, tumble and stack inside
-> the container, and whatever the NEXT card shows is always what drops. Arrow keys aim and
-> Space/Enter drops. Merging and scoring (step 3 onwards) are not implemented yet (M4+).
+> **Current state**: **all five steps are playable**. Dumplings really fall, tumble and stack;
+> same-level contact merges them, with a pop animation and a Combo multiplier of
+> `min(e^(0.075n)/10, 9) + 1` that reaches the ×10.0 ceiling at 60 chained merges.
+> Once the stack crosses the red dashed line 30 units above the container rim you get
+> **3 seconds** to fix it; time out and the run ends with a score summary and a one-tap restart.
+> Every level you merge into existence unlocks that character in the MELTING LIST, and **unlocks
+> and the high score persist locally and survive a new run**. Arrow keys aim and Space/Enter drops.
+> SP and skills (M5) are not implemented yet.
+
+### Combo multiplier
+
+| Chain | 1 | 10 | 23 | 30 | 42 | 60 |
+|:--|:--|:--|:--|:--|:--|:--|
+| Multiplier | ×1.1 | ×1.2 | ×1.6 | ×1.9 | ×3.3 | **×10.0** |
+
+> The curve climbs **deliberately slowly**: it only hits the ceiling at 60. Several merges inside
+> the same physics step count once; a cascade spread across steps accumulates normally. The curve
+> constants live in `src/game/combo.ts → COMBO_CURVE`.
+
+### Overflow rule
+
+A red dashed line sits 30 units above the container's rim, with a pale red warning band between
+the line and the rim. **As soon as anything in the stack crosses the line** a 3-second countdown
+starts; push the stack back down and you are fine, leave it and the run ends.
+
+> Only dumplings that have **joined the pile** count as crossing, and "joined the pile" means
+> **touching another dumpling**. A dumpling still falling through the air does not count (not even
+> if it clips the line), and neither does a lone dumpling resting on the floor that has only ever
+> touched a wall or the floor — it occupies space but is not a stack. The drop point sits
+> deliberately 10 units **above** the red line so the player can see the dumpling appear above it;
+> counting in-flight dumplings would let rapid dropping fill the timer on its own
+> (see [`docs/gameplay.md`](docs/gameplay.md) §4.3, in Chinese).
 
 ## <span style="color:#569CD6">🧩 Merge chain (10 levels)</span>
 Start with the smallest, 萊萬汀, and work your way up to 梨諾:
@@ -75,10 +104,14 @@ Every successful drop banks **1.0 SP**. The gauge doubles as the unlock gate —
 
 ## <span style="color:#569CD6">✨ Features</span>
 - ✅ **Real physics**: driven by Matter.js — gravity, collision and stacking all follow genuine mechanics, with tunable parameters
-- ✅ **Fixed timestep**: physics advances in fixed 1/60s steps so the feel never changes with display refresh rate; the per-frame step count is capped so a backgrounded tab cannot blow the box apart on return
+- ✅ **Faithful colliders**: colliders are not circles but **polygons traced from the sprite's alpha channel** (contour tracing + RDP simplification + `poly-decomp` convex decomposition), so horns and wings count. Missing art or a degenerate contour falls back to a circle automatically
+- ✅ **Fixed timestep**: physics advances in fixed 1/60s steps so the feel never changes with display refresh rate; the per-frame step count is capped so a backgrounded tab cannot blow the box apart
 - ✅ **Config-driven**: levels, skills, container frame and branding all live in `public/config/`, editable without a rebuild
 - ✅ **Hand-drawn art**: dumplings are authored as vector art and exported as lossless 512×512 WebP; the white outline hugs the character silhouette rather than the image bounds
-- ✅ **Art aligned to physics**: sprites scale from the collision radius, so the body on screen and the collision circle coincide exactly
+- ✅ **Art aligned to physics**: sprites scale from the collision radius, and the collider is traced from the very same alpha channel — the two coincide exactly
+- ✅ **Merging and combos**: same-level contact merges, handled in two phases (the collision callback only collects; the merge runs after the physics step). The combo multiplier is a non-linear curve topping out at ×10.0
+- ✅ **A visible overflow rule**: red dashed line, pale red warning band and a 3-second countdown — and it only measures dumplings that have **joined the pile** (touched another dumpling)
+- ✅ **Unlocks and codex**: merging a level into existence unlocks that character (the MELTING LIST *is* the codex); unlocks and the high score persist across runs
 - ✅ **Fallback first**: missing art or config degrades gracefully and never leaves a blank screen
 - ✅ **Tested**: deterministic logic (config loading, layout, geometry, sampling, timestep) has unit coverage
 - ✅ **Free and open source**: MIT licensed. Play it, fork it, change it
@@ -120,6 +153,8 @@ Requires Node.js 20 or newer.
 EndchiMerge
 ├─docs                          # Documentation
 │  ├─physics.md                 # Derivation of the physics numbers and why they are provisional
+│  ├─gameplay.md                # Merge / combo / overflow / unlock rules and tuning map
+│  ├─rendering.md               # Draw order and the visual tuning map
 │  ├─asset-signatures.md        # How character asset metadata signing works
 │  ├─CHANGELOG.md               # What each milestone delivered
 │  └─design-main-screen.jpg     # Main screen design
@@ -144,24 +179,31 @@ EndchiMerge
 │  │  ├─physics.ts              # Matter.js engine wrapper
 │  │  └─input.ts                # Drop input (pointer and keyboard)
 │  ├─game                       # Per-run logic
-│  │  ├─session.ts              # Drops, aiming, body recycling
-│  │  ├─spawnQueue.ts           # Spawn queue (peekAt(0) in hand, peekAt(1) for NEXT)
+│  │  ├─session.ts              # Drops, aiming, merging, combos, overflow, body recycling
+│  │  ├─merge.ts                # Merge-table lookup (pure)
+│  │  ├─combo.ts                # Combo window and multiplier curve (pure)
+│  │  ├─overflow.ts             # Overflow grace countdown (pure, no geometry)
+│  │  ├─progress.ts             # Unlocks and high score (localStorage, injectable)
+│  │  ├─spawnQueue.ts           # Spawn queue (peekAt(0) in hand, peekAt(1) NEXT) + unlock filter
 │  │  ├─containerBox.ts         # Physics boundaries (walls and floor)
 │  │  └─loop.ts                 # Fixed-timestep frame loop
 │  ├─render                     # Drawing
 │  │  ├─viewport.ts             # Virtual coordinate system and scaling
 │  │  ├─container.ts            # Container wireframe geometry
 │  │  ├─stage.ts                # Canvas drawing for the container and dumplings
+│  │  ├─silhouette.ts           # Alpha contour tracing + RDP (pure, node-testable)
+│  │  ├─silhouetteLoader.ts     # Contour cache (OffscreenCanvas alpha → polygons)
 │  │  ├─spriteLoader.ts         # Asset loading and fallback
 │  │  └─placeholder.ts          # Programmatic placeholder dumpling
 │  ├─ui                         # DOM surfaces
 │  │  ├─layout.ts               # Seven regions, absolutely placed on the design canvas
 │  │  ├─scale.ts                # Uniform scaling of the design canvas
 │  │  ├─designTokens.ts         # Design numbers → CSS custom properties
-│  │  ├─meltingList.ts          # Roster rendering and the serpentine track
+│  │  ├─meltingList.ts          # Roster rendering and the serpentine track (the codex)
 │  │  ├─serpentine.ts           # Serpentine layout + track geometry
 │  │  ├─spMeter.ts              # SP meter (one segment per point)
-│  │  ├─hud.ts                  # NEXT / SCORE card updates
+│  │  ├─hud.ts                  # NEXT / SCORE / COMBO card updates
+│  │  ├─gameOver.ts             # End-of-run overlay
 │  │  ├─icons.ts                # Inline SVG icons
 │  │  ├─notice.ts               # Unofficial notice
 │  │  └─dom.ts                  # Small DOM helpers
@@ -171,6 +213,7 @@ EndchiMerge
 │  │  ├─panels.css              # Shared panel styles (liquid glass)
 │  │  ├─layout.css              # Seven-region layout styles
 │  │  ├─melting-list.css        # Roster cells and the track
+│  │  ├─game-over.css           # End-of-run overlay
 │  │  └─sprite.css              # Silhouette outline
 │  ├─main.ts                    # Application entry point (assembly only)
 │  └─vite-env.d.ts
@@ -201,14 +244,36 @@ EndchiMerge
 | M1 | Layout skeleton (7 regions), coordinate system, visuals, responsive | ✅ Done |
 | M2 | Serpentine roster (auto layout) + silhouette outline | ✅ Done |
 | M3 | Container rendering (flat U-shape frame), drop input, NEXT queue | ✅ Done |
-| M4 | Merge core, cooldown, combo, pop animation | 🚧 In progress |
-| M5–M6 | SP and skills, unlock system and codex | ⏳ Pending |
+| M4 | Merge core, cooldown, combo, pop animation, overflow and game over | ✅ Done |
+| M5 | SP and skills (incl. click-to-select) | ⏭️ Skipped on request |
+| M6 | Unlock system, `???`, codex (= the MELTING LIST) | ✅ Done |
 | M7–M9 | Save data and backend sync, leaderboards, analytics and anti-cheat | ⏳ Pending |
 | M10 | Deployment, audio, accessibility | ⏳ Pending |
 
 > What M0 still owes is **outline baking** and the **collision-radius calibration prototype**:
 > the radii and physics numbers in `levels.json` are all provisional and will be recomputed
-> once that prototype lands. Full details in [`docs/CHANGELOG.md`](docs/CHANGELOG.md).
+> once that prototype lands. A knock-on effect: with Lv1 at r=20 against a 730×784 play area,
+> it currently takes roughly 130 near-continuous drops (one per 100 ms) to actually stack up to
+> the overflow line. M6 does not depend on M5, so skipping M5 leaves the codex and unlocks
+> unaffected. Full details in [`docs/CHANGELOG.md`](docs/CHANGELOG.md); the rules themselves in
+> [`docs/gameplay.md`](docs/gameplay.md).
+
+> **v1.8 — outline colliders and pile detection**: dumpling colliders changed from **circles** to
+> **polygons traced from the sprite's alpha channel** (Moore-neighbour tracing + RDP
+> simplification + `poly-decomp` convex decomposition), typically 30–46 vertices, so horns and
+> wings count; missing art or a degenerate contour falls back to a circle. Because an outline
+> collider is a compound body, the collision pairs carry child parts, so `GameSession` gained
+> `resolveEntry()`, which walks up via `body.parent`. "Joined the pile" for overflow purposes now
+> means **touching another dumpling** (wall and floor contact do not count), so a falling dumpling
+> clipping the red line is no longer a false positive.
+
+> **v1.7 — merging and the codex**: the container became a **flat U-shape** (rounded bottom,
+> 20% white fill) and both the drop point and the overflow line are now derived from the
+> container's rim (40 / 30) instead of hard-coded coordinates. Merge detection is split into
+> "the collision callback only collects → the merge runs after the physics step". The combo
+> multiplier is now a non-linear curve topping out at ×10.0 at 60 chained merges. Per the
+> user's decision the MELTING LIST **is** the codex, unlock checks key off the level id, and the
+> spawn pool filters out anything not yet unlocked.
 
 > **v1.6 — UI brought in line with the mock**: the layout is now a **fixed 1920×1080 design
 > canvas scaled by a single `transform: scale()`**, with every panel placed at the coordinates

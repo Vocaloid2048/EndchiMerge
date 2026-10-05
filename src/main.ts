@@ -3,10 +3,13 @@ import { attachDropInput } from './core/input';
 import { loadConfig } from './core/configLoader';
 import type { AllConfig } from './core/types';
 import { FrameLoop } from './game/loop';
+import { createProgressStore, type ProgressStore } from './game/progress';
 import { GameSession } from './game/session';
 import { SpriteLoader } from './render/spriteLoader';
+import { buildSilhouetteCache } from './render/silhouetteLoader';
 import { Viewport } from './render/viewport';
 import { hook } from './ui/dom';
+import { createGameOver, type GameOverView } from './ui/gameOver';
 import { Hud } from './ui/hud';
 import { createLayout, type Layout } from './ui/layout';
 import { createMeltingList, type MeltingList } from './ui/meltingList';
@@ -20,9 +23,8 @@ import { createSpMeter, type SpMeter } from './ui/spMeter';
  *
  * `main.ts` 只做**組裝**：載入配置與素材、建立版面與視埠，再把各模組接起來。
  * 它不含任何遊戲邏輯（agent-readme §0.2 的依賴方向）。
- * This file only assembles: it loads config and assets, builds the layout and the
- * viewport, and wires the modules together. It holds no game logic, per the dependency
- * direction in agent-readme §0.2.
+ * This file only assembles: it loads config and assets, builds the layout and the viewport,
+ * and wires the modules together. It holds no game logic.
  */
 
 /** 執行期共享的組裝結果。 */
@@ -31,11 +33,13 @@ export interface AppContext {
   sprites: SpriteLoader;
   viewport: Viewport;
   layout: Layout;
+  progress: ProgressStore;
   meltingList: MeltingList;
   spMeter: SpMeter;
   session: GameSession;
   hud: Hud;
   loop: FrameLoop;
+  gameOver: GameOverView;
   /** 卸下投放輸入的事件綁定。 */
   detachInput: () => void;
   /** 停止監看視窗尺寸與名冊尺寸。 */
@@ -55,8 +59,6 @@ async function bootstrap(): Promise<void> {
   /*
    * 版面一建好就開始等比縮放，而不是等配置載入完 —— 否則在那段時間裡畫面會是一張
    * 超出視窗、被裁掉大半的 1920×1080 畫布。
-   * Scaling starts as soon as the canvas exists rather than after the config load,
-   * otherwise the first frame is an unscaled 1920×1080 canvas cropped by the viewport.
    */
   const detachScale = attachStageScale({ stage: layout.stage });
 
@@ -73,17 +75,63 @@ async function bootstrap(): Promise<void> {
   const sprites = new SpriteLoader();
   await sprites.loadAll(config.levels.levels);
 
+  /*
+   * 輪廓碰撞框（光柵化輪廓法）：素材一到手就為整條合成鏈導出多邊形。失敗的等級記為
+   * `null`，遊玩時退回圓形 —— 缺一張圖不該讓整個遊戲開不起來。
+   * Outline colliders: outlines are derived for the whole chain as soon as assets arrive.
+   * A failed level is recorded as `null` and falls back to a circle; one bad image must not
+   * stop the game.
+   */
+  const silhouettes = buildSilhouetteCache(config.levels.levels, sprites);
+
   const canvas = hook<HTMLCanvasElement>(layout.regions.container, 'stage-canvas');
   const viewport = new Viewport(canvas);
 
-  const session = new GameSession({ config });
+  /*
+   * meta-progression：解鎖與最高分跨局存活（design.md D5）。
+   * 鏈首（編號最小者）一律已解鎖，否則開局會完全沒有東西可掉。
+   * Meta-progression: unlocks and the high score outlive a run. The head of the chain (the
+   * lowest id) is always unlocked; without it nothing could ever be dropped.
+   */
+  const baselineId = Math.min(...config.levels.levels.map((level) => level.id));
+  const progress = createProgressStore({ baseline: [baselineId] });
+
+  /* 名冊在下方才建立，但解鎖事件可能在建立之前就觸發；用可變參考承接。 */
+  let meltingList: MeltingList | null = null;
+  let gameOver: GameOverView | null = null;
+
+  const session = new GameSession({ config, unlocks: progress, silhouettes });
   const hud = new Hud({ layout, sprites, levels: config.levels.levels });
+
+  const updateHud = (): void => {
+    hud.update({
+      nextLevelId: session.upcomingLevelId,
+      score: session.score,
+      mergedCount: session.mergedCount,
+      comboCount: session.comboCount,
+      comboMultiplier: session.comboMultiplier,
+      bestTry: progress.highScore,
+    });
+  };
+
+  /*
+   * 結算覆蓋層。`shownGameOver` 讓它在同一局只彈一次 —— `isOver` 一旦成立就會一直是
+   * 真，少了這個旗標會每一幀都重設焦點與重播「新紀錄」。
+   * The overlay fires once per run: `isOver` stays true, so without the flag it would refocus
+   * and re-announce a new best every frame.
+   */
+  let shownGameOver = false;
+  gameOver = createGameOver({
+    host: layout.root,
+    onRestart: (): void => {
+      session.reset();
+      shownGameOver = false;
+      updateHud();
+    },
+  });
 
   /*
    * 除錯輔助線：開發模式下加上 `?debug=1` 就會疊出容器外框、物理空腔與投放線。
-   * 這正是「哪個框對應哪個框」的答案，也是取代「瞎子摸象」最快的方法。
-   * Debug guides: `?debug=1` in a dev build overlays the container frame, the physics
-   * cavity and the spawn line — the quickest answer to "which rectangle is which".
    */
   const debugOverlay = import.meta.env.DEV && new URLSearchParams(window.location.search).has('debug');
 
@@ -93,11 +141,19 @@ async function bootstrap(): Promise<void> {
     sprites,
     debug: debugOverlay,
     onAfterFrame: (current): void => {
-      hud.update({
-        nextLevelId: current.upcomingLevelId,
-        score: current.score,
-        mergedCount: current.mergedCount,
-      });
+      updateHud();
+
+      if (current.isOver && !shownGameOver) {
+        shownGameOver = true;
+        const previousBest = progress.highScore;
+        const best = progress.recordScore(current.score);
+        gameOver?.show({
+          score: current.score,
+          merged: current.mergedCount,
+          best,
+          isNewBest: current.score > previousBest,
+        });
+      }
     },
   });
 
@@ -105,14 +161,6 @@ async function bootstrap(): Promise<void> {
    * `observe()` 會立刻回報一次，所以不需要先手動量尺寸。
    * 視埠與 session 必須**一起**重算：前者決定縮放，後者決定牆壁位置，只更新其中一個
    * 會讓物理邊界與畫面框線錯開。
-   * observe() reports once immediately. The viewport and the session are recomputed
-   * together because one owns the scale and the other the wall positions.
-   *
-   * 畫布尺寸現在是固定設計值（不再隨視窗浮動），所以這條路徑實際上每次都算出同一組
-   * 數字；留著是為了讓 `Viewport` 仍是唯一的縮放來源，而不是靠「它不會變」的假設。
-   * The canvas is now a fixed design size, so this path recomputes the same numbers every
-   * time. It stays because `Viewport` should remain the single owner of the scale rather
-   * than relying on an assumption that nothing will ever change it.
    */
   viewport.observe((): void => {
     viewport.resize();
@@ -130,31 +178,38 @@ async function bootstrap(): Promise<void> {
   });
 
   /* 先寫一次 HUD，否則 NEXT 卡會空著等到第一次狀態變化。 */
-  hud.update({
-    nextLevelId: session.upcomingLevelId,
-    score: session.score,
-    mergedCount: session.mergedCount,
-  });
+  updateHud();
 
   loop.start();
 
   /* 名冊格數現在由設計稿決定，不再依面板寬度量測。 */
-  const meltingList = createMeltingList({
+  meltingList = createMeltingList({
     host: hook(layout.regions.melting, 'melting-body'),
     levels: config.levels.levels,
     sprites,
+    unlocked: progress.unlocked,
   });
+
+  /*
+   * 解鎖一發生就重畫名冊，把 `???` 換成角色圖。session 內部會呼叫 `progress.unlock()`，
+   * 這個訂閱是唯一的通知路徑 —— 畫面永遠跟著存檔走。
+   * Unlocks redraw the roster. The session calls `progress.unlock()` internally, and this
+   * subscription is the only notification path, so the screen always follows the save.
+   */
+  progress.onChange((): void => meltingList?.setUnlocked(progress.unlocked));
 
   const context: AppContext = {
     config,
     sprites,
     viewport,
     layout,
+    progress,
     meltingList,
     spMeter,
     session,
     hud,
     loop,
+    gameOver,
     detachInput,
     detachScale,
   };
@@ -164,8 +219,6 @@ async function bootstrap(): Promise<void> {
 /**
  * 在開發模式下把組裝結果掛到 `window` 方便手動檢查。
  * 正式建置會被 Vite 的 `import.meta.env.DEV` 常數折疊掉，不會進產物。
- * Exposes the assembled context on `window` in development only; the production build
- * folds this away.
  */
 function exposeForDebugging(context: AppContext): void {
   if (import.meta.env.DEV) {
