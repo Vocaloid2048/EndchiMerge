@@ -90,7 +90,7 @@ export const LAYOUT_RECTS = {
    */
   back: { x: 64, y: 64, width: 128, height: 128 },
   /** ⑥ 容器（`1408:2110`，含透視偏移的完整包圍盒）。 */
-  container: { x: 627, y: 140, width: 667, height: 875 },
+  container: { x: 627, y: 140, width: 667, height: 845 },
   /** ③ NEXT 卡（`1408:2236`）。 */
   next: { x: 1421, y: 180, width: 163, height: 171 },
   /** ④ COMBO 卡（`1408:2237`），與 NEXT 同高並排。 */

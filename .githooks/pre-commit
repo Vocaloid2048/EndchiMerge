@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 #
 # 方團團素材簽名護欄 / Character asset signature guard.
 #
