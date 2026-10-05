@@ -1172,5 +1172,104 @@ describe('GameSession — 輪廓碰撞體 / outline colliders', () => {
     /* 仍然合成得起來，證明退回路徑沒有把遊戲弄壞。 */
     expect(session.mergedCount).toBeGreaterThan(0);
   });
-});
 
+  it('reports the decomposed convex parts, not the convex hull, for collider outlines', () => {
+    /*
+     * `?debug=1` 的碰撞框標註要畫**物理真正在碰撞的形狀**。
+     *
+     * `Bodies.fromVertices` 把凹多邊形分解成多個凸部件，父體（`parts[0]`）的 `vertices`
+     * 是**凸包** —— 一個把 U 字凹角填滿的多邊形。若標註畫凸包，畫面上會看到一個跟素材
+     * 明顯對不上的實心形狀，正是「看畫面看不出碰撞到底用什麼」的情況。
+     *
+     * 這條釘住 `colliderOutlines` 回傳的是 `parts.slice(1)`：多個部件、每個頂點數 ≥ 3，
+     * 且**不在**父體凸包上。
+     * The `?debug=1` collider annotation must draw the shape physics **actually** collides with.
+     *
+     * `Bodies.fromVertices` splits a concave polygon into convex parts; the parent (`parts[0]`)
+     * holds the **convex hull**, which fills the U's notch. Drawing that would put a visibly
+     * wrong solid shape on screen — exactly the "you cannot see what collides" problem.
+     *
+     * This pins that `colliderOutlines` returns `parts.slice(1)`: several parts, each with ≥3
+     * vertices, and **not** sitting on the parent's hull.
+     */
+    const session = makeOutlineSession(
+      [{ ...level(1, 13.5, 70), mergeResult: null }],
+      U_POLYGON,
+    );
+
+    dropAndSettle(session, 250, 240);
+
+    const [collider] = session.colliderOutlines;
+    expect(collider).toBeDefined();
+    expect(collider?.levelId).toBe(1);
+
+    const parts = collider?.parts ?? [];
+    /* 凹多邊形必須真的被拆開 —— 只有一個部件就代表拿到的是凸包。 */
+    expect(parts.length).toBeGreaterThan(1);
+
+    for (const part of parts) {
+      /* 每個部件都要能畫成多邊形。 */
+      expect(part.length).toBeGreaterThanOrEqual(3);
+      for (const vertex of part) {
+        expect(Number.isFinite(vertex.x)).toBe(true);
+        expect(Number.isFinite(vertex.y)).toBe(true);
+      }
+    }
+
+    /*
+     * 關鍵斷言：**凹角**（原多邊形在 (−4, −14) 到 (−4, 4) 之間內凹）必須是空的。
+     * 凸包會把 (−4, 0) 這種凹進去的點也包含進來；分解後的凸塊不會。
+     */
+    const notchPoints = parts
+      .flat()
+      .filter((vertex) => vertex.x > -6 && vertex.x < -2 && vertex.y > -2 && vertex.y < 6);
+    expect(notchPoints).toHaveLength(0);
+  });
+
+  it('hands out copies so the renderer cannot mutate the physics vertices', () => {
+    /*
+     * `colliderOutlines` 把 Matter 的 `vertices` 複製一份再交出去。若哪天圖個方便直接回傳
+     * 內部陣列，渲染層就能改到物理狀態 —— 而且這種 bug 只會在除錯開啟時出現，最難查。
+     * `colliderOutlines` copies Matter's vertices. Should anyone ever return the internals for
+     * convenience, the renderer could mutate physics — and only with debug on, which is the
+     * hardest class of bug to trace.
+     */
+    const session = makeOutlineSession(
+      [{ ...level(1, 13.5, 70), mergeResult: null }],
+      U_POLYGON,
+    );
+
+    dropAndSettle(session, 250, 240);
+
+    const first = session.colliderOutlines[0];
+    const snapshot = first?.parts[0]?.[0];
+    expect(snapshot).toBeDefined();
+    if (snapshot === undefined) return;
+
+    /* 竄改回傳的副本，不該影響下一次讀取。 */
+    snapshot.x = -9999;
+
+    expect(session.colliderOutlines[0]?.parts[0]?.[0]?.x).not.toBe(-9999);
+  });
+
+  it('falls back to a single part when the collider is a circle', () => {
+    /*
+     * 圓形碰撞體沒有 `parts` 陣列，退回父體本身就是對的 —— 圓就是一個部件。
+     * 這條同時保證「圓形後備路徑不會讓除錯標註崩掉」。
+     * A circle collider has no `parts`, so falling back to the parent is correct — a circle is
+     * one part. This also guarantees the fallback never breaks the debug annotation.
+     */
+    const session = makeOutlineSession(
+      [{ ...level(1, 13.5, 70), mergeResult: null }],
+      U_POLYGON,
+    );
+    const silhouettes = (session as unknown as { silhouettes: Map<number, unknown> }).silhouettes;
+    silhouettes.set(1, null);
+
+    dropAndSettle(session, 250, 240);
+
+    const [collider] = session.colliderOutlines;
+    expect(collider?.parts.length).toBe(1);
+    expect(collider?.parts[0]?.length).toBeGreaterThanOrEqual(3);
+  });
+});

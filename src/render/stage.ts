@@ -39,12 +39,35 @@ export const AIM_GUIDE_STYLE = {
   color: 'rgba(61, 61, 61, 0.69)',
 } as const;
 
-/** 除錯輔助線的樣式；只在 `StageFrame.debug` 存在時使用。 */
+/**
+ * 除錯輔助線的樣式；只在 `StageFrame.debug` 存在時使用。
+ *
+ * **調參入口**：顏色、粗幼、頂點半徑都在這裡改。
+ * The tuning entry point: colours, weights and the vertex dot radius all live here.
+ */
 const DEBUG_STYLE = {
   lineWidth: 1.5,
   frame: 'rgba(255, 84, 160, 0.95)',
   cavity: 'rgba(90, 220, 255, 0.95)',
   spawn: 'rgba(255, 214, 92, 0.95)',
+  /*
+   * 碰撞框：**紅線描邊 ＋ 藍色頂點實心圓點**，與 `.tmp-verify/trace-xx.png`（輪廓追蹤工具）
+   * 的畫面一模一樣。這不是巧合 —— 兩者回答的是同一個問題：「物理實際拿什麼在碰撞？」，
+   * 顏色一致就不用在腦中做一次對應。
+   *
+   * 紅線選純紅（`#ff2d55`）而 frame 的粉紅（`rgba(255,84,160)`），因為兩者會**同時**出現，
+   * 拉開色相才分得清哪條線是哪個。藍點刻意用接近青色的 `#33d6ff`，避開 cavity 的
+   * `rgba(90,220,255)` 又足夠醒目。
+   * Colliders: **red edges with blue vertex dots**, exactly as the contour tracer renders in
+   * `.tmp-verify/trace-xx.png`. Not a coincidence — both answer "what is the engine actually
+   * colliding with?", and matching colours means the mapping is never re-derived in the head.
+   *
+   * The red is deliberately a different hue from the frame's pink because the two can appear
+   * together; the vertex blue is pushed toward cyan to stay distinct from the cavity's.
+   */
+  colliderEdge: 'rgba(255, 45, 85, 0.95)',
+  colliderVertex: 'rgba(51, 214, 255, 0.95)',
+  colliderVertexRadius: 3.5,
 } as const;
 
 /**
@@ -177,12 +200,26 @@ export interface StageFrame {
    */
   clipTop?: number;
   /**
-   * 除錯輔助。提供時額外畫出容器的外框、物理空腔與投放線。
+   * 除錯輔助。提供時額外畫出容器的外框、物理空腔、投放線與**碰撞框標註**。
    * Only wired up behind `?debug=1` in development.
    */
   debug?: {
     cavity: Rect;
     spawnY: number;
+    /**
+     * 每顆方團團的碰撞體頂點（世界座標），每個元素是一顆的**凸部件**清單。
+     * 一顆圓形（無輪廓）只有一個部件；一個凹輪廓會被物理引擎拆成數個。
+     *
+     * 可空：沒有碰撞框資料時只是不畫標註，其餘輔助線照舊。
+     * Collider vertices per dumpling in world space, one list per **convex part**. A circle has
+     * a single part; a concave outline is split into several by the engine.
+     *
+     * Optional: absent simply means no annotations, the other guides still draw.
+     */
+    colliders?: {
+      levelId: number;
+      parts: { x: number; y: number }[][];
+    }[];
   };
 }
 
@@ -365,8 +402,8 @@ function drawOverflowLine(
 }
 
 /**
- * 除錯輔助線：容器外框、物理空腔、投放高度。
- * Debug guides: container frame, physics cavity and spawn height.
+ * 除錯輔助線：容器外框、物理空腔、投放高度，以及**碰撞框標註**。
+ * Debug guides: container frame, physics cavity, spawn height and the collider annotations.
  */
 function drawDebugOverlay(
   ctx: CanvasRenderingContext2D,
@@ -374,7 +411,7 @@ function drawDebugOverlay(
   debug: NonNullable<StageFrame['debug']>,
 ): void {
   const { frame } = geometry;
-  const { cavity, spawnY } = debug;
+  const { cavity, spawnY, colliders } = debug;
 
   ctx.save();
   ctx.lineWidth = DEBUG_STYLE.lineWidth;
@@ -392,6 +429,37 @@ function drawDebugOverlay(
   ctx.moveTo(frame.x, spawnY);
   ctx.lineTo(frame.x + frame.width, spawnY);
   ctx.stroke();
+
+  /* 碰撞框：實線閉合多邊形 ＋ 每個頂點一個實心圓點。 */
+  if (colliders !== undefined) {
+    ctx.setLineDash([]);
+
+    for (const collider of colliders) {
+      for (const part of collider.parts) {
+        /* 頂點少於 3 個畫不成多邊形（退化情形），直接跳過。 */
+        if (part.length < 3) continue;
+
+        ctx.strokeStyle = DEBUG_STYLE.colliderEdge;
+        ctx.beginPath();
+        ctx.moveTo(part[0].x, part[0].y);
+        /* `closePath` 會自動連回第一點，所以只畫 n−1 條線段。 */
+        for (let index = 1; index < part.length; index += 1) {
+          ctx.lineTo(part[index].x, part[index].y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+
+        /* 頂點用實心圓點：`fill` 不用 `stroke`，小半徑下才不會糊成一團。 */
+        ctx.fillStyle = DEBUG_STYLE.colliderVertex;
+
+        for (const vertex of part) {
+          ctx.beginPath();
+          ctx.arc(vertex.x, vertex.y, DEBUG_STYLE.colliderVertexRadius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+  }
 
   ctx.restore();
 }

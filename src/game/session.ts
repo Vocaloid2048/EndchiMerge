@@ -774,6 +774,45 @@ export class GameSession {
   }
 
   /**
+   * **除錯用**：每一顆方團團的碰撞體頂點（世界座標），依實際用來碰撞的多邊形拆解。
+   *
+   * 這是給 `?debug=1` 的：畫面上標成「藍點 ＋ 紅線」，讓人一眼看出物理引擎實際拿什麼
+   * 在碰撞 —— 這正是輪廓追蹤（`render/silhouette.ts`）那套工具的畫面版本。
+   * Debug-only: each dumpling's collider vertices in world space, split the way the engine
+   * actually collides.
+   *
+   * **為什麼是「拆解後」的形狀**：`Bodies.fromVertices` 把凹多邊形分解成多個**凸**部件
+   * 才能做碰撞。父體（`parts[0]`）的 `vertices` 是**凸包**，畫出來會是一個把凹角填滿的
+   * 多邊形 —— 那不是實際碰撞的形狀。所以取 `parts.slice(1)`：那才是真正在跑的凸塊。
+   * 圓形後備路徑（`createCircleBody`）沒有 `parts`，退回父體本身即可。
+   *
+   * **為什麼回傳副本**：`vertices` 雖說是唯讀陣列，但把 Matter 的內部結構直接交出去，
+   * 等於讓渲染層能改到物理狀態。複製一份淺層頂點，兩邊就互不干涉。
+   *
+   * **Why the *decomposed* shape**: `Bodies.fromVertices` splits a concave polygon into convex
+   * parts because that is all the engine can collide. The parent (`parts[0]`) holds the
+   * **convex hull**, whose vertices trace a filled-in polygon that is *not* the collision shape.
+   * `parts.slice(1)` is what actually runs. The circle fallback has no `parts`, so it falls back
+   * to the parent.
+   *
+   * **Why copies**: `vertices` is nominally read-only, but handing out Matter's internals lets the
+   * renderer mutate physics. A shallow copy per vertex keeps the two layers independent.
+   */
+  get colliderOutlines(): { levelId: number; parts: { x: number; y: number }[][] }[] {
+    return this.entries.map((entry) => {
+      /* `isConvex` 的複合體有 `parts`；單一圓形（`circleRadius` 定義）則沒有。 */
+      const parts = entry.body.parts.length > 1 ? entry.body.parts.slice(1) : [entry.body];
+
+      return {
+        levelId: entry.level.id,
+        parts: parts.map((part) =>
+          part.vertices.map((vertex) => ({ x: vertex.x, y: vertex.y })),
+        ),
+      };
+    });
+  }
+
+  /**
    * 彈跳縮放：動畫期間從 `POP_PEAK_SCALE` 緩出回到 1。
    * Pop scale: eases from `POP_PEAK_SCALE` back to 1 during the animation.
    */

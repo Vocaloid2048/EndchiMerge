@@ -239,7 +239,12 @@ export class FrameLoop {
          */
         clipTop: 0,
         debug: this.debug
-          ? { cavity: this.session.playArea, spawnY: this.session.spawnYValue }
+          ? {
+              cavity: this.session.playArea,
+              spawnY: this.session.spawnYValue,
+              /* 碰撞框標註：藍點（頂點）＋紅線（邊），對齊輪廓追蹤工具的畫面。 */
+              colliders: this.session.colliderOutlines,
+            }
           : undefined,
       },
       this.sprites,
