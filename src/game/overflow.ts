@@ -2,44 +2,40 @@
  * 溢位判定與寬限倒數。
  * Overflow detection and grace countdown.
  *
- * 規則（使用者定案）：容器頂緣往上 `overflowAboveRim` 的高度畫一條線；只要有方團團的
- * **上緣**越過那條線，**而且在越線位置附近停定下來**，就開始倒數 `graceMs`。
+ * 規則（使用者定案）：容器頂緣往上 `overflowAboveRim` 的高度畫一條線；只要有**已入堆**的
+ * 方團團，其上緣越過那條線，就立刻開始倒數 `graceMs`。
  * The rule: a line sits `overflowAboveRim` above the container's rim. As soon as any
- * dumpling's **top edge** crosses it **and settles there**, a `graceMs` countdown starts.
+ * **piled** dumpling's **top edge** crosses it, a `graceMs` countdown starts immediately.
  *
- * **為什麼要等停定**（使用者定案）：越線的瞬間幾乎都是「剛投下、還在往下掉」或
- * 「剛被彈起來」，那時候倒數毫無意義 —— 玩家還沒看到問題就先被警告。改成要「位移很少」
- * 才起算，倒數就只在堆疊真的卡住了才出現。
- * **Why wait for it to settle** (the user's decision): the instant of crossing is almost
- * always a dumpling still falling or freshly bounced, and starting the countdown then warns
- * the player before they can even see the problem. Requiring the breach to be nearly
- * stationary means the timer only appears when the stack is genuinely stuck.
+ * **為什麼不看「停定」**（使用者定案，第二版）：第一版要求越線顆粒在原地停定 `settleMs`
+ * 才起算，用意是避免「剛投下、還在掉」的瞬間誤判。但 `entered`（已入堆＝碰過別的方團團）
+ * 本身已經把「還在掉」排除掉了，停定判定於是變成多餘的門檻 —— 而且會開一個大洞：
+ * **玩家持續投放時，堆頂那顆一直被擾動、位移永遠超過門檻，停定永不成立，紅線與倒數就
+ * 永遠不出現**。場面看起來就是「堆到線上卻什麼都不發生」（使用者截圖的「卡住」）。
+ * 既然入堆與否已由接觸判定把關，越線的已入堆顆粒就是貨真價實的溢位，直接起算。
+ * **Why the settle gate was dropped** (the user's decision, revision 2): the first cut required
+ * the breaching body to be stationary for `settleMs` before counting, to avoid tripping on a
+ * dumpling still falling. But `entered` (piled = has touched another dumpling) already excludes
+ * "still falling", so the settle gate became a redundant threshold — and it opened a large hole:
+ * **while the player keeps dropping, the topmost body is constantly jostled, its displacement
+ * never stays under the threshold, settling never holds, and the red line and countdown never
+ * appear at all.** The board simply looks like "the stack reached the line and nothing happens"
+ * (the "stuck" the user's screenshot showed). Since contact already gates "piled", a piled body
+ * over the line is a genuine overflow and counts right away.
  *
- * 停定的判準是**越線顆粒的每步位移**：連續 `settleMs` 都低於 `settleDistance` 才算停定。
- * 位移用每顆自己的上一幀位置比對，所以一顆靜止的顆粒不會被旁邊滾動的顆粒拖住
- * —— 「整堆都靜止」在堆滿時幾乎永遠不成立。
- * Settling is measured as the **per-step displacement of the breaching bodies**: every body
- * must stay under `settleDistance` for `settleMs` in a row. Displacement is compared against
- * each body's own previous position, so one still dumpling is not held up by a neighbour
- * rolling past — "the whole pile is still" is a condition that almost never holds once the
- * container is full.
- *
- * **為什麼倒數要「連續」而不是「累計」**：掉落下來的方團團本來就會短暫經過線上，若把那些
- * 瞬時穿越累加起來，正常遊玩也會被誤判出局。因此只要場上沒有東西越線，計時器立刻歸零。
+ * **為什麼倒數要「連續」而不是「累計」**：掉落下來的方團團本來就會短暫經過線上，但因為
+ * 未入堆不算數，這些瞬時穿越不會被計入。只要場上沒有**已入堆**的東西越線，計時器立刻歸零。
  * **Why the countdown is continuous rather than cumulative**: a falling dumpling crosses the
- * line for a moment by design, and accumulating those instants would fail a perfectly normal
- * run. The timer snaps back to zero the moment nothing is above the line.
+ * line for a moment by design, but since it is not piled those instants never count. The timer
+ * snaps back to zero the moment nothing **piled** is above the line.
  *
- * **倒數起算後就不再被運動打斷**（使用者定案）：停定判定只決定「倒數**什麼時候開始**」，
- * 一旦開始，之後不論場上多吵（玩家繼續投放、新顆粒砸進堆疊把整堆推開），倒數都一路走到底。
- * 唯一能讓它歸零的條件是「完全沒有越線顆粒」—— 那才是「解除越界」。
- * 舊實作把 `elapsedMs` 也綁在 `anyMoving` 上，導致每投一顆就歸零、倒數永遠走不完。
- * **Once counting begins, movement can no longer interrupt it** (the user's decision): settling
- * only decides **when the countdown starts**. After that it runs to the end no matter how noisy
- * the board gets (the player keeps dropping, fresh dumplings slam into the pile and shove it
- * around). The one thing that resets it is "nothing is above the line" — that is what "clearing
- * the breach" means. The old code zeroed `elapsedMs` on movement too, so every drop reset the
- * timer and it could never finish.
+ * **倒數起算後就不再被運動打斷**（使用者定案）：一旦開始，之後不論場上多吵（玩家繼續投放、
+ * 新顆粒砸進堆疊把整堆推開），倒數都一路走到底。唯一能讓它歸零的條件是「完全沒有越線顆粒」
+ * —— 那才是「解除越界」。
+ * **Once counting begins, movement can no longer interrupt it** (the user's decision): after that
+ * it runs to the end no matter how noisy the board gets (the player keeps dropping, fresh
+ * dumplings slam into the pile and shove it around). The one thing that resets it is "nothing is
+ * above the line" — that is what "clearing the breach" means.
  *
  * **「入堆」的定義是接觸**（使用者定案）：一顆方團團要**碰到其他方團團**才算入堆，光是被
  * 投下來、或撞到牆與地板都不算。標記由呼叫端（`game/session.ts` 的碰撞處理）單向設真；
@@ -60,9 +56,9 @@
  * joined the pile.
  */
 export interface OverflowBody {
-  /** 剛體識別碼；用來追蹤同一顆的上一幀位置。 */
+  /** 剛體識別碼；保留給呼叫端與除錯用途。 */
   id: number;
-  /** 圓心 X，虛擬單位。停定判定要看二維位移，只看 Y 會漏掉橫向滾動。 */
+  /** 圓心 X，虛擬單位。 */
   x: number;
   /** 圓心 Y，虛擬單位。 */
   y: number;
@@ -80,79 +76,63 @@ export interface OverflowBody {
 }
 
 /**
- * 停定判定的參數。
- * Settling-detection parameters.
+ * 溢位判定參數。
+ * Overflow-detection parameters.
  *
- * **調參入口**：想讓警告更早或更晚出現就改這裡。
- * **The tuning entry point**: adjust these to make the warning appear sooner or later.
+ * **調參入口**：想改寬限秒數就改 `graceMs`（來自 `levels.json`）。舊版還有
+ * `settleDistance` / `settleMs` 這兩個「停定」門檻，現已移除 —— 見檔頭說明。
+ * **The tuning entry point**: `graceMs` comes from `levels.json`. The old `settleDistance` /
+ * `settleMs` settle thresholds are gone — see the file header.
  */
 export interface OverflowSettleOptions {
   /**
-   * 每步位移低於這個值（虛擬單位）才算「沒有在動」。
-   * Per-step displacement below this (virtual units) counts as "not moving".
+   * @deprecated 停定門檻已移除；已入堆的越線顆粒立即起算。保留欄位只為相容舊呼叫端。
+   * @deprecated The settle gate is gone; a piled breach counts immediately. Kept for signature
+   * compatibility only.
    */
-  settleDistance: number;
+  settleDistance?: number;
   /**
-   * 要連續靜止多久（毫秒）才真的起算。給了它一段緩衝，抖動不會被當成停定。
-   * How long (ms) the breach must stay still to actually start counting; the margin keeps
-   * jitter from reading as settled.
+   * @deprecated 見 `settleDistance`。
+   * @deprecated See `settleDistance`.
    */
-  settleMs: number;
+  settleMs?: number;
 }
 
-/** 停定判定的預設值；數字與 `docs/gameplay.md` §4.3 的說明一致。 */
-export const OVERFLOW_SETTLE_DEFAULTS: OverflowSettleOptions = {
+/** 舊版停定門檻的預設值；保留僅供文件與既有測試引用。 */
+export const OVERFLOW_SETTLE_DEFAULTS = {
   settleDistance: 0.6,
   settleMs: 200,
-};
-
-/** 一顆越線顆粒的追蹤狀態。 */
-interface TrackedBody {
-  x: number;
-  y: number;
-}
+} as const;
 
 export class OverflowMonitor {
   private readonly graceMs: number;
-  private readonly settleDistance: number;
-  private readonly settleMs: number;
 
   private elapsedMs = 0;
-  /** 越線且已在原地停留多久；未達 `settleMs` 前不倒數。 */
-  private settledMs = 0;
-  private over = false;
-  /**
-   * 倒數是否已經**起算**（=`settled` 曾為真）。起算之後就進入「不可被運動打斷」的狀態。
-   * Whether the countdown has ever actually begun. Once it has, the timer becomes immune to
-   * movement — see `update`.
-   */
+  /** 是否曾經起算（一旦為真，倒數就不再被運動打斷，直到退線歸零）。 */
   private counting = false;
+  private over = false;
 
-  /** 上一幀各顆的位置，用來算每步位移。 */
-  private previous = new Map<number, TrackedBody>();
-
-  constructor(graceMs: number, settle: Partial<OverflowSettleOptions> = {}) {
+  constructor(graceMs: number, _settle: OverflowSettleOptions = {}) {
     this.graceMs = Math.max(0, graceMs);
-    this.settleDistance = Math.max(0, settle.settleDistance ?? OVERFLOW_SETTLE_DEFAULTS.settleDistance);
-    this.settleMs = Math.max(0, settle.settleMs ?? OVERFLOW_SETTLE_DEFAULTS.settleMs);
   }
 
-  /** 目前已經連續溢位（且已停定）多久，毫秒。 */
+  /** 目前已經連續溢位多久，毫秒。 */
   get elapsed(): number {
     return this.elapsedMs;
   }
 
   /**
-   * 越線的顆粒是否已經停定（＝倒數真的開始了）。
-   * Whether the breach has settled, i.e. the countdown has actually started.
+   * 目前是否有**已入堆**的顆粒越線（＝倒數正在跑）。
+   * Whether a **piled** body is over the line, i.e. the countdown is running.
    *
-   * 畫面靠這個值決定要不要亮紅線：還在動的時候**完全不亮**，玩家就不會看到一個
-   * 「還在掉就出現」的警告。
-   * The view uses this to decide whether to light the line: while things are still moving it
-   * stays completely dark, so the player never sees a warning about a dumpling still falling.
+   * 畫面靠這個值決定要不要亮紅線與倒數徽章。舊版另外要求「停定」才為真，那個門檻已移除：
+   * 它讓「持續投放時堆頂一直被擾動」的場面永遠不亮線，玩家只看到堆到頂卻毫無反應。
+   * The view uses this to light the line and the countdown badge. The old "settled" gate is
+   * gone: it kept the line dark whenever continuous dropping jostled the top of the stack, so
+   * the player saw the pile reach the line and nothing happen at all.
    */
   get settled(): boolean {
-    return this.settledMs >= this.settleMs;
+    return this.counting;
   }
 
   /** 寬限進度 `0..1`；給 UI 顯示「剩下多少時間」。 */
@@ -171,8 +151,8 @@ export class OverflowMonitor {
    * 剩餘秒數，無條件**進位**到整數 —— 顯示 5 到 1，不會出現 0。
    * Whole seconds remaining, rounded **up** so the display runs 5, 4, … 1 and never shows 0.
    *
-   * 尚未停定（＝倒數還沒真的開始）時回 0，呼叫端因此不需要自己判斷要不要顯示。
-   * Returns 0 before the breach settles, so callers need no extra "should I show this?" test.
+   * 沒有越線顆粒時回 0，呼叫端因此不需要自己判斷要不要顯示。
+   * Returns 0 while nothing is over the line, so callers need no extra "should I show this?".
    */
   get remainingSeconds(): number {
     if (!this.settled || this.graceMs <= 0) return 0;
@@ -193,7 +173,7 @@ export class OverflowMonitor {
    * @param bodies 場上所有方團團，各自帶 `entered` 標記 / Every dumpling on the board,
    *   each carrying its `entered` flag.
    * @param lineY 溢位線的 Y（虛擬單位）/ The overflow line's Y in virtual units.
-   * @returns 這一步是否處於「有東西越線」的狀態（尚未考慮停定）。
+   * @returns 這一步是否處於「有已入堆顆粒越線」的狀態。
    */
   update(deltaMs: number, bodies: readonly OverflowBody[], lineY: number): boolean {
     const dt = Math.max(0, deltaMs);
@@ -202,80 +182,27 @@ export class OverflowMonitor {
     const breaching = bodies.filter((body) => body.entered && body.y - body.radius < lineY);
 
     if (breaching.length === 0) {
-      /* 退線就完全歸零，包括「停定了多久」—— 下一次越線要重新等它停。 */
+      /* 退線就完全歸零 —— 下一次越線要從頭倒數。這是「解除越界」的唯一條件。 */
       this.elapsedMs = 0;
-      this.settledMs = 0;
       this.counting = false;
-      this.previous.clear();
       return false;
     }
 
     /*
-     * **倒數起算之後，運動不再打斷它**（使用者定案）。
+     * 越線即起算，一直到退線為止。
      *
-     * 舊實作裡 `anyMoving` 會把 `settledMs` 和 `elapsedMs` 一起歸零，於是每投一顆新方團團
-     * 就重置一次：新顆粒掉進堆疊、碰到其他方團團 → `entered = true`，上緣又在線上 → 它成了
-     * 新的「越線顆粒」，而第一次見到它沒有上一步可比較 → `anyMoving = true` → 倒數歸零。
-     * 結果是**倒數永遠走不完**，玩家可以靠一直投放無限拖延（畫面上就是倒數反覆跳回 5）。
+     * 這裡刻意**沒有任何運動或停定判斷**：入堆與否已由接觸判定把關（見檔頭），所以一顆
+     * 已入堆且越線的顆粒，就是貨真價實的溢位，不論它當下是靜止還是被後續投放推得搖搖晃晃。
+     * 舊版的「連續靜止 settleMs」門檻讓「玩家持續投放」的場面永遠起不了算 —— 越線顆粒一直在動、
+     * 停定永不成立、紅線與倒數永不出現，看起來就像卡住。
+     * Count immediately on the breach and keep counting until it clears.
      *
-     * 使用者的規則是「若果未有解除越界條件，請繼續倒數」—— 解除的唯一條件是「完全沒有
-     * 越線顆粒」，那正是上面 `breaching.length === 0` 那一支。所以這裡直接跳過整段停定
-     * 判定，讓倒數一路走到底。
-     *
-     * The countdown, once begun, is **immune to movement** (the user's decision).
-     *
-     * The old code zeroed both `settledMs` and `elapsedMs` whenever anything moved, so every
-     * single drop reset it: the fresh dumpling touches the pile, `entered` goes true, its top
-     * edge is over the line, and being seen for the first time it counts as moving — countdown
-     * back to zero. The result was a timer that could **never** finish; the player could stall
-     * forever by dropping repeatedly (visually: the badge keeps snapping back to 5).
-     *
-     * The user's rule is "keep counting unless the breach is cleared", and the only way to clear
-     * it is "nothing is above the line" — exactly the `breaching.length === 0` branch above. So
-     * the settling test is skipped from here on and the timer runs to the end.
+     * There is deliberately **no movement or settle test here**: contact already gates "piled"
+     * (see the header), so a piled body over the line is a genuine overflow whether it is still
+     * or being jostled by later drops. The old "stationary for `settleMs`" gate meant that while
+     * the player kept dropping, the breaching body never stopped moving, settling never held,
+     * and neither the line nor the countdown ever appeared — which read as being stuck.
      */
-    if (this.counting) {
-      this.elapsedMs += dt;
-      if (this.elapsedMs >= this.graceMs) this.over = true;
-
-      /* 仍然更新基準位置，萬一之後退線又重新越線，接續的判定才不會用舊資料。 */
-      this.previous = new Map(breaching.map((body) => [body.id, { x: body.x, y: body.y }]));
-      return true;
-    }
-
-    /*
-     * 位移取「上一步位置 → 這一步位置」的歐氏距離。第一次見到一顆時沒有上一步可比較，
-     * 直接當成「還在動」—— 剛越線的顆粒本來就多半在動，急著起算會反而更早誤判。
-     * Displacement is the Euclidean distance from the previous step; a body seen for the
-     * first time has nothing to compare against, so it counts as still moving — a freshly
-     * breaching dumpling usually is, and assuming otherwise would warn too early.
-     */
-    let anyMoving = false;
-    for (const body of breaching) {
-      const last = this.previous.get(body.id);
-
-      if (last === undefined) {
-        anyMoving = true;
-      } else if (Math.hypot(body.x - last.x, body.y - last.y) > this.settleDistance) {
-        anyMoving = true;
-      }
-    }
-
-    this.previous = new Map(breaching.map((body) => [body.id, { x: body.x, y: body.y }]));
-
-    if (anyMoving) {
-      /* 還在動：停定計時歸零，倒數尚未起算所以不動 elapsed。畫面上紅線因此完全不亮。 */
-      this.settledMs = 0;
-      this.elapsedMs = 0;
-      return true;
-    }
-
-    this.settledMs += dt;
-
-    /* 還沒停定就不起算；這是「停定後才提示」的落點。 */
-    if (!this.settled) return true;
-
-    /* 通過停定門檻的這一步就是倒數的起算點，從此刻起 `counting` 永為真。 */
     this.counting = true;
     this.elapsedMs += dt;
     if (this.elapsedMs >= this.graceMs) this.over = true;
@@ -286,9 +213,7 @@ export class OverflowMonitor {
   /** 歸零；開新局時呼叫。 */
   reset(): void {
     this.elapsedMs = 0;
-    this.settledMs = 0;
     this.over = false;
     this.counting = false;
-    this.previous.clear();
   }
 }

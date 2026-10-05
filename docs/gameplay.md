@@ -213,14 +213,28 @@ spawnY        = frame.y - dropAboveRim          // container.json，預設 40（
 
 ```
 只要有【已經進槽】的方團團，其上緣（y - radius）越過溢位線：
-    → 開始連續計時 overflowGraceMs（預設 3000ms）
+    → 立刻開始連續計時 overflowGraceMs（預設 5000ms）
 場上沒有這種顆粒：
     → 計時器【立刻歸零】（不是累計）
 計時器滿 → 這一局結束（isOver，單向，不會自己回復）
 ```
 
-**為什麼是「連續」而不是「累計」**：正常遊玩時方團團本來就會短暫經過線上，
-把這些瞬間累加起來會讓完全正常的局面被判出局。
+**沒有「停定」門檻**（修訂版，使用者定案）：最初版本要求越線顆粒在原地停留 200ms 才起算，
+用意是別對「剛投下、還在掉」的瞬間誤報。但 §4.3 的接觸判定已經把「還在掉」排除掉了，這個
+門檻於是不但多餘，還開了一個大洞：
+
+> **玩家持續投放時，堆頂那顆一直被擾動、位移永遠超過門檻 → 停定永不成立 → 紅線與倒數
+> 從不出現。** 場面看起來就是「堆到線上卻什麼都不發生」（使用者截圖回報的「卡住」）。
+
+因為入堆與否已由接觸把關，**已入堆且越線的顆粒就是貨真價實的溢位，立刻起算**，不論它當下
+靜止還是被推得搖搖晃晃。
+
+**為什麼是「連續」而不是「累計」**：正常遊玩時方團團本來就會短暫經過線上，但因為未入堆
+不算數，這些瞬時穿越不會被計入；只要場上沒有**已入堆**的顆粒越線，計時器立刻歸零。
+
+**驗證方式**：`tests/overflow.test.ts` 的「已入堆即起算 / a piled breach counts immediately」
+區塊，其中 `does not need the breaching body to be still — a jostled pile still counts` 直接
+釘住這個修正（舊版在這個情境會回 `settled: false`）。
 
 ### 4.3 「已經進槽」以**接觸**為準
 
@@ -320,7 +334,7 @@ spawnY        = frame.y - dropAboveRim          // container.json，預設 40（
 |---|---|---|
 | 溢位線在頂緣上方多高 | `container.json → overflowAboveRim` | `30` |
 | 投放點在頂緣上方多高 | `container.json → dropAboveRim` | `40`（**必須大於上一項**） |
-| 溢位寬限秒數 | `levels.json → settings.overflowGraceMs` | `3000` |
+| 溢位寬限秒數 | `levels.json → settings.overflowGraceMs` | `5000` |
 | 連擊窗口 | `levels.json → settings.comboWindowMs` | `1000` |
 | 合成冷卻 | `levels.json → settings.mergeCooldownMs` | `100` |
 | 近接合成的邊緣間隙容差 | `src/core/constants.ts → MERGE_OUTLINE_GAP` | `4` |
