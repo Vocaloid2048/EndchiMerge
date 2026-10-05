@@ -62,7 +62,7 @@ const DEFAULT_SETTINGS: GameSettings = {
   overflowPenalty: false,
   mergeCooldownMs: 100,
   overflowGraceMs: 5000,
-  dropCooldownMs: 1000,
+  dropCooldownMs: 500,
 };
 
 /** 合成鏈 10 級（design.md D2）。順序即等級順序。 */

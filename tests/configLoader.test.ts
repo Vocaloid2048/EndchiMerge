@@ -126,6 +126,20 @@ describe('loadConfig — 正常路徑 / happy path', () => {
     const config = await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files) });
     expect(config.skills.skills[0]?.pickCount).toBe(0);
   });
+
+  it('falls back to a 500ms drop cooldown, the shipped value', async () => {
+    /*
+     * 投放冷卻由 1000 縮到 500（使用者定案「1 秒好像太久了」）。這條盯的是**預設值** ——
+     * `levels.json` 若缺失或漏欄位，`DEFAULT_SETTINGS` 必須給 500，而不是留著舊的 1000。
+     * A missing or partial `levels.json` must yield the shipped 500ms, not a stale 1000.
+     */
+    const files = allValid({
+      'levels.json': JSON.stringify({ levels: JSON.parse(VALID_LEVELS).levels }),
+    });
+    const config = await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files) });
+
+    expect(config.levels.settings.dropCooldownMs).toBe(500);
+  });
 });
 
 describe('loadConfig — 檔案層級的降級 / file-level fallback', () => {
