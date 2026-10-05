@@ -61,17 +61,25 @@ export function attachDropInput(options: DropInputOptions): () => void {
   };
 
   /**
-   * 把事件的 client 座標換成虛擬 X。
+   * 把事件的視窗座標換成虛擬 X。
    * Convert an event's client coordinates into a virtual X.
    *
    * 用 `getBoundingClientRect()` 而非 `offsetX`：`offsetX` 以**事件目標**為基準，
-   * 一旦畫布內有子元素或 CSS 縮放就會偏移，而 rect 永遠是視窗座標，可直接相減。
-   * Uses the bounding rect rather than `offsetX`, which is relative to the event target
-   * and drifts as soon as the canvas has children or CSS scaling.
+   * 一旦畫布內有子元素就會偏移，而 rect 永遠是視窗座標，可直接相減。
+   * **但 rect 是「已縮放」的**（畫布活在 `.stage-scale { transform: scale(k) }` 裡），
+   * 所以必須把 rect 一起交給 `viewport.toVirtual()` 讓它除掉 k —— 只傳相對位移會讓
+   * 指標比畫面跑得快 k 倍，可投放範圍看起來會窄掉。
+   * Uses the bounding rect rather than `offsetX`, which is relative to the event target and
+   * drifts as soon as the canvas has children. **Note the rect is the *scaled* one** (the
+   * canvas sits inside `.stage-scale { transform: scale(k) }`), so the rect goes to
+   * `viewport.toVirtual()` too, which divides the scale back out; passing only the offset
+   * makes the pointer outrun the screen by a factor of k and the droppable range look narrow.
    */
   const aimAt = (clientX: number, clientY: number): void => {
     const rect = target.getBoundingClientRect();
-    aim(viewport.toVirtual(clientX - rect.left, clientY - rect.top).x);
+    const point = viewport.toVirtual(rect, clientX, clientY);
+    if (point === null) return;
+    aim(point.x);
   };
 
   const handlePointerMove = (event: PointerEvent): void => {

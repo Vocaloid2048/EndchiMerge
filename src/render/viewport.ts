@@ -135,14 +135,50 @@ export class Viewport {
   }
 
   /**
-   * CSS 像素 → 虛擬座標，用於處理指標事件。
-   * CSS pixels to virtual, for pointer handling.
+   * 相對元素的 CSS 像素 → 虛擬座標，用於處理指標事件。
+   * Element-relative CSS pixels to virtual coordinates, for pointer handling.
    *
-   * @param offsetX 事件相對畫布左緣的 CSS 像素 / Pointer offset in CSS pixels.
-   * @param offsetY 事件相對畫布上緣的 CSS 像素 / Pointer offset in CSS pixels.
+   * **一定要傳「相對元素的」像素，而且要先除掉 CSS 縮放。** 這張畫布活在被
+   * `.stage-scale { transform: scale(k) }` 縮放過的樹裡，所以 `getBoundingClientRect()`
+   * 拿到的是**縮放後**的尺寸：rect 寬是 `元素寬 × k`，而 canvas 的 `clientWidth` 是
+   * **未縮放寬度**。用 `clientX - rect.left` 直接餵進來，等於把 k 倍的距離當成 k = 1，
+   * 指標就會比畫面跑得快 k 倍 —— 指標停在右牆時，瞄準早已撞到夾制上限，可投放範圍看起來
+   * 只剩左邊一段（k 越小越窄）。手指／指標落在元素之外時回傳 `null`，與瀏覽器在元素外
+   * 不派發事件的行為一致。
+   * **Pass element-relative pixels, and divide out the CSS scale.** The canvas lives inside
+   * a tree scaled by `.stage-scale { transform: scale(k) }`, so `getBoundingClientRect()`
+   * reports the **scaled** size while the canvas's `clientWidth` is the **unscaled** width.
+   * Feeding `clientX - rect.left` straight in treats a k-times distance as k = 1, so the
+   * pointer outruns the aim by a factor of k: hovering the right wall already sits past the
+   * clamp, and the droppable range looks like a short segment on the left (the smaller k is,
+   * the narrower it gets). Returns `null` for a point outside the element, matching the
+   * browser's own "no events outside the element" behaviour.
+   *
+   * @param rect 指標事件當下呼叫 `target.getBoundingClientRect()` 的結果（**已縮放**）
+   *   / The rect from `target.getBoundingClientRect()` at event time (already scaled).
+   * @param clientX 事件的視窗座標 X（CSS px）/ The event's client X in CSS px.
+   * @param clientY 事件的視窗座標 Y（CSS px）/ The event's client Y in CSS px.
    */
-  toVirtual(offsetX: number, offsetY: number): VirtualPoint {
-    return { x: offsetX / this.currentScale, y: offsetY / this.currentScale };
+  toVirtual(rect: DOMRectReadOnly, clientX: number, clientY: number): VirtualPoint | null {
+    if (this.widthPx <= 0 || this.heightPx <= 0 || rect.width <= 0 || rect.height <= 0) return null;
+
+    /*
+     * 元素的**實際** CSS 縮放倍率（＝外層 transform 的 k）。基準是 `clientWidth`
+     * （未縮放的 layout 寬），所以 `transform: scale()` 之外的縮放手法也一併還原。
+     */
+    const k = rect.width / this.widthPx;
+    if (!(k > 0)) return null;
+
+    /* 相對元素的未縮放 CSS 像素。 */
+    const localX = (clientX - rect.left) / k;
+    const localY = (clientY - rect.top) / k;
+
+    /* 指標落在元素之外時不回應，與瀏覽器不在元素外派發事件的行為一致。 */
+    if (localX < 0 || localY < 0 || localX > this.widthPx || localY > this.heightPx) return null;
+
+    const factor = this.currentScale > 0 ? this.currentScale : 1;
+
+    return { x: localX / factor, y: localY / factor };
   }
 
   /**
