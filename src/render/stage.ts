@@ -17,7 +17,7 @@
 
 import type { Rect } from '../core/types';
 import type { ContainerGeometry } from './container';
-import { drawContainerBack, drawContainerFront } from './container';
+import { drawContainerBack, drawContainerFront, clipToPlayField } from './container';
 import { drawPlaceholderDumpling } from './placeholder';
 import { SPRITE_ANCHOR, SPRITE_SIZE, spriteScaleForRadius } from '../core/constants';
 
@@ -164,6 +164,18 @@ export interface StageFrame {
     /** 剩餘秒數（整數）；畫在警戒區的正中央。 */
     secondsLeft: number;
   };
+  /**
+   * 方團團與投放預覽的裁切上界（虛擬 Y）。未提供時為 0（＝畫布頂端）。
+   * The clip's top edge in virtual units for dumplings and the drop preview. Defaults to 0,
+   * the canvas top.
+   *
+   * 讓呼叫端能把裁切往下拉（例如除錯時想看清楚被容器蓋住的部分），也把「頂端是開口的」
+   * 寫成明碼而不是靠畫布邊界的副作用。
+   * Lets the caller pull the clip down (e.g. to inspect what the container hides while
+   * debugging) and states that the top is open on purpose rather than leaving it as a side
+   * effect of the canvas boundary.
+   */
+  clipTop?: number;
   /**
    * 除錯輔助。提供時額外畫出容器的外框、物理空腔與投放線。
    * Only wired up behind `?debug=1` in development.
@@ -411,10 +423,30 @@ export function drawStage(
     drawAimGuide(ctx, aim, geometry, frame.guideColor ?? AIM_GUIDE_STYLE.color);
   }
 
-  /* 3. 全部方團團（依物理角度翻滾、依彈跳動畫縮放）。 */
+  /* 3. 全部方團團（依物理角度翻滾、依彈跳動畫縮放）。
+   *
+   * 用 `clipToPlayField()` 把方團團夾在看得見的遊戲區內。素材在圓心**上方**伸出
+   * 2.16 倍半徑（`SPRITE_ANCHOR.y = 328` vs `SPRITE_BODY = 304`），所以疊高之後最頂那顆、
+   * 以及生成在溢位線之上的投放預覽，都會有一截落在畫布之外。顯式裁切讓那一截**沿著
+   * 容器邊界**被切掉，而不是在畫布邊緣隨機斷開；`clipY` 也讓「頂端是開口的」寫在明處。
+   * All dumplings, rotated by physics and scaled by the pop animation.
+   *
+   * The clip keeps dumplings inside the visible play field. The art reaches 2.16 radii
+   * **above** the centre (`SPRITE_ANCHOR.y = 328` against `SPRITE_BODY = 304`), so once the
+   * pile is tall — and for the drop preview, which spawns above the overflow line — a slice
+   * falls outside the canvas. Clipping explicitly cuts that slice **along the container's
+   * boundary** instead of letting it break off at the canvas edge, and `clipY` documents that
+   * the top is open on purpose.
+   *
+   * 線框在裁切之外繪製，所以左右牆與底部圓角永遠完整。
+   * The outline is drawn outside the clip, so the walls and rounded corners stay whole.
+   */
+  ctx.save();
+  clipToPlayField(ctx, geometry, frame.clipTop ?? 0);
   for (const body of bodies) {
     drawBody(ctx, body, sprites);
   }
+  ctx.restore();
 
   /* 4. U 形線框。少了這步就沒有「裝在槽內」的感覺。 */
   drawContainerFront(ctx, geometry);
@@ -429,9 +461,22 @@ export function drawStage(
     drawOverflowCountdown(ctx, overflow);
   }
 
-  /* 6. 投放預覽畫在最上層：它應該壓在線框上，因為它還沒進到槽裡。 */
+  /*
+   * 6. 投放預覽畫在最上層：它應該壓在線框上，因為它還沒進到槽裡。
+   *
+   * 同樣套用遊戲區裁切：預覽生成在**溢位線之上**，而它的藝術又比圓心高 2.16 倍半徑，
+   * 所以在高等級（半徑大）時會有一截落在畫布頂端之外。不裁的話那一截會被畫布靜默切掉，
+   * 看起來像素材缺一角；裁了則是乾淨地沿著可見邊界收邊。
+   * The drop preview, drawn on top because it has not entered the trough yet.
+   *
+   * The same play-field clip applies: the preview spawns **above the overflow line** and its
+   * art reaches 2.16 radii above the centre, so at high levels (larger radii) a slice lands
+   * above the canvas top. Without the clip the canvas cuts it silently and the sprite appears
+   * to be missing a corner; with it the edge is trimmed cleanly at the visible boundary.
+   */
   if (aim !== null) {
     ctx.save();
+    clipToPlayField(ctx, geometry, frame.clipTop ?? 0);
     ctx.globalAlpha = 0.85;
     drawBody(ctx, { ...aim, angle: 0 }, sprites);
     ctx.restore();

@@ -20,8 +20,66 @@ import { createStaticRect } from '../core/physics';
 import { WALL_THICKNESS } from '../core/constants';
 import type { Rect } from '../core/types';
 
-/** 左右牆向上延伸的量，避免下落中的方團團從側面溜出。 */
+/**
+ * 左右牆向上延伸的量，避免下落中的方團團從側面溜出。
+ * How far the side walls rise above the container's rim so a falling dumpling cannot slip
+ * out sideways.
+ *
+ * **240 是下限，不是定值。** 這裡的數字只保證「蓋過畫布頂端的頭部空間」；實際高度由
+ * `computeWallOverhang()` 依容器與投放點算出來，取兩者的較大值。原因是溢位線在頂緣
+ * 上方，堆疊接近溢位線時最頂那幾顆的**藝術**（比碰撞體高 2.16 倍半徑）已經很接近畫布
+ * 頂端，若牆只到那裡就可能在補齊前被擠出去。
+ * **240 is a floor, not the value used.** This number only guarantees the walls clear the
+ * headroom at the top of the canvas; the real height comes from `computeWallOverhang()`,
+ * which derives it from the container and the drop point and takes the larger of the two. The
+ * overflow line sits above the rim, so when a pile nears it the **art** of the topmost
+ * dumplings (2.16 radii above the collider) is already close to the canvas top — a wall that
+ * stopped there could let them be squeezed out before they settled.
+ */
 export const DEFAULT_WALL_OVERHANG = 240;
+
+/**
+ * 由容器與投放點算出左右牆該往上長多高。
+ * Derive how far the side walls must rise, from the container and the drop point.
+ *
+ * 牆必須同時滿足兩件事：
+ * 1. **蓋過投放點** —— 方團團是在 `spawnY` 生成的，若牆頂低於它，剛出現的那一顆就有一
+ *    小段時間兩側無遮擋，連續投放時能被互相擠出去。
+ * 2. **蓋過溢位線** —— 越線的堆疊是這一局最危急的狀態，那裡的顆粒最需要被框住。
+ *
+ * 兩者都取「頂緣以上多遠」，再加上 `DEFAULT_WALL_OVERHANG` 的餘裕，最後與下限取大。
+ * The walls must satisfy two things at once:
+ * 1. **clear the drop point** — dumplings are spawned at `spawnY`, so a wall top below that
+ *    leaves the fresh dumpling briefly unfenced and rapid drops can squeeze each other out;
+ * 2. **clear the overflow line** — a breaching stack is the most precarious state in the run,
+ *    and those are exactly the bodies that most need fencing.
+ *
+ * Both are measured as "how far above the rim", `DEFAULT_WALL_OVERHANG` of slack is added,
+ * and the floor wins if it is larger.
+ *
+ * @param frameTop 容器頂緣的 Y（虛擬單位）/ The container rim's Y in virtual units.
+ * @param spawnY 投放點的 Y；方團團在這裡生成 / The drop point's Y, where dumplings appear.
+ * @param overflowLineY 溢位線的 Y / The overflow line's Y.
+ */
+export function computeWallOverhang(
+  frameTop: number,
+  spawnY?: number,
+  overflowLineY?: number,
+): number {
+  const candidates = [frameTop - DEFAULT_WALL_OVERHANG];
+
+  /* 投放點與溢位線都轉成「頂緣以上多遠」，再往上多留一段餘裕。 */
+  if (spawnY !== undefined && Number.isFinite(spawnY)) {
+    candidates.push(spawnY - DEFAULT_WALL_OVERHANG);
+  }
+  if (overflowLineY !== undefined && Number.isFinite(overflowLineY)) {
+    candidates.push(overflowLineY - DEFAULT_WALL_OVERHANG);
+  }
+
+  const top = Math.min(...candidates);
+
+  return Math.max(DEFAULT_WALL_OVERHANG, frameTop - top);
+}
 
 export interface ContainerBounds {
   /** 空腔：方團團合法活動的矩形。 */

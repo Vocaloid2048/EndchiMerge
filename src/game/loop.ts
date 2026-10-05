@@ -228,6 +228,16 @@ export class FrameLoop {
         bodies: this.session.bodies,
         aim: this.session.aimPreview,
         overflow: this.overflowFrame(),
+        /*
+         * 裁切上界固定為畫布頂端（虛擬 Y = 0）。方團團與投放預覽都只會被裁在**看得見的
+         * 範圍內**：素材在圓心上方伸出 2.16 倍半徑，疊高或投放預覽時會有一截超出去，
+         * 顯式裁掉比讓畫布靜默切斷乾淨。
+         * The clip's top is the canvas top (virtual y = 0). Dumplings and the drop preview are
+         * only ever trimmed to the **visible** area: the art reaches 2.16 radii above the
+         * centre, so a tall pile or the preview hangs over the edge, and an explicit cut is
+         * cleaner than the canvas quietly truncating it.
+         */
+        clipTop: 0,
         debug: this.debug
           ? { cavity: this.session.playArea, spawnY: this.session.spawnYValue }
           : undefined,

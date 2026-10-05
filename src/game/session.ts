@@ -29,7 +29,7 @@
 import Matter from 'matter-js';
 import { createCircleBody, createPolygonBody, lockRotation, Physics } from '../core/physics';
 import { POP_ANIMATION_MS, POP_PEAK_SCALE, WALL_THICKNESS } from '../core/constants';
-import { computeContainerBounds, createContainerBodies } from './containerBox';
+import { computeContainerBounds, computeWallOverhang, createContainerBodies } from './containerBox';
 import { ComboTracker } from './combo';
 import { mergeResultId } from './merge';
 import { OverflowMonitor } from './overflow';
@@ -246,12 +246,31 @@ export class GameSession {
     return computeContainerGeometry(virtualWidth, virtualHeight, this.config.container);
   }
 
-  /** 換掉牆壁：先移除舊的再加新的，避免 resize 後留下兩套重疊的牆。 */
+  /**
+   * 換掉牆壁：先移除舊的再加新的，避免 resize 後留下兩套重疊的牆。
+   * Replace the walls: remove the old set before adding the new one, so a resize never leaves
+   * two overlapping sets behind.
+   *
+   * 牆高由 `computeWallOverhang()` 依**容器頂緣、投放點與溢位線**推導，而不是用一個寫死的
+   * 常數 —— 這樣改 `container.json` 的 `topOffset` / `dropAboveRim` / `overflowAboveRim`
+   * 之後，牆會自動跟著長高，不會出現「投放點跑到牆頂之上」這種縫隙。
+   * The wall height comes from `computeWallOverhang()`, derived from the **rim, the drop point
+   * and the overflow line** rather than a hardcoded constant, so changing `topOffset`,
+   * `dropAboveRim` or `overflowAboveRim` in `container.json` grows the walls on its own and no
+   * gap can open up above the drop point.
+   */
   private applyWalls(): void {
     if (this.wallBodies.length > 0) {
       this.physics.remove(...this.wallBodies);
     }
-    const bounds = computeContainerBounds(this.geometry.frame, WALL_THICKNESS);
+
+    const overhang = computeWallOverhang(
+      this.geometry.frame.y,
+      this.spawnYValue,
+      this.overflowLineY,
+    );
+    const bounds = computeContainerBounds(this.geometry.frame, WALL_THICKNESS, overhang);
+
     this.wallBodies = createContainerBodies(bounds.walls);
     this.physics.add(...this.wallBodies);
   }

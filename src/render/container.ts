@@ -116,6 +116,49 @@ function uPath(ctx: CanvasRenderingContext2D, frame: Rect, radius: number): void
 }
 
 /**
+ * 把繪製範圍裁到「看得見的遊戲區」：容器 frame 的橫向範圍，加上畫布頂端以上不放行。
+ * Clip drawing to the **visible** play field: the container frame's horizontal span, and no
+ * drawing above the top of the canvas.
+ *
+ * **為什麼需要顯式裁切。** Canvas 本身就會裁，但那是「靜默」的 —— 一張 sprite 若一半在
+ * 畫布之外，你只會看到它被切掉，卻說不出是被誰切的。方團團的素材是
+ * `SPRITE_ANCHOR = (256, 328)` 對齊的，藝術在圓心**上方**伸出 2.16 倍半徑、下方只有
+ * 1.21 倍，所以疊高之後最頂那一顆、以及**投放預覽**（生成在溢位線之上），都可能有一截
+ * 落在畫布之外。這裡把裁切寫成明碼，並用 `clipY` 明確表達「頂端是開口的」。
+ * **Why an explicit clip.** The canvas clips anyway, but it does so **silently** — a sprite
+ * half outside the canvas just looks cut, with nothing to say what cut it. Dumpling art is
+ * aligned by `SPRITE_ANCHOR = (256, 328)`, so it reaches 2.16 radii **above** the centre and
+ * only 1.21 below; once the pile is tall, both the topmost dumpling and the **drop preview**
+ * (spawned above the overflow line) can have a slice outside the canvas. Writing the clip out
+ * in the open, with an explicit `clipY`, also documents that the top is open on purpose.
+ *
+ * 裁切**不碰** U 形線框：線框在裁切之外繪製，所以底部圓角與左右牆永遠是完整的。
+ * The clip deliberately **excludes** the U outline: it is drawn outside the clip so the
+ * rounded corners and side walls always render whole.
+ *
+ * @param ctx 已套用虛擬座標變換的上下文 / A context already in virtual units.
+ * @param geometry 容器幾何 / The container geometry.
+ * @param clipY 裁切區的頂端（虛擬 Y）；傳 0 即「畫布頂端」。預設 0。
+ *   / The clip region's top in virtual units; 0 means the canvas top. Defaults to 0.
+ */
+export function clipToPlayField(
+  ctx: CanvasRenderingContext2D,
+  geometry: ContainerGeometry,
+  clipY = 0,
+): void {
+  const frame = geometry.frame;
+  /* `clipY` 以上的內容不放行；用矩形裁切而非把 Y 夾到 0，讓呼叫端能自己決定界線。 */
+  const top = Math.min(clipY, frame.y);
+  const height = frame.y + frame.height - top;
+
+  if (frame.width <= 0 || height <= 0) return;
+
+  ctx.beginPath();
+  ctx.rect(frame.x, top, frame.width, height);
+  ctx.clip();
+}
+
+/**
  * 畫「槽的內部」：U 形範圍的填充。應在方團團**之前**呼叫。
  * Draw the trough's interior fill. Call this before the dumplings.
  */

@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import {
   computeContainerBounds,
   computePlayArea,
+  computeWallOverhang,
   computeWalls,
   createContainerBodies,
   DEFAULT_WALL_OVERHANG,
@@ -116,6 +117,68 @@ describe('computeContainerBounds — 一次算完 / one-shot derivation', () => 
 
     expect(bounds.cavity).toEqual(cavity);
     expect(bounds.walls).toEqual(computeWalls(FRONT));
+  });
+});
+
+describe('computeWallOverhang — 牆高推導 / deriving the wall height', () => {
+  /*
+   * 牆高是「防漏」與「防裁切」的第一道防線，所以不該是一個孤立的常數：投放點與溢位線
+   * 若被調到比牆頂還高，剛生成的那一顆就有一小段時間兩側無遮擋。
+   * The wall height is the first line of defence against leaks, so it must not be an isolated
+   * constant: if the drop point or the overflow line is tuned above the wall top, a fresh
+   * dumpling is briefly unfenced on both sides.
+   */
+  it('never returns less than the floor', () => {
+    expect(computeWallOverhang(200)).toBe(DEFAULT_WALL_OVERHANG);
+    /* 極端小值也一樣：下限保證牆一定高過頂緣。 */
+    expect(computeWallOverhang(0)).toBe(DEFAULT_WALL_OVERHANG);
+  });
+
+  it('grows to clear a drop point above the floor', () => {
+    /*
+     * 容器頂緣 y=200、投放點 y=160（頂緣上方 40）→ 牆頂必須高於 160，所以高度至少
+     * 200 + 40 = 240 …… 這裡要的是「牆頂 ≤ 投放點 - 餘裕」。
+     * Rim at y = 200, drop point at y = 160 (40 above the rim) — the wall top must clear 160.
+     */
+    const overhang = computeWallOverhang(200, 160);
+
+    /* 牆頂 = 200 - overhang，必須不高於投放點減餘裕。 */
+    expect(200 - overhang).toBeLessThanOrEqual(160 - DEFAULT_WALL_OVERHANG);
+  });
+
+  it('grows to clear the overflow line', () => {
+    const overhang = computeWallOverhang(200, 160, 170);
+
+    expect(200 - overhang).toBeLessThanOrEqual(170 - DEFAULT_WALL_OVERHANG);
+  });
+
+  it('takes the tallest requirement when several are given', () => {
+    /* 溢位線比投放點高時，牆必須依溢位線長 —— 取最嚴格的。 */
+    const byDrop = computeWallOverhang(200, 160);
+    const byLine = computeWallOverhang(200, 160, 100);
+
+    expect(byLine).toBeGreaterThan(byDrop);
+  });
+
+  it('ignores non-finite inputs instead of producing NaN', () => {
+    expect(computeWallOverhang(200, Number.NaN, Number.POSITIVE_INFINITY)).toBe(
+      DEFAULT_WALL_OVERHANG,
+    );
+  });
+
+  it('produces a wall that spans from above the drop point down to the floor', () => {
+    /*
+     * 整合檢查：把推導出來的高度餵回 `computeWalls()`，牆頂必須高於投放點。
+     * Integration check: feed the derived height back into `computeWalls()` and the wall top
+     * must sit above the drop point.
+     */
+    const rim = 200;
+    const spawnY = 160;
+    const overhang = computeWallOverhang(rim, spawnY);
+    const front: Rect = { x: 0, y: rim, width: 500, height: 800 };
+    const [wall] = computeWalls(front, WALL_THICKNESS, overhang);
+
+    expect(wall?.y).toBeLessThan(spawnY);
   });
 });
 
