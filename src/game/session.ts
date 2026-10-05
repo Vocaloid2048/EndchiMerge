@@ -158,20 +158,15 @@ export class GameSession {
   private lastDropAtMs = Number.NEGATIVE_INFINITY;
 
   /**
-   * **本次投放**累積的分數，以及本次投放目前為止的合成次數。
-   * The score earned **by this drop** so far, and how many merges it has produced.
+   * **本次投放**累積的分數。串長與倍率由 `combo` 直接提供，不另記一份，以免兩個
+   * 計數器各說各話。
+   * The score earned **by this drop**. The chain length and multiplier come straight from
+   * `combo` rather than a second counter that could disagree with it.
    *
-   * 這兩個數字就是 COMBO 卡要顯示的東西：大數字是本次投放的**合共得分**，下面一行是
-   * 最近一次合成的加分與倍率。它們由 `drop()` 歸零，所以「本次投放」的邊界與連擊一致。
-   * These are exactly what the COMBO card shows: the big number is this drop's **total
-   * score** and the line below is the latest merge's gain and multiplier. `drop()` zeroes
-   * them, so "this drop" spans the same window as the combo chain.
+   * 它由 `drop()` 歸零，所以「本次投放」的邊界與連擊一致。
+   * `drop()` zeroes it, so "this drop" spans the same window as the combo chain.
    */
   private dropScoreValue = 0;
-  private dropMergeCountValue = 0;
-  /** 最近一次合成的加分（未乘倍率前的等級分）與它拿到的倍率。 */
-  private lastGainBase = 0;
-  private lastGainMultiplier = 1;
 
   constructor(options: GameSessionOptions) {
     this.config = options.config;
@@ -398,9 +393,6 @@ export class GameSession {
     this.lastDropAtMs = this.elapsedMs;
     this.combo.reset();
     this.dropScoreValue = 0;
-    this.dropMergeCountValue = 0;
-    this.lastGainBase = 0;
-    this.lastGainMultiplier = 1;
 
     return true;
   }
@@ -593,23 +585,20 @@ export class GameSession {
     this.mergedCountValue += 1;
 
     /*
-     * 連擊：一次投放裡的第 n 場合併拿 ×n（`COMBO_LADDER`）。倍率由 tracker 算，這裡只管
-     * 把它乘上等級分數 —— 「第幾次拿幾倍」的規則全在 `game/combo.ts`，可以在單元測試裡
-     * 逐條釘住。
-     * Combo: the nth merge inside one drop takes ×n. The tracker owns the ladder; this only
-     * multiplies the level score by it, so "which merge gets which multiplier" stays in
-     * `game/combo.ts` where it can be pinned down test by test.
+     * 連擊：每一次合成拿「當下串長」對應的曲線倍率（`COMBO_CURVE`）。倍率由 tracker 算，
+     * 這裡只管把它乘上等級分數 —— 「第幾次拿幾倍」的規則全在 `game/combo.ts`，可以在
+     * 單元測試裡逐條釘住。
+     * Combo: each merge takes the curve multiplier at its chain length (`COMBO_CURVE`). The
+     * tracker owns the curve; this only multiplies the level score by it, so "which merge gets
+     * which multiplier" stays in `game/combo.ts` where it can be pinned down test by test.
      */
     const snapshot = this.combo.record();
     const gain = level.score * snapshot.multiplier;
 
     this.scoreValue += gain;
 
-    /* 本次投放的計分：大數字（合共）與下面一行（最近一次）都從這裡來。 */
+    /* 本次投放的計分；倍率曲線全在 `game/combo.ts`，這裡只累加。 */
     this.dropScoreValue += gain;
-    this.dropMergeCountValue += 1;
-    this.lastGainBase = level.score;
-    this.lastGainMultiplier = snapshot.multiplier;
 
     this.registerUnlock(level.id);
   }
@@ -730,9 +719,6 @@ export class GameSession {
      */
     this.lastDropAtMs = Number.NEGATIVE_INFINITY;
     this.dropScoreValue = 0;
-    this.dropMergeCountValue = 0;
-    this.lastGainBase = 0;
-    this.lastGainMultiplier = 1;
     this.spawnQueue.reset();
     this.aimX = this.clampAimX(this.aimX, this.pendingLevel().radius);
   }
@@ -801,41 +787,27 @@ export class GameSession {
   }
 
   /**
-   * **本次投放**累積的總分（每次合成各自乘上它的階梯倍率後相加）。
-   * The total score **this drop** has earned, each merge multiplied by its own ladder step.
+   * **本次投放**累積的總分（每次合成各自乘上當下的曲線倍率後相加）。
+   * The total score **this drop** has earned, each merge multiplied by the curve value at its
+   * own chain length.
    *
-   * 這是 COMBO 卡的大數字：使用者定案「展示本次投放合共賺了多少分」。
-   * This is the COMBO card's big number — the user's "how much this drop earned in total".
+   * 這是 COMBO 卡第二行的 `+ 18`：使用者定案「展示本次投放合共賺了多少分」。
+   * This is the COMBO card's `+ 18` on the second line — the user's "how much this drop earned
+   * in total".
    */
   get dropScore(): number {
     return Math.round(this.dropScoreValue);
   }
 
-  /** 本次投放計分的原始值（未取整）；測試用。 */
-  get dropScoreRaw(): number {
-    return this.dropScoreValue;
-  }
-
   /**
-   * 最近一次合成的「加分 + 倍率」，例如 `{ base: 8, multiplier: 2, gain: 16 }`。
-   * The latest merge's gain and multiplier, e.g. `{ base: 8, multiplier: 2, gain: 16 }`.
+   * 本次投放最後一次合成所用的倍率；尚未合成為 `1`。
+   * The multiplier the latest merge in this drop used; `1` before any merge.
    *
-   * `base` 是等級分數（未乘倍率），`gain` 是實際加進去的分數。HUD 用它渲染
-   * `+16 (×2.0)` 這一行。
-   * `base` is the level score before the multiplier and `gain` is what was actually added;
-   * the HUD renders the `+16 (×2.0)` line from it.
+   * COMBO 卡第二行的 `(×1.3)` 顯示的就是它。
+   * Exactly what the card's `(×1.3)` renders.
    */
-  get lastMergeGain(): { base: number; multiplier: number; gain: number } {
-    return {
-      base: this.lastGainBase,
-      multiplier: this.lastGainMultiplier,
-      gain: Math.round(this.lastGainBase * this.lastGainMultiplier),
-    };
-  }
-
-  /** 本次投放已合成的次數；與 `comboCount` 同義，但語意上強調「本次投放」。 */
-  get dropMergeCount(): number {
-    return this.dropMergeCountValue;
+  get comboMultiplier(): number {
+    return this.combo.snapshot().multiplier;
   }
 
   /** 溢位寬限的進度 `0..1`；給 UI 顯示倒數。 */

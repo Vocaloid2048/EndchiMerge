@@ -147,28 +147,29 @@ function buildNextCard(): HTMLElement {
  * The COMBO card.
  *
  * 兩個數字，回答兩個不同的問題（使用者定案）：
- * - 大數字：**本次投放合共賺了多少分**（`combo-score`，顯示成 `+87`）。
- * - 下面一行：**本次加分**與它拿到的倍率，前面帶串長（`combo-detail`，`3 連 · +16 (×2.0)`）。
+ * - 大數字：**本次投放合成了幾次**（`combo-count`）。
+ * - 下面一行：**本次投放合共賺了多少分**，加上最後一次合成所用的倍率
+ *   （`combo-detail`，`+ 18 (×1.3)`）。
  *
- * 兩者都隨投放歸零，所以「本次投放」的界線與連擊一致，不會出現大數字還在跳、
- * 倍率卻已經換了一批的錯覺。
+ * 兩者都隨投放歸零，所以「本次投放」的界線與連擊一致，不會出現次數還在跳、
+ * 得分卻已經換了一批的錯覺。
  *
  * Two numbers answering two different questions (the user's decision):
- * - the big one: **how much this drop earned in total** (`combo-score`, shown as `+87`);
- * - the line below: **this gain** and its multiplier, prefixed by the chain length
- *   (`combo-detail`, `3 連 · +16 (×2.0)`).
+ * - the big one: **how many merges this drop produced** (`combo-count`);
+ * - the line below: **what this drop earned in total** with the multiplier its last merge
+ *   used (`combo-detail`, `+ 18 (×1.3)`).
  *
- * Both reset on a drop, so "this drop" spans the same window as the chain and the big number
- * can never run ahead of the multiplier.
+ * Both reset on a drop, so "this drop" spans the same window as the chain and the total can
+ * never belong to a different drop than the count.
  */
 function buildComboCard(): HTMLElement {
   const card = el('section', 'panel card card--combo');
   card.dataset['region'] = 'combo';
-  const score = el('p', 'card__value', '+0');
-  score.dataset['hook'] = 'combo-score';
-  const detail = el('p', 'card__multiplier', '+0 (×1.0)');
+  const count = el('p', 'card__value', '0');
+  count.dataset['hook'] = 'combo-count';
+  const detail = el('p', 'card__detail', '+ 0 (×1.0)');
   detail.dataset['hook'] = 'combo-detail';
-  appendChildren(card, el('h2', 'card__label', 'COMBO'), score, detail);
+  appendChildren(card, el('h2', 'card__label', 'COMBO'), count, detail);
   return card;
 }
 

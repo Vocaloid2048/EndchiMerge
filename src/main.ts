@@ -108,11 +108,10 @@ async function bootstrap(): Promise<void> {
       nextLevelId: session.upcomingLevelId,
       score: session.score,
       mergedCount: session.mergedCount,
-      /* COMBO 卡：本次投放的合共得分 + 合成次數 + 最近一次的加分與倍率。 */
-      dropScore: session.dropScore,
-      dropMergeCount: session.dropMergeCount,
-      lastGain: session.lastMergeGain,
-      canDrop: session.canDrop,
+      /* COMBO 卡：本次投放的合成次數（大數字）＋ 合共得分與倍率（第二行）。 */
+      comboCount: session.comboCount,
+      comboDropScore: session.dropScore,
+      comboMultiplier: session.comboMultiplier,
       bestTry: progress.highScore,
     });
   };

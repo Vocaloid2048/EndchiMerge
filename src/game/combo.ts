@@ -4,13 +4,11 @@
  *
  * **計數語意（使用者定案）**：一串連擊 ＝ **一次投放**。窗口不是時間，而是「本次投放到
  * 下次投放之間」—— 因此 `reset()` 只在投放時被呼叫，不會因為時間過去而歸零。
- * 一次投放裡合成了幾次，就是 `count`；每一次合成各自拿一個**遞增**的倍率
- * （第 1 次 ×1、第 2 次 ×2…），這也是本模組唯一的輸出。
+ * 一次投放裡合成了幾次，就是 `count`；每一次合成各自拿「當下串長」對應的倍率。
  * **Counting semantics** (the user's decision): one chain *is* one drop. The window is not a
  * duration but "this drop until the next drop", so `reset()` is driven by `drop()` and time
  * alone never ends a chain. `count` is how many merges happened inside that drop, and each
- * merge takes a **stepped** multiplier (the 1st ×1, the 2nd ×2, …). That is the module's only
- * output.
+ * merge takes the multiplier of the chain length it lands on.
  *
  * 為什麼**不是**時間窗口：舊版用 `comboWindowMs`（1 秒），但投放本身已經有 1 秒間隔，
  * 兩個時間概念會互相打架 —— 「同一批」究柢是「同一次投放」，用投放當界線比用毫秒誠實。
@@ -24,41 +22,54 @@
  */
 
 /**
- * Combo 倍率的階梯。
- * The combo-multiplier ladder.
+ * Combo 倍率曲線。
+ * The combo-multiplier curve.
  *
- * 使用者定案的語意是「每一次合成各自拿一個遞增的倍率」：
- * 一次投放裡第 1 場合併 ×1、第 2 場 ×2、第 3 場 ×3……而不是像指數曲線那樣平滑爬升。
- * The user's semantics are "each merge takes its own stepped multiplier": inside one drop the
- * 1st merge is ×1, the 2nd ×2, the 3rd ×3, … rather than a smooth exponential climb.
+ * 使用者指定：`y = min(e^(0.05x) / 10, 9) + 1`，`x` 是當下的串長。原本的階梯
+ * （第 1 次 ×1、第 2 次 ×2…）換成這條平滑曲線：起點貼著 ×1.1，之後緩慢上升，
+ * `x = 90` 才碰到 `×10.0` 的天花板；`×1.3` 剛好落在 `x = 22`。
+ * The user's curve: `y = min(e^(0.05x) / 10, 9) + 1` with `x` the current chain length. It
+ * replaces the ×n ladder with a smooth climb that starts just above ×1.1 and only reaches the
+ * ×10.0 ceiling at `x = 90`; ×1.3 lands exactly at `x = 22`.
  *
- * `step` 是每一場合併往上加多少；`cap` 是天花板，避免一次超長連鎖把分數炸開。
- * `step` is how much each merge adds and `cap` is the ceiling, so one very long cascade cannot
- * blow the score up.
+ * 註：使用者訊息裡寫的是 `max(...)`，但 `max(e^(0.05x)/10, 9) + 1` 在 `x ≤ 90` 時**恆等於
+ * ×10**（e 項要 `x = 90` 才追上 9），與示例 `×1.3` 矛盾，也與「緩慢上升」的原設計相反；
+ * 故按文檔原本的 `min` 結構實作。若真的要 `max`，把 `Math.min` 換成 `Math.max` 即可。
+ * Note: the user's message wrote `max(...)`, but `max(e^(0.05x)/10, 9) + 1` is a flat ×10 for
+ * every `x ≤ 90` (the exponential only overtakes 9 at x=90), which contradicts both the ×1.3
+ * example and the original "climbs slowly" design; it is implemented as the documented `min`
+ * form. If `max` really is wanted, swap `Math.min` for `Math.max`.
+ *
+ * `count = 0`（沒有連擊）時直接回傳 `×1.0`，而不是公式算出的 `×1.1`：靜止狀態顯示 1.1
+ * 會讓玩家以為一直有加成。這是一處刻意偏離公式的地方，只影響「沒有連擊」那一格。
+ * At `count = 0` this returns ×1.0 rather than the formula's ×1.1, because an idle card
+ * reading 1.1 looks like a permanent bonus. Deliberate, and it only affects the no-combo case.
  */
-export const COMBO_LADDER = {
-  /** 開頭倍率（第一場合併）。 */
+export const COMBO_CURVE = {
+  /** 指數係數；越小上升越慢。 */
+  coefficient: 0.05,
+  /** 除數，把指數拉回 1 附近。 */
+  divisor: 10,
+  /** 指數項的上限。 */
+  cap: 9,
+  /** 加的基數；`cap + base` ＝ 倍率天花板（×10.0）。 */
   base: 1,
-  /** 每一場合併往上加的量。 */
-  step: 1,
-  /** 倍率上限。 */
-  cap: 10,
 } as const;
 
-/** 由「本次投放的第幾場合併」算出倍率。`count <= 0` 回傳 `1`。 */
+/** 由串長算出倍率。`count <= 0` 回傳 `1`（見上方說明）。 */
 export function comboMultiplier(count: number): number {
-  if (!Number.isFinite(count) || count <= 0) return COMBO_LADDER.base;
+  if (!Number.isFinite(count) || count <= 0) return 1;
 
-  const raw = COMBO_LADDER.base + (count - 1) * COMBO_LADDER.step;
+  const raw = Math.exp(COMBO_CURVE.coefficient * count) / COMBO_CURVE.divisor;
 
-  return Math.min(raw, COMBO_LADDER.cap);
+  return Math.min(raw, COMBO_CURVE.cap) + COMBO_CURVE.base;
 }
 
 /** 某一刻的連擊狀態快照。 */
 export interface ComboSnapshot {
   /** 本次投放已經合成過幾次；尚未合成為 0。 */
   count: number;
-  /** 下一場合併會拿到的倍率；尚未合成為 `1`。 */
+  /** 目前串長對應的倍率（＝最後一次合成所用的）；尚未合成為 `1`。 */
   multiplier: number;
 }
 
@@ -70,7 +81,7 @@ export interface ComboSnapshot {
  * 也不需要「同一批」的判準 —— 同一物理步的多場合併自然就落在同一次投放裡，各自遞增。
  * It knows one event only: **a merge happened on this step**. Because the window *is* the
  * drop, no clock and no "same batch" test is needed — several merges in one physics step fall
- * inside the same drop and simply step the ladder.
+ * inside the same drop and each climbs the curve.
  */
 export class ComboTracker {
   private chain = 0;
@@ -80,19 +91,15 @@ export class ComboTracker {
     return this.chain;
   }
 
-  /** 下一場合併會用到的倍率（＝目前串長 + 1 對應的倍率）。 */
-  get pendingMultiplier(): number {
-    return comboMultiplier(this.chain + 1);
-  }
-
   /**
    * 記錄一次合成，回傳記錄後的狀態。
    * Record one merge and return the resulting state.
    *
-   * 回傳的 `multiplier` 是**這次**合成所用的倍率（第 1 次 ×1、第 2 次 ×2…），
+   * 回傳的 `multiplier` 是**這次**合成所用的倍率（當下串長對應的曲線值），
    * 呼叫端直接拿它去乘分數即可，不必自己推導。
-   * The returned `multiplier` is the one **this** merge used (the 1st ×1, the 2nd ×2, …), so
-   * the caller can multiply the score straight away without deriving anything.
+   * The returned `multiplier` is the one **this** merge used (the curve value at the new
+   * chain length), so the caller can multiply the score straight away without deriving
+   * anything.
    */
   record(): ComboSnapshot {
     this.chain += 1;
@@ -100,9 +107,17 @@ export class ComboTracker {
     return { count: this.chain, multiplier: comboMultiplier(this.chain) };
   }
 
-  /** 目前狀態。無副作用，HUD 可以每幀查詢。 */
+  /**
+   * 目前狀態。無副作用，HUD 可以每幀查詢。
+   * Current state. Side-effect free, so the HUD may poll it every frame.
+   *
+   * `multiplier` 是**最後一次**合成所用的倍率 —— COMBO 卡第二行 `(×1.3)` 顯示的就是它；
+   * 尚未合成時為 `1`。
+   * `multiplier` is what the **latest** merge used — exactly what the card's `(×1.3)` shows;
+   * `1` before any merge.
+   */
   snapshot(): ComboSnapshot {
-    return { count: this.chain, multiplier: this.pendingMultiplier };
+    return { count: this.chain, multiplier: comboMultiplier(this.chain) };
   }
 
   /**

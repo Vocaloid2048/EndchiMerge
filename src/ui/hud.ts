@@ -36,17 +36,12 @@ export interface HudState {
   nextLevelId: number;
   score: number;
   mergedCount: number;
-  /**
-   * **本次投放**的合共得分。這是 COMBO 卡的大數字。
-   * The total score earned by **this drop** — the COMBO card's big number.
-   */
-  dropScore: number;
-  /** 本次投放已合成的次數。顯示在倍率旁，讓玩家看得出連鎖有多長。 */
-  dropMergeCount: number;
-  /** 最近一次合成的加分與倍率，渲染成 `+16 (×2.0)`。 */
-  lastGain: { base: number; multiplier: number; gain: number };
-  /** 現在是否可以投放；false 時卡片轉為冷卻態。 */
-  canDrop: boolean;
+  /** 本次投放已合成的次數 —— COMBO 卡的大數字。 */
+  comboCount: number;
+  /** 本次投放合共賺了多少分 —— 第二行的 `+ 18`。 */
+  comboDropScore: number;
+  /** 最後一次合成所用的倍率；尚未合成為 1。渲染成 `×1.3`。 */
+  comboMultiplier: number;
   /** 最高分；M7 接上存檔前固定為 0。 */
   bestTry?: number;
 }
@@ -58,18 +53,16 @@ export class Hud {
   private readonly scoreValue: HTMLElement;
   private readonly mergedValue: HTMLElement;
   private readonly bestTryValue: HTMLElement;
-  private readonly comboScoreValue: HTMLElement;
+  private readonly comboCountValue: HTMLElement;
   private readonly comboDetailValue: HTMLElement;
-  private readonly comboCard: HTMLElement;
 
   /** 上次寫入的值；初值用不可能的數字，保證第一次一定更新。 */
   private lastNextId = Number.NaN;
   private lastScore = Number.NaN;
   private lastMerged = Number.NaN;
   private lastBestTry = Number.NaN;
-  private lastComboScore = Number.NaN;
+  private lastComboCount = Number.NaN;
   private lastComboDetail = '';
-  private lastCanDrop: boolean | null = null;
 
   constructor(options: HudOptions) {
     this.sprites = options.sprites;
@@ -80,8 +73,7 @@ export class Hud {
     this.scoreValue = hook<HTMLElement>(regions.score, 'score-value');
     this.mergedValue = hook<HTMLElement>(regions.score, 'merged');
     this.bestTryValue = hook<HTMLElement>(regions.score, 'best-try');
-    this.comboCard = regions.combo;
-    this.comboScoreValue = hook<HTMLElement>(regions.combo, 'combo-score');
+    this.comboCountValue = hook<HTMLElement>(regions.combo, 'combo-count');
     this.comboDetailValue = hook<HTMLElement>(regions.combo, 'combo-detail');
   }
 
@@ -103,36 +95,27 @@ export class Hud {
     }
 
     /*
-     * COMBO 卡大數字 ＝ **本次投放**的合共得分。零分也要寫（投放後歸零），所以用數值比對
+     * COMBO 卡大數字 ＝ **本次投放**的合成次數。零也要寫（投放後歸零），所以用數值比對
      * 而不是「非零才寫」。
-     * The COMBO card's big number is the score **this drop** earned. Zero is a real value
-     * (right after a drop), so this compares numbers rather than skipping falsy values.
+     * The COMBO card's big number is how many merges **this drop** produced. Zero is a real
+     * value (right after a drop), so this compares numbers rather than skipping falsy values.
      */
-    if (state.dropScore !== this.lastComboScore) {
-      this.comboScoreValue.textContent = `+${String(state.dropScore)}`;
-      this.lastComboScore = state.dropScore;
+    if (state.comboCount !== this.lastComboCount) {
+      this.comboCountValue.textContent = String(state.comboCount);
+      this.lastComboCount = state.comboCount;
     }
 
     /*
-     * 下面一行：`+16 (×2.0)` 加一個 `n 連` 的串長計數。串長為 0 時只顯示倍率的預設值，
-     * 讓卡片在還沒合成時保持乾淨。
-     * The line below: `+16 (×2.0)` plus an `n 連` chain counter. With a zero chain it shows
-     * just the default multiplier so the card stays quiet before the first merge.
+     * 第二行：`+ 18 (×1.3)` —— 本次投放合共得分，加上最後一次合成所用的倍率。
+     * 倍率固定一位小數（`×1.3`），避免 `×1.30000000000000004` 這種浮點尾巴。
+     * The second line: `+ 18 (×1.3)` — this drop's total with the multiplier its last merge
+     * used. One decimal keeps float tails like `×1.30000000000000004` off the card.
      */
-    const detail = this.buildComboDetail(state);
+    const shown = Math.round(state.comboMultiplier * 10) / 10;
+    const detail = `+ ${String(state.comboDropScore)} (×${shown.toFixed(1)})`;
     if (detail !== this.lastComboDetail) {
       this.comboDetailValue.textContent = detail;
       this.lastComboDetail = detail;
-    }
-
-    /*
-     * 冷卻態：投放後 1 秒內卡片變暗，玩家一眼看得出「現在還不能投」。
-     * Cooldown state: the card dims for the second after a drop, so it is obvious at a glance
-     * that dropping is not accepted yet.
-     */
-    if (state.canDrop !== this.lastCanDrop) {
-      this.comboCard.classList.toggle('card--cooling', !state.canDrop);
-      this.lastCanDrop = state.canDrop;
     }
 
     const bestTry = state.bestTry ?? 0;
@@ -140,26 +123,6 @@ export class Hud {
       this.bestTryValue.textContent = String(bestTry);
       this.lastBestTry = bestTry;
     }
-  }
-
-  /**
-   * 組出 COMBO 卡的第二行。
-   * Build the COMBO card's second line.
-   *
-   * 未合成任何東西時顯示 `+0 (×1.0)`（＝下一場合併會用的倍率），一旦有了連鎖就變成
-   * `+16 (×2.0)`，並在前面加上串長。三個數字都是**本次投放**的，與大數字同一個窗口。
-   * Before any merge it shows `+0 (×1.0)` — the multiplier the next merge would use — and
-   * once a chain exists it becomes `+16 (×2.0)` with the chain length in front. All three
-   * numbers belong to **this drop**, the same window as the big number.
-   */
-  private buildComboDetail(state: HudState): string {
-    const { gain, multiplier } = state.lastGain;
-    const shown = Math.round(multiplier * 10) / 10;
-    const gainText = `+${String(gain)} (×${shown.toFixed(1)})`;
-
-    if (state.dropMergeCount <= 0) return gainText;
-
-    return `${String(state.dropMergeCount)} 連 · ${gainText}`;
   }
 
   private renderNext(levelId: number): void {

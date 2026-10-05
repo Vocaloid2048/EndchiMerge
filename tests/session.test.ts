@@ -634,8 +634,8 @@ describe('GameSession — 合成與計分 / merging and scoring', () => {
 
     expect(merged).toBe(true);
     expect(session.comboCount).toBe(1);
-    /* 第一場合併拿 base（×1），且本次投放的分數就是那一場的加分。 */
-    expect(session.dropMergeCount).toBe(1);
+    /* 第一次合成拿曲線起點（貼著 ×1.1），且本次投放的分數就是那一場的加分。 */
+    expect(session.comboMultiplier).toBeGreaterThan(1);
     expect(session.dropScore).toBe(session.score);
   });
 
@@ -668,7 +668,6 @@ describe('GameSession — 合成與計分 / merging and scoring', () => {
     session.drop();
     expect(session.comboCount).toBe(0);
     expect(session.dropScore).toBe(0);
-    expect(session.dropMergeCount).toBe(0);
   });
 
   it('accumulates this drop\'s score across its merges', () => {
@@ -677,9 +676,10 @@ describe('GameSession — 合成與計分 / merging and scoring', () => {
 
     /*
      * 連投三顆同一位置：前兩顆合成 Lv2（加分），第三顆再合成出 Lv3。每一次合成都在同一批裡
-     * 拿到遞增的倍率，`dropScore` 應該是這些加分的總和。
+     * 拿到當下串長的曲線倍率，`dropScore` 應該是這些加分的總和。
      * Three drops at one spot: the first two merge into Lv2 and the third merges again into
-     * Lv3. Every merge steps the ladder, so `dropScore` must be the sum of those gains.
+     * Lv3. Every merge takes the curve value at its chain length, so `dropScore` must be the
+     * sum of those gains.
      */
     session.drop();
     runFrames(session, 120);
@@ -687,7 +687,7 @@ describe('GameSession — 合成與計分 / merging and scoring', () => {
     runFrames(session, 120);
 
     expect(session.mergedCount).toBeGreaterThanOrEqual(1);
-    expect(session.dropMergeCount).toBeGreaterThanOrEqual(1);
+    expect(session.comboCount).toBeGreaterThanOrEqual(1);
     expect(session.dropScore).toBeGreaterThan(0);
     /* 本次投放的分數不可能超過總分。 */
     expect(session.dropScore).toBeLessThanOrEqual(session.score);
