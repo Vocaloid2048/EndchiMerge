@@ -56,6 +56,27 @@
   --color-object: rgba(255, 255, 255, 0.1);
   --color-border: rgba(255, 255, 255, 0.14);
 
+  /*
+   * 未解鎖格（`???`）的底與字。
+   * The locked cell's (`???`) fill and text.
+   *
+   * 這格必須**不透明**：已解鎖格在設計稿裡是透明的，因為角色素材本身會蓋住蛇形走線；
+   * 未解鎖沒有素材，若留透明，走線就會從 `???` 方格底下穿出來。用「比玻璃面板再暗一階的
+   * 實色」填滿，語意上就是「這裡是空的、未知的」，視覺上則把走線遮掉。
+   * This tile must be **opaque**: unlocked cells are transparent in the mock only because the
+   * character art covers the serpentine track. A locked cell has no art, so transparency lets the
+   * track show through the `???` tile. A solid that is one step darker than the glass panel reads
+   * as "empty and unknown" and hides the track.
+   *
+   * 不是純黑：面板填色是 `rgba(34,34,34,.8)`，疊在深色背景上約等於 `#1e1f24`；這裡取比它
+   * 再亮一點的 `#2b2c33`，讓方格在面板上仍然「看得見」，而不是一個黑洞。
+   * Not pure black: the panel fill is `rgba(34,34,34,.8)` over a dark background, landing near
+   * `#1e1f24`; this takes a slightly lighter `#2b2c33` so the tile stays visible on the panel
+   * instead of reading as a hole.
+   */
+  --color-locked-bg: #2b2c33;
+  --color-locked-fg: rgba(215, 215, 215, 0.5);
+
   /* 資料色 Data（設計稿的技能卡與技力條配色） */
   --color-sp-full: #f9ff51;
   --color-sp-empty: #d7d7d7;

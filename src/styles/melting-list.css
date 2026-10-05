@@ -13,11 +13,18 @@
  * in `core/design.ts`, so no number is duplicated here.
  */
 
-/* 內容區 367×472（`1408:2234`），大小由 UI 層設定，這裡只建立定位上下文。 */
+/*
+ * 內容區：寬度固定（面板寬），**高度跟著實際列數**（`--melting-grid-h` 由 `ui/meltingList.ts`
+ * 依列數寫入）。列數少時高度縮短，下半個面板不會空著、走線也不會拖到格子下方。
+ * The content box: fixed width (the panel's), with **height following the rows actually used**
+ * (`--melting-grid-h`, written by `ui/meltingList.ts` from the row count). Fewer rows mean a
+ * shorter box, so the lower half of the panel is not left empty nor the track dragged below the
+ * cells.
+ */
 .roster {
   position: relative;
   width: var(--melting-content-w);
-  height: var(--melting-content-h);
+  height: var(--melting-grid-h, var(--melting-content-h));
 }
 
 /*
@@ -73,9 +80,25 @@
   height: var(--melting-cell-h);
 }
 
-/* 未解鎖：只留一個虛線記號，不填色，避免搶走已解鎖角色的注意力。 */
+/*
+ * 未解鎖：一個**不透明**的灰底方格，把下方的蛇形走線遮住。
+ * Locked: an **opaque** grey tile that hides the serpentine track underneath.
+ *
+ * 這裡的填色是刻意的，與已解鎖格子的「不填色」不同。設計稿的格子透明是因為角色本身會蓋住
+ * 走線；未解鎖沒有角色，若也留透明，走線就會直接穿過 `???` 方格露出來（使用者回報的正是
+ * 這個）。給一個淺／深灰底 ＋ 模糊，就等於用「未解鎖的空白」把走線遮掉。
+ * The fill here is deliberate, unlike the unlocked cells' transparency. The mock's cells are
+ * transparent because the character art covers the track; a locked cell has no art, so leaving it
+ * transparent lets the track show straight through the `???` tile (exactly what the user
+ * reported). A light/dark grey fill plus blur hides the track behind "an empty, unknown slot".
+ *
+ * 顏色寫在 `styles/tokens.css`：面板本身是深色玻璃，方格取比它再暗一階的實色，讓 `???`
+ * 讀起來是「空的、未知的」，而不是純黑或半透明。
+ * The colour lives in `styles/tokens.css`: the panel is dark glass, and the tile takes a solid
+ * one step darker so `???` reads as "empty and unknown" rather than pure black or translucent.
+ */
 .roster-cell--locked {
-  color: var(--color-fg-dim);
+  color: var(--color-locked-fg, var(--color-fg-dim));
   font-size: 26px;
   font-weight: 500;
   letter-spacing: 0.06em;
@@ -88,6 +111,15 @@
   height: var(--melting-art);
   border: 2px dashed var(--color-border);
   border-radius: 22px;
+  /*
+   * 不透明填充 ＋ 模糊：把背後的走線擋掉。`backdrop-filter` 讓底下的面板玻璃微微透出，
+   * 方格看起來是「霧面玻璃」而不是一塊死灰。
+   * An opaque fill plus blur blocks the track behind it. `backdrop-filter` lets the glass panel
+   * show faintly so the tile reads as frosted glass rather than flat grey.
+   */
+  background: var(--color-locked-bg);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
 /*
