@@ -30,6 +30,17 @@
  * line for a moment by design, and accumulating those instants would fail a perfectly normal
  * run. The timer snaps back to zero the moment nothing is above the line.
  *
+ * **倒數起算後就不再被運動打斷**（使用者定案）：停定判定只決定「倒數**什麼時候開始**」，
+ * 一旦開始，之後不論場上多吵（玩家繼續投放、新顆粒砸進堆疊把整堆推開），倒數都一路走到底。
+ * 唯一能讓它歸零的條件是「完全沒有越線顆粒」—— 那才是「解除越界」。
+ * 舊實作把 `elapsedMs` 也綁在 `anyMoving` 上，導致每投一顆就歸零、倒數永遠走不完。
+ * **Once counting begins, movement can no longer interrupt it** (the user's decision): settling
+ * only decides **when the countdown starts**. After that it runs to the end no matter how noisy
+ * the board gets (the player keeps dropping, fresh dumplings slam into the pile and shove it
+ * around). The one thing that resets it is "nothing is above the line" — that is what "clearing
+ * the breach" means. The old code zeroed `elapsedMs` on movement too, so every drop reset the
+ * timer and it could never finish.
+ *
  * **「入堆」的定義是接觸**（使用者定案）：一顆方團團要**碰到其他方團團**才算入堆，光是被
  * 投下來、或撞到牆與地板都不算。標記由呼叫端（`game/session.ts` 的碰撞處理）單向設真；
  * 本類別只讀它，不看幾何、也不看速度。
@@ -110,6 +121,12 @@ export class OverflowMonitor {
   /** 越線且已在原地停留多久；未達 `settleMs` 前不倒數。 */
   private settledMs = 0;
   private over = false;
+  /**
+   * 倒數是否已經**起算**（=`settled` 曾為真）。起算之後就進入「不可被運動打斷」的狀態。
+   * Whether the countdown has ever actually begun. Once it has, the timer becomes immune to
+   * movement — see `update`.
+   */
+  private counting = false;
 
   /** 上一幀各顆的位置，用來算每步位移。 */
   private previous = new Map<number, TrackedBody>();
@@ -188,8 +205,42 @@ export class OverflowMonitor {
       /* 退線就完全歸零，包括「停定了多久」—— 下一次越線要重新等它停。 */
       this.elapsedMs = 0;
       this.settledMs = 0;
+      this.counting = false;
       this.previous.clear();
       return false;
+    }
+
+    /*
+     * **倒數起算之後，運動不再打斷它**（使用者定案）。
+     *
+     * 舊實作裡 `anyMoving` 會把 `settledMs` 和 `elapsedMs` 一起歸零，於是每投一顆新方團團
+     * 就重置一次：新顆粒掉進堆疊、碰到其他方團團 → `entered = true`，上緣又在線上 → 它成了
+     * 新的「越線顆粒」，而第一次見到它沒有上一步可比較 → `anyMoving = true` → 倒數歸零。
+     * 結果是**倒數永遠走不完**，玩家可以靠一直投放無限拖延（畫面上就是倒數反覆跳回 5）。
+     *
+     * 使用者的規則是「若果未有解除越界條件，請繼續倒數」—— 解除的唯一條件是「完全沒有
+     * 越線顆粒」，那正是上面 `breaching.length === 0` 那一支。所以這裡直接跳過整段停定
+     * 判定，讓倒數一路走到底。
+     *
+     * The countdown, once begun, is **immune to movement** (the user's decision).
+     *
+     * The old code zeroed both `settledMs` and `elapsedMs` whenever anything moved, so every
+     * single drop reset it: the fresh dumpling touches the pile, `entered` goes true, its top
+     * edge is over the line, and being seen for the first time it counts as moving — countdown
+     * back to zero. The result was a timer that could **never** finish; the player could stall
+     * forever by dropping repeatedly (visually: the badge keeps snapping back to 5).
+     *
+     * The user's rule is "keep counting unless the breach is cleared", and the only way to clear
+     * it is "nothing is above the line" — exactly the `breaching.length === 0` branch above. So
+     * the settling test is skipped from here on and the timer runs to the end.
+     */
+    if (this.counting) {
+      this.elapsedMs += dt;
+      if (this.elapsedMs >= this.graceMs) this.over = true;
+
+      /* 仍然更新基準位置，萬一之後退線又重新越線，接續的判定才不會用舊資料。 */
+      this.previous = new Map(breaching.map((body) => [body.id, { x: body.x, y: body.y }]));
+      return true;
     }
 
     /*
@@ -213,7 +264,7 @@ export class OverflowMonitor {
     this.previous = new Map(breaching.map((body) => [body.id, { x: body.x, y: body.y }]));
 
     if (anyMoving) {
-      /* 還在動：停定計時歸零，倒數也歸零。畫面上紅線因此完全不亮。 */
+      /* 還在動：停定計時歸零，倒數尚未起算所以不動 elapsed。畫面上紅線因此完全不亮。 */
       this.settledMs = 0;
       this.elapsedMs = 0;
       return true;
@@ -224,6 +275,8 @@ export class OverflowMonitor {
     /* 還沒停定就不起算；這是「停定後才提示」的落點。 */
     if (!this.settled) return true;
 
+    /* 通過停定門檻的這一步就是倒數的起算點，從此刻起 `counting` 永為真。 */
+    this.counting = true;
     this.elapsedMs += dt;
     if (this.elapsedMs >= this.graceMs) this.over = true;
 
@@ -235,6 +288,7 @@ export class OverflowMonitor {
     this.elapsedMs = 0;
     this.settledMs = 0;
     this.over = false;
+    this.counting = false;
     this.previous.clear();
   }
 }

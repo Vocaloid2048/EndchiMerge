@@ -199,30 +199,44 @@ describe('OverflowMonitor — 停定才起算 / settle before counting', () => {
     expect(monitor.elapsed).toBe(100);
   });
 
-  it('resets the settle timer when the breach starts moving again', () => {
-    const monitor = new OverflowMonitor(GRACE, SETTLE_FAST);
+  it('resets the settle timer when the breach starts moving again — before counting begins', () => {
+    /*
+     * 這條守的是**起算前**的語意：還在猶豫要不要起算的時候，移動就代表「剛越線、還在掉」，
+     * 應該把停定計時清掉重新等。這是「不要在還在掉就警告」那條規則的一部分。
+     *
+     * 注意觸發時機必須在 `settled` 成立**之前**。一旦起算，移動就不再打斷倒數了 ——
+     * 那條規則由下一個 describe 區塊釘住。
+     *
+     * This guards the **pre-countdown** semantics: while the monitor is still deciding, movement
+     * means "just crossed, still falling", so the settle timer clears and waits again.
+     *
+     * Note it fires *before* `settled` holds. Once counting begins, movement no longer interrupts
+     * — that rule is pinned by the next describe block.
+     */
+    const monitor = new OverflowMonitor(GRACE, { settleDistance: 0.6, settleMs: 5000 });
     const body = overTheLine();
 
-    monitor.update(1000, [body], LINE);
-    monitor.update(1000, [body], LINE);
-    expect(monitor.settled).toBe(true);
+    /* 累積 400ms，還沒到 5000ms 的門檻。 */
+    monitor.update(200, [body], LINE);
+    monitor.update(200, [body], LINE);
+    expect(monitor.settled).toBe(false);
 
-    /* 動一下 → 停定與倒數都歸零。 */
-    monitor.update(1000, [{ ...body, y: body.y + 5 }], LINE);
+    /* 動一下 → 停定計時歸零。 */
+    monitor.update(200, [{ ...body, y: body.y + 5 }], LINE);
     expect(monitor.settled).toBe(false);
     expect(monitor.elapsed).toBe(0);
   });
 
-  it('counts horizontal drift as movement too', () => {
-    const monitor = new OverflowMonitor(GRACE, SETTLE_FAST);
+  it('counts horizontal drift as movement too, before counting begins', () => {
+    const monitor = new OverflowMonitor(GRACE, { settleDistance: 0.6, settleMs: 5000 });
     const body = overTheLine();
 
-    monitor.update(1000, [body], LINE);
-    monitor.update(1000, [body], LINE);
-    expect(monitor.settled).toBe(true);
+    monitor.update(200, [body], LINE);
+    monitor.update(200, [body], LINE);
+    expect(monitor.settled).toBe(false);
 
     /* 只有 X 改變：只看 Y 的實作會漏掉這種滾動。 */
-    monitor.update(1000, [{ ...body, x: body.x + 5 }], LINE);
+    monitor.update(200, [{ ...body, x: body.x + 5 }], LINE);
     expect(monitor.settled).toBe(false);
   });
 
@@ -261,6 +275,146 @@ describe('OverflowMonitor — 停定才起算 / settle before counting', () => {
 
     monitor.update(1, [body], LINE);
     expect(monitor.isOver).toBe(true);
+  });
+});
+
+/*
+ * 使用者回報的 bug：倒數開始後，只要繼續投放方團團，倒數就會被重置回 5 秒，一直走不完。
+ * 根因是「新的越線顆粒第一次見到時算還在動」，而舊實作把 `elapsedMs` 也綁在這個條件上。
+ * 這一整個區塊釘住新規則：**起算之後，只有「完全沒有越線顆粒」能讓倒數歸零。**
+ * The bug the user reported: once the countdown began, dropping more dumplings reset it back to
+ * 5 and it never finished. The cause is "a newly seen breaching body counts as moving" combined
+ * with `elapsedMs` being tied to that condition. This block pins the new rule: **once counting,
+ * only "nothing above the line" resets it.**
+ */
+describe('OverflowMonitor — 起算後倒數不可被運動打斷 / counting is immune to movement', () => {
+  it('keeps counting when a fresh dumpling lands on the pile', () => {
+    /*
+     * 這就是使用者截圖裡的情境：倒數走到一半，玩家再投一顆，新顆粒掉進堆疊、碰到其他方團團
+     * → `entered = true`，上緣在線上 → 成為越線顆粒 → 舊實作在此歸零。
+     * This is the screenshot's exact scenario: mid-countdown the player drops again, the fresh
+     * dumpling touches the pile so `entered` goes true, its top edge is over the line — and the
+     * old code zeroed the timer right here.
+     */
+    const monitor = new OverflowMonitor(GRACE, SETTLE_FAST);
+    const piled = overTheLine();
+
+    /* 起算：建立基準 → 停定 200ms → 倒數開始（1000ms）。 */
+    stepSettled(monitor, piled);
+    monitor.update(1000, [piled], LINE);
+    expect(monitor.elapsed).toBe(2000);
+
+    /* 新投的一顆，第一次見到，位置略有不同。 */
+    const fresh = { id: nextId++, x: piled.x + 2, y: piled.y - 2, radius: 20, entered: true };
+    monitor.update(1000, [piled, fresh], LINE);
+
+    expect(monitor.elapsed).toBe(3000);
+    expect(monitor.settled).toBe(true);
+    /* 玩家看到的是「4 → 3」繼續走，而不是跳回 5。 */
+    expect(monitor.remainingSeconds).toBe(2);
+  });
+
+  it('keeps counting even while the whole pile is shoved around', () => {
+    /*
+     * 停定判定在起算前是「位移超過門檻就算在動」。起算後這個門檻不再有意義 —— 玩家把整堆
+     * 推得團團轉也一樣要算完。
+     * Before counting, the settle test is "displacement over the threshold means moving". After
+     * counting starts that threshold no longer matters — even a pile shoved all over must run
+     * the clock out.
+     */
+    const monitor = new OverflowMonitor(GRACE, SETTLE_FAST);
+    const body = overTheLine();
+
+    stepSettled(monitor, body);
+    monitor.update(1000, [body], LINE);
+    expect(monitor.elapsed).toBe(2000);
+
+    /* 每一步都大幅位移。 */
+    for (let step = 0; step < 2; step += 1) {
+      monitor.update(1000, [{ ...body, y: body.y - 30 + step * 60, x: body.x + 40 }], LINE);
+    }
+
+    expect(monitor.elapsed).toBe(4000);
+    expect(monitor.isOver).toBe(false);
+  });
+
+  it('still ends the run even if the player never stops dropping', () => {
+    /*
+     * 這條是整個修正的落點：**倒數終究會走完**。玩家瘋狂投放也救不了已經起算的倒數。
+     * 舊實作下這個場景會永遠停在 5 秒。
+     * This is the whole point of the fix: **the countdown does finish**. Dropping frantically
+     * cannot save a countdown that has already begun — under the old code this scenario hung at
+     * 5 forever.
+     */
+    const monitor = new OverflowMonitor(3000, SETTLE_FAST);
+    const piled = overTheLine();
+
+    stepSettled(monitor, piled);
+
+    /* 每 500ms 補一顆新方團團，堆已經高到永遠有東西越線。 */
+    for (let round = 0; round < 12 && !monitor.isOver; round += 1) {
+      const fresh = { id: nextId++, x: 100 + round, y: 28, radius: 20, entered: true };
+      monitor.update(500, [piled, fresh], LINE);
+    }
+
+    expect(monitor.isOver).toBe(true);
+  });
+
+  it('still resets when every breaching body drops back below the line', () => {
+    /*
+     * 唯一仍然能讓倒數歸零的條件。玩家若真的把越線的顆粒推回線下（例如用大顆合成掉），
+     * 那是「解除越界」，倒數就該重算 —— 而且要重新經過停定判定才會再次起算。
+     * The one thing that still resets it. If the player genuinely pushes the breaching bodies
+     * back under the line (by merging them away with something bigger), the breach *is* cleared,
+     * so the countdown restarts — and must earn its way past the settle check all over again.
+     */
+    const monitor = new OverflowMonitor(GRACE, SETTLE_FAST);
+    const body = overTheLine();
+
+    stepSettled(monitor, body);
+    monitor.update(1000, [body], LINE);
+    expect(monitor.elapsed).toBe(2000);
+
+    /* 全部退回線下 → 歸零。 */
+    monitor.update(16.7, [underTheLine()], LINE);
+    expect(monitor.elapsed).toBe(0);
+    expect(monitor.settled).toBe(false);
+
+    /* 再越線時必須重新等停定，不能直接從 2 秒接續。 */
+    const again = overTheLine();
+    monitor.update(200, [again], LINE); /* 第一次見到 → 當成還在動 */
+    expect(monitor.elapsed).toBe(0);
+
+    monitor.update(100, [again], LINE); /* 靜止 100ms，還沒到 200ms */
+    expect(monitor.elapsed).toBe(0);
+
+    monitor.update(100, [again], LINE); /* 滿 200ms → 重新起算 */
+    expect(monitor.elapsed).toBe(100);
+  });
+
+  it('forgets that it was counting after a reset', () => {
+    /*
+     * `reset()` 必須把 `counting` 一起清掉，否則新一局一開始就越線就立刻倒數，
+     * 「停定才起算」這條規則在第二局會失效。
+     * `reset()` must clear `counting` too, otherwise a new run would start counting the instant
+     * anything crosses the line and "settle before counting" would stop working in run two.
+     */
+    const monitor = new OverflowMonitor(GRACE, SETTLE_FAST);
+    const body = overTheLine();
+
+    stepSettled(monitor, body);
+    monitor.update(1000, [body], LINE);
+    expect(monitor.elapsed).toBe(2000);
+
+    monitor.reset();
+    expect(monitor.elapsed).toBe(0);
+    expect(monitor.settled).toBe(false);
+
+    /* 新局：同樣的靜止顆粒，仍然要等兩步才起算。 */
+    monitor.update(1000, [body], LINE);
+    expect(monitor.elapsed).toBe(0);
+    monitor.update(1000, [body], LINE);
+    expect(monitor.elapsed).toBe(1000);
   });
 });
 
