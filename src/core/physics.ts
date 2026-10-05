@@ -193,6 +193,48 @@ export function lockRotation(body: Matter.Body): void {
   Matter.Body.setAngularVelocity(body, 0);
 }
 
+/**
+ * 把一個剛體沿某方向推出去（**位置**位移＋速度增量）。
+ * Push a body along a direction — a **position** shift plus a velocity kick.
+ *
+ * 兩者都要，而且各有用途：
+ *  - **位置**位移讓穿透**立刻**消失。只給速度的話，這一幀畫面仍然是穿模的，玩家會看到
+ *    一瞬間的錯誤，然後才分開。
+ *  - **速度**增量讓它「繼續往外走」而不是被推回原位，分開的動作才有物理感。
+ * Two parts, each doing its own job: the **position** shift removes the penetration
+ * immediately (velocity alone would leave one visibly wrong frame before anything separates),
+ * and the velocity kick carries the body outward so the separation reads as motion rather than
+ * a teleport.
+ *
+ * 用 `Body.translate` 而不是直接改 `position`：前者會同步更新 `bounds`、`vertices` 與
+ * 質心，直接賦值只改位置、讓快取幾何與位置不一致 —— 那會在下一次碰撞偵測時爆出幽靈碰撞。
+ * Uses `Body.translate` rather than assigning `position`: the former keeps `bounds`, `vertices`
+ * and the centre of mass in sync, while a raw assignment leaves cached geometry stale — which
+ * surfaces later as ghost collisions.
+ *
+ * @param body 目標剛體 / The body to push.
+ * @param nx 方向單位向量 X / Unit direction X.
+ * @param ny 方向單位向量 Y / Unit direction Y.
+ * @param distance 位置位移量（世界單位）/ Position shift in world units.
+ * @param speed 速度增量（世界單位／步）/ Velocity kick in world units per step.
+ */
+export function pushBody(
+  body: Matter.Body,
+  nx: number,
+  ny: number,
+  distance: number,
+  speed: number,
+): void {
+  if (distance > 0) Matter.Body.translate(body, { x: nx * distance, y: ny * distance });
+
+  if (speed > 0) {
+    Matter.Body.setVelocity(body, {
+      x: body.velocity.x + nx * speed,
+      y: body.velocity.y + ny * speed,
+    });
+  }
+}
+
 export class Physics {
   private readonly engine: Matter.Engine;
 

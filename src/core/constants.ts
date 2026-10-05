@@ -116,6 +116,53 @@ export const POP_PEAK_SCALE = 1.3;
  */
 export const MERGE_OUTLINE_GAP = 4;
 
+/**
+ * 合成後對鄰居的推力係數（使用者定案：按重疊深度推開）。
+ * The push factor applied to neighbours after a merge (the user's decision: push apart by
+ * overlap depth).
+ *
+ * 合成出來的那顆比兩顆原料都**大**，而它生成在兩者的質心 —— 多出來的面積沒有地方去，
+ * 就會陷進旁邊的方團團裡。使用者的截圖正是這個：新生成的小顆粒整個埋在大顆粒的左上角。
+ * 補救是「誰被壓到就推誰」：對每個與新顆粒重疊的鄰居，沿連心線推開，位移量 ＝
+ * `重疊深度 × MERGE_PUSH_FACTOR`。
+ * The merged dumpling is **larger** than either input yet spawns at their midpoint, so the
+ * extra area has nowhere to go and sinks into the neighbours — exactly the user's screenshot,
+ * where a freshly merged dumpling sits buried in a large one's corner. The remedy is "push
+ * whoever got crushed": every neighbour overlapping the new body is displaced along the centre
+ * line by `overlap depth × MERGE_PUSH_FACTOR`.
+ *
+ * **為什麼大於 1**：深度本身只夠「剛好分開」，但新顆粒生成後還在彈跳動畫中、且下一幀物理
+ * 會繼續把它往下壓，1.0 會立刻又重疊。稍微過推（1.15）讓分開維持得住。
+ * **Why above 1**: the raw depth only just separates them, but the new body is still inside its
+ * pop animation and physics pushes it back down on the next frame, so 1.0 re-overlaps
+ * immediately. A slight overshoot (1.15) makes the separation stick.
+ */
+export const MERGE_PUSH_FACTOR = 1.15;
+
+/**
+ * 合成推力附帶的速度增量比例（每單位深度）。
+ * The velocity kick per unit of overlap depth, applied alongside the merge push.
+ *
+ * 只有位置位移的話，鄰居會被「瞬移」到旁邊、看起來很硬。附帶一點速度讓它自然地滑開，
+ * 分開的過程才像被擠出來而不是被傳送。
+ * A position shift alone teleports the neighbour aside, which reads as rigid. A small velocity
+ * kick lets it slide away, so the separation looks like being squeezed out rather than moved.
+ */
+export const MERGE_PUSH_SPEED = 0.05;
+
+/**
+ * 合成推力的深度上限，世界單位。
+ * The cap on overlap depth used for a merge push, in world units.
+ *
+ * 沒有上限的話，一顆大顆粒整個包住小顆粒時會算出極大的深度（區間重疊可以到對方整條直徑），
+ * 把鄰居彈到容器另一端。上限讓最壞情況也只是「明顯推開」，不會變成彈射。
+ * Without a cap, a small dumpling wholly inside a large one reports an enormous depth (the
+ * interval overlap can reach the other shape's whole diameter) and launches the neighbour
+ * across the container. The cap keeps the worst case at "clearly pushed aside" rather than
+ * "catapulted".
+ */
+export const MERGE_PUSH_MAX_DEPTH = 12;
+
 /** 本地儲存鍵的前綴，避免與同網域其他專案衝突。 */
 export const STORAGE_PREFIX = 'endchimerge';
 

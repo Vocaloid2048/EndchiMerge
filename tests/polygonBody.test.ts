@@ -13,7 +13,7 @@
 
 import { describe, expect, it } from 'vitest';
 import Matter from 'matter-js';
-import { createCircleBody, createPolygonBody } from '../src/core/physics';
+import { createCircleBody, createPolygonBody, pushBody } from '../src/core/physics';
 
 /** 一個邊長 40、正方、凸的輪廓（相對質心）。 */
 function squarePolygon(half = 20) {
@@ -91,5 +91,66 @@ describe('createCircleBody', () => {
 
     expect(body.mass).toBeGreaterThan(0);
     expect(body.circleRadius).toBeCloseTo(20, 6);
+  });
+});
+
+describe('pushBody — 沿方向推開剛體 / displace a body along a direction', () => {
+  it('translates the body by the requested distance', () => {
+    const body = createCircleBody(0, 0, 10);
+    pushBody(body, 1, 0, 5, 0);
+
+    expect(body.position.x).toBeCloseTo(5, 6);
+    expect(body.position.y).toBeCloseTo(0, 6);
+  });
+
+  it('pushes along a diagonal direction', () => {
+    const body = createCircleBody(0, 0, 10);
+    const inv = 1 / Math.SQRT2;
+    pushBody(body, inv, inv, 10, 0);
+
+    expect(body.position.x).toBeCloseTo(10 * inv, 6);
+    expect(body.position.y).toBeCloseTo(10 * inv, 6);
+  });
+
+  it('adds a velocity kick on top of any existing velocity', () => {
+    const body = createCircleBody(0, 0, 10);
+    Matter.Body.setVelocity(body, { x: 1, y: 0 });
+
+    pushBody(body, 1, 0, 0, 0.5);
+
+    expect(body.velocity.x).toBeCloseTo(1.5, 6);
+    expect(body.velocity.y).toBeCloseTo(0, 6);
+  });
+
+  it('keeps the cached bounds in sync with the new position', () => {
+    /*
+     * 這條釘住「用 `Body.translate` 而不是直接改 `position`」。直接賦值會讓 `bounds` 與
+     * `vertices` 停在舊位置 —— 下一次碰撞偵測就會拿過期幾何去比對。
+     * This pins "use `Body.translate`, not a raw `position` assignment": assigning leaves
+     * `bounds` and `vertices` at the old location, and the next collision pass then tests
+     * against stale geometry.
+     *
+     * 斷言的是**位移量**而不是絕對位置：圓形剛體的頂點是多邊形近似（Matter 預設取樣數
+     * 讓半徑 10 的圓在 x 上只到 15.489 而非 15），所以絕對值不可靠，位移才可靠。
+     * The assertion is on the **shift**, not the absolute position: a circle's vertices are a
+     * polygon approximation (Matter's default sample count makes a radius-10 circle reach
+     * 15.489 on x, not 15), so the absolute value is unreliable while the shift is exact.
+     */
+    const body = createCircleBody(0, 0, 10);
+    const beforeBounds = body.bounds.min.x;
+    const beforeMinX = Math.min(...body.vertices.map((v) => v.x));
+
+    pushBody(body, 1, 0, 25, 0);
+
+    expect(body.bounds.min.x).toBeCloseTo(beforeBounds + 25, 6);
+    expect(Math.min(...body.vertices.map((v) => v.x))).toBeCloseTo(beforeMinX + 25, 6);
+  });
+
+  it('does nothing when both distance and speed are zero', () => {
+    const body = createCircleBody(7, 8, 10);
+    pushBody(body, 1, 0, 0, 0);
+
+    expect(body.position.x).toBeCloseTo(7, 6);
+    expect(body.position.y).toBeCloseTo(8, 6);
   });
 });

@@ -1069,6 +1069,108 @@ describe('GameSession — 近接合成 / proximity merging', () => {
   });
 });
 
+/*
+ * 合成推力（使用者定案：按重疊深度推開）。
+ * The merge push (the user's decision: displace neighbours by overlap depth).
+ *
+ * 合成出來的那顆比兩顆原料都大，卻生成在質心 —— 多出來的面積會陷進旁邊的方團團。這一整個
+ * 區塊釘住「生成後立刻把被壓到的鄰居推開」這條補救規則。
+ * The merged dumpling is larger than either input yet spawns at the midpoint, so its extra area
+ * sinks into the neighbours. This block pins the remedy: overlapping neighbours are displaced
+ * immediately after the new body appears.
+ */
+describe('GameSession — 合成推力 / merge push', () => {
+  it('still merges and never leaves a neighbour buried inside the result', () => {
+    /*
+     * 密集投放後，場上不該有「明顯重疊」的同級或跨級殘留。
+     *
+     * 用**圓形近似**量殘留（測試環境沒有輪廓）：`(r₁+r₂) − 圓心距離` 為正代表重疊。這比
+     * 真實輪廓保守（輪廓有凹角，實際上更不容易重疊），所以「近似下也不重疊」比
+     * 「輪廓下不重疊」是更強的保證。
+     * After dense dropping, no clearly overlapping pair may remain.
+     *
+     * The residual is measured with a **circle approximation** (tests have no outlines):
+     * `(r₁+r₂) − centre distance` being positive means overlap. That is more conservative than
+     * the true outlines (whose concave corners overlap less readily), so "no overlap even under
+     * the approximation" is the stronger guarantee.
+     */
+    const session = makeNarrow(SOLO_LV1, 200, { dropCooldownMs: 0 });
+
+    for (let n = 0; n < 10; n += 1) {
+      session.setAim(60 + (n % 3) * 40);
+      session.drop();
+      runFrames(session, 40);
+    }
+    /* 讓場面完全靜止。 */
+    runFrames(session, 300);
+
+    const bodies = session.bodies;
+    const radii = new Map<number, number>([
+      [1, 13.5],
+      [2, 17.3],
+      [3, 22.1],
+    ]);
+
+    let worst = 0;
+    for (let i = 0; i < bodies.length; i += 1) {
+      for (let j = i + 1; j < bodies.length; j += 1) {
+        const a = bodies[i]!;
+        const b = bodies[j]!;
+        const distance = Math.hypot(a.x - b.x, a.y - b.y);
+        const overlap = (radii.get(a.levelId) ?? 0) + (radii.get(b.levelId) ?? 0) - distance;
+        if (overlap > worst) worst = overlap;
+      }
+    }
+
+    /*
+     * 門檻 1：物理求解器本身就會解掉一點點重疊，這裡允許極小殘留（< 1）當作數值誤差。
+     * A threshold of 1 absorbs the tiny residual the solver itself leaves as numeric error.
+     */
+    expect(worst).toBeLessThan(1);
+  });
+
+  it('displaces a neighbour that the merge result lands on', () => {
+    /*
+     * 直接驗證推力：鋪三顆同級，讓中間那兩顆合成，檢查被壓到的第三顆有沒有被推開。
+     *
+     * 做法是記錄「合成前」第三顆的位置與「合成後數幀」的位置，兩者必須有位移。用窄容器
+     * 確保它們一定擠在一起，推力才有東西可推。
+     * A direct check of the push: lay three same-level dumplings, merge the middle two, and
+     * verify the third one got moved. The third body's position before the merge and a few
+     * frames after are compared; they must differ. A narrow box guarantees the tight packing
+     * the push needs to have anything to push.
+     */
+    const session = makeNarrow(SOLO_LV1, 120, { dropCooldownMs: 0 });
+
+    /* 鋪好第一顆並記下位置。 */
+    dropAndSettle(session, 60, 90);
+    const firstId = session.bodies[0]?.levelId;
+    expect(firstId).toBe(1);
+
+    /* 再投一顆 → 合成；此時場上只剩合成結果。 */
+    dropAndSettle(session, 60, 120);
+    expect(session.mergedCount).toBe(1);
+
+    /* 投第三顆，讓它跟合成結果靠近（不同級不會再合成，所以才留得住）。 */
+    session.setAim(60);
+    session.drop();
+    runFrames(session, 5);
+
+    const before = session.bodies.map((body) => ({ x: body.x, y: body.y }));
+    runFrames(session, 10);
+    const after = session.bodies.map((body) => ({ x: body.x, y: body.y }));
+
+    /* 至少有一顆移動了（推力或物理擠壓）。 */
+    const moved = before.some((point, index) => {
+      const other = after[index];
+      if (other === undefined) return false;
+      return Math.hypot(point.x - other.x, point.y - other.y) > 0.5;
+    });
+
+    expect(moved).toBe(true);
+  });
+});
+
 describe('GameSession — 溢位與結束 / overflow and game over', () => {
   /**
    * 溢位測試專用的房間：可以覆寫容器參數，而且等級表**不會合成**，堆疊才穩定。

@@ -27,9 +27,12 @@
  */
 
 import Matter from 'matter-js';
-import { createCircleBody, createPolygonBody, lockRotation, Physics } from '../core/physics';
+import { createCircleBody, createPolygonBody, lockRotation, Physics, pushBody } from '../core/physics';
 import {
   MERGE_OUTLINE_GAP,
+  MERGE_PUSH_FACTOR,
+  MERGE_PUSH_MAX_DEPTH,
+  MERGE_PUSH_SPEED,
   POP_ANIMATION_MS,
   POP_PEAK_SCALE,
   WALL_THICKNESS,
@@ -37,7 +40,7 @@ import {
 import { computeContainerBounds, computeWallOverhang, createContainerBodies } from './containerBox';
 import { ComboTracker } from './combo';
 import { mergeResultId } from './merge';
-import { outlinesWithinReach, toWorldPolygon } from './outlineProximity';
+import { outlinePenetration, outlinesWithinReach, toWorldPolygon } from './outlineProximity';
 import { OverflowMonitor } from './overflow';
 import { SpawnQueue } from './spawnQueue';
 import { computeContainerGeometry, type ContainerGeometry } from '../render/container';
@@ -752,6 +755,20 @@ export class GameSession {
     this.physics.add(body);
     this.addEntry({ body, level, bornAtMs: atMs });
 
+    /*
+     * 推開被壓到的鄰居（使用者定案：按重疊深度推開）。
+     *
+     * 新顆粒比兩顆原料都大，卻生成在質心 —— 多出來的面積會陷進旁邊的方團團。這裡在生成後
+     * **立刻**把重疊的鄰居沿連心線推開，位移量按重疊深度算，不讓穿模留到下一幀被玩家看到。
+     * Push aside the neighbours that got crushed (the user's decision: push by overlap depth).
+     *
+     * The new body is larger than either input yet spawns at the midpoint, so its extra area
+     * sinks into the surrounding dumplings. This immediately displaces every overlapping
+     * neighbour along the centre line by its overlap depth, so the interpenetration never
+     * survives to the next frame where the player would see it.
+     */
+    this.pushNeighboursApart(body, level);
+
     /* 彈跳動畫：新生成的那顆從峰值縮回原尺寸。 */
     this.pops.set(body.id, atMs);
 
@@ -780,6 +797,96 @@ export class GameSession {
     this.dropMergeCountValue += 1;
 
     this.registerUnlock(level.id);
+  }
+
+  /**
+   * 把與新顆粒重疊的鄰居沿連心線推開（使用者定案：按重疊深度推開）。
+   * Push neighbours overlapping a freshly merged body outward along the centre line (the user's
+   * decision: push by overlap depth).
+   *
+   * 每個鄰居各自處理，深度取 `outlinePenetration()` 的結果，並且：
+   *  - **位移 ＝ 深度 × `MERGE_PUSH_FACTOR`**（略為過推，否則下一幀又疊回去）
+   *  - **速度增量 ＝ 深度 × `MERGE_PUSH_SPEED`**（讓分開看起來是滑開，不是瞬移）
+   *  - **深度上限 `MERGE_PUSH_MAX_DEPTH`**（否則「小顆粒完全在大顆粒內」會把鄰居彈飛）
+   * Each neighbour is handled on its own, with the depth from `outlinePenetration()`, and:
+   *  - **position shift = depth × `MERGE_PUSH_FACTOR`** (a slight overshoot, or it re-overlaps
+   *    next frame)
+   *  - **velocity kick = depth × `MERGE_PUSH_SPEED`** (so separation reads as sliding, not a
+   *    teleport)
+   *  - **depth capped at `MERGE_PUSH_MAX_DEPTH`** (or "small wholly inside large" would fling
+   *    the neighbour away)
+   *
+   * **只推鄰居、不推自己**：新顆粒剛生成，位置由合成規則決定（兩顆原料的質心）；把它也推走
+   * 會讓合成結果「跳」到玩家預期之外的地方。鄰居被推開才是玩家要的效果。
+   * **Only neighbours move, never the new body**: the merge result's position is dictated by the
+   * rule (the inputs' midpoint), and shoving it too would make it jump somewhere the player did
+   * not expect. Displacing the neighbours is the effect that was asked for.
+   *
+   * **沒有輪廓時退回「圓心距離 vs 半徑和」**：與合併判定同一套退路，讓純圓形碰撞體也能運作。
+   * **Falls back to "centre distance vs radii sum" without outlines**: the same fallback as the
+   * merge predicate, so plain circle colliders still work.
+   */
+  private pushNeighboursApart(body: Matter.Body, level: LevelDef): void {
+    const newPolygon = this.silhouettes?.get(level.id);
+    const hasNew = newPolygon !== undefined && newPolygon !== null;
+
+    const worldNew = hasNew
+      ? toWorldPolygon(newPolygon, body.position.x, body.position.y, body.angle)
+      : null;
+
+    for (const entry of this.entries) {
+      /* 自己不算鄰居。 */
+      if (entry.body.id === body.id) continue;
+
+      let nx: number;
+      let ny: number;
+      let depth: number;
+
+      const otherPolygon = this.silhouettes?.get(entry.level.id);
+      const hasOther = otherPolygon !== undefined && otherPolygon !== null;
+
+      if (worldNew !== null && hasOther) {
+        const worldOther = toWorldPolygon(
+          otherPolygon,
+          entry.body.position.x,
+          entry.body.position.y,
+          entry.body.angle,
+        );
+        ({ nx, ny, depth } = outlinePenetration(worldNew, worldOther));
+      } else {
+        /*
+         * 退路：用圓心距離與半徑和算深度。深度 = 半徑和 − 圓心距離（沒重疊就是 0）。
+         * Fallback: depth from centre distance versus the radii sum.
+         */
+        const dx = entry.body.position.x - body.position.x;
+        const dy = entry.body.position.y - body.position.y;
+        const distance = Math.hypot(dx, dy);
+        const radiiSum = level.radius + entry.level.radius;
+
+        if (distance === 0) {
+          nx = 0;
+          ny = 1;
+          depth = radiiSum;
+        } else {
+          nx = dx / distance;
+          ny = dy / distance;
+          depth = radiiSum - distance;
+        }
+      }
+
+      if (depth <= 0) continue;
+
+      /* 上限：避免極端深度把鄰居彈到容器另一頭。 */
+      const capped = Math.min(depth, MERGE_PUSH_MAX_DEPTH);
+
+      pushBody(
+        entry.body,
+        nx,
+        ny,
+        capped * MERGE_PUSH_FACTOR,
+        capped * MERGE_PUSH_SPEED,
+      );
+    }
   }
 
   /** 依世代註冊解鎖；成功時刷新生成池，讓新等級也能被抽到。 */
