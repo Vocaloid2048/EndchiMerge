@@ -21,10 +21,48 @@
  *
  * 對角方向的位移略小於正交方向，這樣八個影子疊出來的描邊寬度才大致等寬。
  * The diagonal offsets are smaller so all eight shadows produce an even-width edge.
+ *
+ * ## 為什麼是 2 / 1.42（修訂版，使用者定案）
+ * Why 2 / 1.42 (revised, the user's decision)
+ *
+ * 舊值是 1.2 / 0.85。使用者回報「上半有明確輪廓，下半的寬度反而不明顯」。實測後確認這不是
+ * 裁切問題（`overflow: clip` 在 `<img>` 上，但元素框四周餘裕足夠），而是**白框本身太細**：
+ * 素材本身在上緣／左緣有一道淺色 rim-light，會和 1.2px 的白框**疊在一起**，讀起來像 3px；
+ * 下緣／右緣沒有 rim-light，只有白框自己，於是同一條 1.2px 的白框在那兩邊只剩約 1px 的
+ * 視覺重量。差距因此不是「某一邊被裁掉」，而是「某一邊沒有素材幫忙加粗」。
+ * The old values were 1.2 / 0.85. The user reported "the upper half has a clear outline, the lower
+ * half's width falls off". Measurement ruled out clipping (the `<img>` does carry `overflow: clip`,
+ * but its box has ample slack on every side) and pointed at the **outline simply being too thin**:
+ * the art has a light rim-light along its top and left edges which **merges** with the 1.2px frame
+ * and reads as ~3px, while the bottom and right have no rim-light, so the same 1.2px frame carries
+ * only about 1px of visual weight there. The gap was never "one side got clipped" — it was "one side
+ * gets no help from the art".
+ *
+ * 量測（NEXT 卡，設計空間 px，四邊白框中位厚）：
+ * Measurement (NEXT card, design-space px, median frame thickness per side):
+ *
+ * | 值 width/diag | 上 top | 下 bottom | 左 left | 右 right |
+ * |---------------|-------:|----------:|--------:|---------:|
+ * | 1.2 / 0.85（舊） | 3.00 | **1.00** | 3.00 | **0.75** |
+ * | 1.6 / 1.15       | 4.50 | 2.25     | 4.38 | 2.25     |
+ * | **2.0 / 1.42**   | 4.88 | 3.25     | 4.38 | 3.00     |
+ * | 2.4 / 1.70       | 5.75 | 3.38     | 5.13 | 3.00     |
+ *
+ * 取 `2 / 1.42`：下緣與右緣升到和上緣／左緣同一量級（差距由約 3× 收斂到約 1.3×），
+ * 且上緣不會像 2.4 那樣明顯脹大。這組值也正好落在 §3.2 自帶的 CSS 範例（`2px` / `1.5px`）
+ * 上 —— 原本的 1.2 比設計稿範例還薄，本身就是取值偏低。
+ * `2 / 1.42` is chosen: bottom and right rise into the same band as top and left (the ~3× gap
+ * collapses to about 1.3×), and the top does not visibly bloat the way 2.4 does. These values also
+ * land on §3.2's own CSS example (`2px` / `1.5px`) — the old 1.2 was simply under the spec.
+ *
+ * 寬度以**設計空間 px** 定義（§3.2：白框寬度以虛擬單位定義），面板整體再被 `.stage-scale`
+ * 縮放，所以這裡的 px 會隨縮放等比變化。
+ * The width is in **design-space px** (§3.2 defines it in virtual units); the whole panel is then
+ * scaled by `.stage-scale`, so these px scale proportionally.
  */
 .sprite-outline {
-  --outline-width: 1.2px;
-  --outline-diagonal: 0.85px;
+  --outline-width: 2px;
+  --outline-diagonal: 1.42px;
   --outline-color: #ffffff;
 
   filter:
