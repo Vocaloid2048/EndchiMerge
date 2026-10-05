@@ -27,6 +27,7 @@ import type { SpriteLoader } from '../render/spriteLoader';
 import { MELTING } from '../core/design';
 import { el } from './dom';
 import {
+  autoFitRows,
   cellOrigin,
   computeRosterLayout,
   type RosterSlot,
@@ -134,13 +135,19 @@ export function createMeltingList(options: MeltingListOptions): MeltingList {
  *
  * `overflow: visible` 是必要的：箭頭比內容區右緣再突出約 18px（設計稿也是如此，只是仍在
  * 面板之內）。SVG 預設會裁掉視埠外的內容，那會把箭頭切一半。
+ *
+ * `viewBox` 的高度取**實際格網高度**（`rows × cellHeight`），與 `.roster` 的高度一致；否則
+ * `preserveAspectRatio="none"` 會把路徑垂直拉伸，圓角與線寬全部變形。
+ * The `viewBox` height is the **actual grid height** (`rows × cellHeight`), matching `.roster`;
+ * otherwise `preserveAspectRatio="none"` would stretch the path vertically and distort every
+ * fillet and the stroke width.
  */
-function buildTrack(track: RosterTrack): SVGSVGElement {
+function buildTrack(track: RosterTrack, gridHeight: number): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.classList.add('roster-track');
   svg.setAttribute(
     'viewBox',
-    `0 0 ${String(MELTING.content.width)} ${String(MELTING.content.height)}`,
+    `0 0 ${String(MELTING.content.width)} ${String(gridHeight)}`,
   );
   svg.setAttribute('aria-hidden', 'true');
   svg.setAttribute('preserveAspectRatio', 'none');
@@ -164,15 +171,32 @@ function buildTrack(track: RosterTrack): SVGSVGElement {
   function render(): void {
     const unlockedCount = levels.filter((level) => unlocked.has(level.id)).length;
 
+    /*
+     * 列數由**鏈長自動決定**（見 `autoFitRows`）：設計稿的 4×5 是 19 格的形狀，10 級沿用 5 列
+     * 會讓走線只用 2 欄、蛇形退化成最右邊一條垂直線。自動列數讓欄數填滿面板寬度。
+     * Rows are **auto-fitted to the chain length** (see `autoFitRows`): the mock's 4×5 is the shape
+     * of 19 slots, and 10 levels at 5 rows would use only 2 columns and degenerate the serpentine
+     * into one vertical line at the far right. Auto-fit fills the panel width instead.
+     */
+    const rows = options.rows ?? autoFitRows(levels.length, options.cols ?? MELTING.cols);
+
     const layout = computeRosterLayout({
       count: levels.length,
       cols: options.cols,
-      rows: options.rows,
+      rows,
       unlockedCount,
     });
 
+    /*
+     * 格網高度跟著實際列數走，否則列數變少時下半個面板會空著、走線也拖在格子下方。
+     * The grid height follows the rows actually used, or a shorter grid would leave the lower half
+     * of the panel empty and the track dragging below the cells.
+     */
+    const gridHeight = rows * MELTING.cellHeight;
+    grid.style.setProperty('--melting-grid-h', `${String(gridHeight)}px`);
+
     grid.replaceChildren();
-    if (layout.track !== null) grid.append(buildTrack(layout.track));
+    if (layout.track !== null) grid.append(buildTrack(layout.track, gridHeight));
 
     for (const slot of layout.slots) {
       grid.append(buildCell(slot));

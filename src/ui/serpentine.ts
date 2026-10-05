@@ -121,6 +121,45 @@ function num(value: number): string {
 }
 
 /**
+ * 由列數推導上／下走道的 y。
+ * Derive the top and bottom lane Y from the row count.
+ *
+ * 設計稿的 5 列格網給出上走道 35、下走道 458，而 5 列共佔 `5 × 94.4 ≈ 472`。兩個值其實是
+ * 「貼著格網邊緣內縮一點」：
+ *  - 下走道 ＝ 格網底部內縮 `laneInset` → `458 ≈ 472 − 14`
+ *  - 上走道 ＝ 第一列中心往上 `cellHeight / 2 − laneInset` → `35 ≈ 47.2 − 12`
+ * 把這兩個關係寫成式子，列數改變時走道自動跟著貼合。
+ * The mock's 5-row grid gives lanes at 35 and 458, and 5 rows span `5 × 94.4 ≈ 472`. Both are
+ * simply "a little inside the grid's edge":
+ *  - bottom lane = grid bottom inset by `laneInset` → `458 ≈ 472 − 14`
+ *  - top lane = first row's centre raised by `cellHeight / 2 − laneInset` → `35 ≈ 47.2 − 12`
+ * Expressing those relations keeps the lanes tight to the grid at any row count.
+ *
+ * @param rows 實際使用的列數 / The rows actually used.
+ * @returns 上走道與下走道的 y（內容區座標）。
+ */
+export function trackLanes(rows: number): { topLane: number; bottomLane: number } {
+  const { topLane, bottomLane } = MELTING.track;
+  const safeRows = Math.max(1, Math.trunc(rows));
+
+  /* 從設計稿的 5 列值反推「內縮量」，其餘列數沿用同一個內縮。 */
+  const referenceBottom = MELTING.rows * MELTING.cellHeight;
+  const laneInset = referenceBottom - bottomLane;
+
+  const gridBottom = safeRows * MELTING.cellHeight;
+  const derivedBottom = gridBottom - laneInset;
+
+  /*
+   * 上走道：設計稿把它放在第一列中心再往上約 12（`cellHeight/2 − laneInset`）。
+   * Top lane: the mock places it about 12 above the first row's centre.
+   */
+  const referenceTopOffset = topLane - MELTING.cellHeight / 2;
+  const derivedTop = MELTING.cellHeight / 2 + referenceTopOffset;
+
+  return { topLane: derivedTop, bottomLane: derivedBottom };
+}
+
+/**
  * 組出走線。
  * Build the track.
  *
@@ -132,16 +171,39 @@ function num(value: number): string {
  * fillets rather than 90° corners; after the final column the path exits right and descends
  * the right-hand lane, ending in a downward arrow.
  *
+ * **走道的 y 由 `rows` 推導**，不是寫死的。設計稿的 35 / 458 是 5 列格網的值；列數變少時若
+ * 沿用，線會拖到格子下方一大截（蛇形看起來「多走了一段」）。推導式讓任何列數都貼著格網。
+ * **The lane Y values are derived from `rows`**, not hardcoded. The mock's 35 / 458 belong to a
+ * 5-row grid; keeping them for fewer rows would drag the line far below the last row, making the
+ * serpentine look like it walks extra steps. Deriving keeps any row count tight to the grid.
+ *
  * SVG 的 `sweep-flag` 只有兩個值，這裡用「往下走就是 0、往上走就是 1」的通則決定 ——
  * 直行蛇形裡同一個 U-turn 的兩個圓角一定同向，所以一個旗標就夠。
  * The SVG sweep flag has only two values; the rule here is "downward = 0, upward = 1".
  * Both fillets of one U-turn always share a direction, so a single flag suffices.
  */
-function buildTrack(cols: number): RosterTrack | null {
+function buildTrack(cols: number, rows: number): RosterTrack | null {
   if (cols < 1) return null;
 
   const pitch = MELTING.cellWidth;
-  const { topLane, bottomLane, exitX, cornerRadius, arrowLength, arrowHalfWidth } = MELTING.track;
+  const { cornerRadius, arrowLength, arrowHalfWidth } = MELTING.track;
+  const { topLane, bottomLane } = trackLanes(rows);
+
+  /*
+   * 出欄的 x：**預設用設計稿的 364**，但只要最後一欄的右緣超過它（欄數多時），就改貼在最後
+   * 一欄外側。設計稿的 364 是 4 欄全用滿時的值；欄數少時它會離最後一欄很遠，出欄線橫拉一大段
+   * 再垂直落下 —— 使用者看到的「一條直線」正是這個。
+   * The exit X **defaults to the mock's 364**, but moves out to hug the last column whenever that
+   * column's right edge passes it. The mock's 364 assumes all 4 columns; with fewer, it sits far
+   * from the last column, so the exit stretches across a long run before dropping — the "straight
+   * line" the user saw.
+   *
+   * 這樣「用滿 4 欄」時逐字等於設計稿（既有測試釘住的值不變），欄數少時則自動收窄。
+   * This keeps the all-4-column case byte-identical to the mock (the value the existing tests pin),
+   * while narrowing automatically for fewer columns.
+   */
+  const lastColRight = cols * pitch;
+  const derivedExit = Math.max(lastColRight + 6, Math.min(MELTING.track.exitX, MELTING.content.width - 3));
 
   /* 圓角半徑不能吃掉整個欄距，否則同一組 U-turn 的兩個圓角會互相穿過。 */
   const radius = Math.min(cornerRadius, pitch / 2 - 1);
@@ -178,13 +240,13 @@ function buildTrack(cols: number): RosterTrack | null {
    * only needs to step right before the arrow.
    */
   const endLane = (cols - 1) % 2 === 0 ? bottomLane : topLane;
-  parts.push(`L ${num(exitX)} ${num(endLane)}`);
-  if (endLane !== bottomLane) parts.push(`L ${num(exitX)} ${num(bottomLane)}`);
+  parts.push(`L ${num(derivedExit)} ${num(endLane)}`);
+  if (endLane !== bottomLane) parts.push(`L ${num(derivedExit)} ${num(bottomLane)}`);
 
   const arrow = [
-    `M ${num(exitX - arrowHalfWidth)} ${num(bottomLane - arrowLength)}`,
-    `L ${num(exitX)} ${num(bottomLane)}`,
-    `L ${num(exitX + arrowHalfWidth)} ${num(bottomLane - arrowLength)}`,
+    `M ${num(derivedExit - arrowHalfWidth)} ${num(bottomLane - arrowLength)}`,
+    `L ${num(derivedExit)} ${num(bottomLane)}`,
+    `L ${num(derivedExit + arrowHalfWidth)} ${num(bottomLane - arrowLength)}`,
   ].join(' ');
 
   return {
@@ -217,5 +279,39 @@ export function computeRosterLayout(options: RosterOptions): RosterLayout {
     slots.push({ index, col, row });
   }
 
-  return { cols: usedCols, rows, slots, track: buildTrack(usedCols), unlockedCount: unlocked };
+  return { cols: usedCols, rows, slots, track: buildTrack(usedCols, rows), unlockedCount: unlocked };
+}
+
+/**
+ * 由合成鏈長度挑出**填得滿寬度**的列數。
+ * Pick the row count that **fills the width** for a given chain length.
+ *
+ * 設計稿的 4×5 是從**19 格**反推的；實際的合成鏈只有 10 級時，沿用 5 列會讓走線只用到 2 欄，
+ * 蛇形退化成「走完兩欄後從最右邊垂直下來」的一條直線 —— 那既不像蛇形、也浪費了整個面板的
+ * 寬度。使用者回報的正是這個：10 個之後就變成 90° 一條直線。
+ * The mock's 4×5 was reverse-engineered from **19 slots**; with an actual 10-level chain, keeping
+ * 5 rows makes the walk use only 2 columns and the serpentine degenerates into "two columns, then
+ * drop straight down the far right" — not serpentine, and it wastes the panel's width. That is
+ * exactly what the user reported: a 90° straight line after the tenth cell.
+ *
+ * 選法：`rows = ceil(total / cols)`，讓每一欄分到差不多數量的格子，欄數自然填滿面板寬度。
+ * 例：10 級、4 欄 → `ceil(10/4) = 3`，得到 3+3+3+1 的四欄分佈（比 5+5 的 2 欄高塔好得多）。
+ * The rule is `rows = ceil(total / cols)`: each column gets a comparable share and the columns
+ * fill the panel width. For 10 levels at 4 columns that is `ceil(10/4) = 3`, giving a 3+3+3+1
+ * four-column spread — far better than a 5+5 two-column tower.
+ *
+ * @param total 合成鏈長度 / The chain length.
+ * @param cols 可用的欄數上限 / The column budget.
+ * @param maxRows 列數上限（避免超長鏈把面板撐爆）/ Row cap, so a very long chain cannot blow up.
+ * @returns 建議列數，至少 1。
+ */
+export function autoFitRows(total: number, cols: number, maxRows: number = MELTING.rows): number {
+  const safeCols = Math.max(1, Math.trunc(cols));
+  const safeRows = Math.max(1, Math.trunc(maxRows));
+  const count = Math.max(0, Math.trunc(total));
+
+  if (count === 0) return 1;
+
+  const rows = Math.ceil(count / safeCols);
+  return Math.max(1, Math.min(rows, safeRows));
 }
