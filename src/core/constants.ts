@@ -85,6 +85,37 @@ export const POP_ANIMATION_MS = 180;
 /** 彈跳動畫的峰值縮放倍率。 */
 export const POP_PEAK_SCALE = 1.3;
 
+/**
+ * 輪廓邊緣間隙的合成容差，虛擬單位（使用者定案：改用輪廓實際接觸判定）。
+ * The merge tolerance for the edge gap between two outlines, in virtual units (the user's
+ * decision: judge by the outlines actually touching).
+ *
+ * 兩顆**同級**方團團的輪廓邊緣間隙 ≤ 這個值（或已經重疊）時判定可合成。
+ * Two **same-level** dumplings merge once the edge gap between their outlines is at most this
+ * value, or once the outlines already overlap.
+ *
+ * **為什麼改用輪廓而不是圓心距離**：圓心距離法對**不同尺寸**的配對會系統性失準 —— 一顆
+ * 小顆粒夾在兩顆大顆粒之間時，視覺上已經相依，但圓心距離被「自己的半徑 ＋ 鄰居的半徑」
+ * 綁死，遠超任何合理的圓心容差。使用者的截圖正是這個情境。邊緣間隙沒有這個偏誤，它直接
+ * 量「兩張圖差多遠」。
+ * **Why outlines instead of centre distance**: a centre-radius rule is systematically wrong
+ * for **mixed-size** pairs — a small dumpling wedged between two larger ones is visually
+ * adjacent, yet its centre distance is pinned by "my radius + their radius" and lands far
+ * beyond any sensible centre tolerance. The user's screenshot is exactly this case. The edge
+ * gap has no such bias: it measures directly how far apart the artwork is.
+ *
+ * **為什麼是固定值而非比例**：輪廓間隙已經是絕對距離，不像圓心距離那樣隨半徑和放大，
+ * 所以固定值就夠 —— 而且它對應的是「畫面上的視覺縫隙」，玩家的感受本來就與尺寸無關。
+ * **Why a fixed value, not a ratio**: an outline gap is already an absolute distance rather
+ * than something that scales with the radii' sum, so a constant suffices — and it corresponds
+ * to the on-screen visual seam, which the player perceives independently of size.
+ *
+ * 值取 4：約為最小等級（半徑 15）直徑的 13%，對應「幾乎貼住」的視覺感受。
+ * A value of 4 is about 13% of the smallest level's diameter (radius 15) — the "just about
+ * touching" band.
+ */
+export const MERGE_OUTLINE_GAP = 4;
+
 /** 本地儲存鍵的前綴，避免與同網域其他專案衝突。 */
 export const STORAGE_PREFIX = 'endchimerge';
 

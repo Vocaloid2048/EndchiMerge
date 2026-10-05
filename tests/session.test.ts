@@ -149,6 +149,58 @@ function makeCustom(
   });
 }
 
+/**
+ * 窄容器版本：把兩顆丟在同一個 X，容器窄到它們**必定**貼在一起。
+ *
+ * 寬容器裡兩顆球落地後會各自滾開（實測圓心相距 51px，遠超容差 30px），所以「近接」根本
+ * 不會成立 —— 測試會變成在驗證物理，而不是在驗證近接偵測。窄容器強制它們相依，讓測試
+ * 只針對「近接掃描有沒有把相鄰的一對配起來」。
+ * Narrow-container variant: dropping twice at the same X leaves the pair **guaranteed**
+ * adjacent. In a wide box the two balls roll apart after landing (centre distance measured at
+ * 51px, far beyond the 30px tolerance), so no proximity ever forms and the test would be
+ * measuring physics rather than the sweep. A narrow box forces them together.
+ */
+function makeNarrow(levels: LevelDef[], width: number, settings: Partial<GameSettings> = {}): GameSession {
+  return new GameSession({
+    config: {
+      ...CONFIG,
+      levels: { ...CONFIG.levels, settings: { ...CONFIG.levels.settings, ...settings }, levels },
+    },
+    rng: createRng(20261004),
+    virtualWidth: width,
+  });
+}
+
+/**
+ * 注入輪廓素材的 session（每一級都用同一份輪廓）。
+ * A session with injected outline sprites — every level gets the same outline.
+ *
+ * 測試環境沒有真的 sprite，所以想驗證**輪廓路徑**就只能自己餵一份輪廓進去。這份 helper 讓
+ * 上面的近接測試能確實走到多邊形判定，而不是悄悄退回圓形。
+ * Tests have no real sprites, so exercising the **outline path** means injecting one. This
+ * helper lets the proximity tests genuinely reach the polygon predicate instead of quietly
+ * falling back to circles.
+ */
+function makeWithOutline(
+  levels: LevelDef[],
+  polygons: readonly { x: number; y: number }[],
+  width = 500,
+  settings: Partial<GameSettings> = {},
+): GameSession {
+  const silhouettes = new Map<number, { x: number; y: number }[] | null>();
+  for (const lvl of levels) silhouettes.set(lvl.id, [...polygons]);
+
+  return new GameSession({
+    config: {
+      ...CONFIG,
+      levels: { ...CONFIG.levels, settings: { ...CONFIG.levels.settings, ...settings }, levels },
+    },
+    rng: createRng(20261004),
+    virtualWidth: width,
+    silhouettes,
+  });
+}
+
 /** 最小的解鎖閘門；`unlocked` 是活的集合，解鎖後內容會變。 */
 function makeGate(initial: readonly number[]): UnlockSource {
   const ids = new Set<number>(initial);
@@ -827,6 +879,193 @@ describe('GameSession — 合成與計分 / merging and scoring', () => {
     expect(session.dropScore).toBeGreaterThan(0);
     /* 本次投放的分數不可能超過總分。 */
     expect(session.dropScore).toBeLessThanOrEqual(session.score);
+  });
+});
+
+/*
+ * 近接合成（使用者定案：改用輪廓實際接觸判定）。
+ * Proximity merging (the user's decision: judge by the outlines actually meeting).
+ *
+ * 方團團用的是**輪廓碰撞體**，兩顆貼在一起時圓身之間仍有一道縫，碰撞事件永遠不觸發，
+ * 所以只靠碰撞判定會出現「兩顆明顯相依卻不合成」。這一整個區塊釘住補救規則：
+ * **同級 ＋ 輪廓邊緣間隙 ≤ `MERGE_OUTLINE_GAP`（或已重疊）→ 合成。**
+ * Dumplings use **outline colliders**, so two neighbours leave a seam between their round
+ * middles and the collision never fires — collision-only detection leaves two clearly-adjacent
+ * dumplings refusing to merge. This block pins the remedy: **same level + outline edge gap
+ * within `MERGE_OUTLINE_GAP` (or overlapping) → merge.**
+ *
+ * **測試環境沒有輪廓素材**，所以 `silhouettes` 是空的，判定會走**圓形退回路徑**
+ * （圓心距離 ≤ r₁+r₂）。純幾何的輪廓判定本身由 `outlineProximity.test.ts` 涵蓋；這裡
+ * 驗證的是 session 的接線：有沒有每步掃、有沒有去重、有沒有守冷卻。
+ * **The test environment has no sprite assets**, so `silhouettes` is empty and the predicate
+ * takes the **circle fallback** (centre distance ≤ r₁+r₂). The outline geometry itself is
+ * covered by `outlineProximity.test.ts`; what is verified here is the session's wiring —
+ * whether it sweeps every step, de-duplicates, and honours the cooldown.
+ */
+describe('GameSession — 近接合成 / proximity merging', () => {
+  it('merges two same-level dumplings that come close without touching', () => {
+    /*
+     * 兩顆都丟在同一個 X。容器刻意窄，因為寬容器裡兩顆落地後會各自滾開 —— 那時它們相距
+     * 51px、遠超容差 30px，測到的其實是物理而非近接掃描。窄容器讓「相鄰」成為必然，
+     * 於是這裡只驗證一件事：**近接掃描把相鄰的同級一對配起來了**。
+     * Both drop at the same X. The box is deliberately narrow: in a wide box the two balls roll
+     * apart on landing — 51px apart, well past the 30px tolerance — so the test would be
+     * measuring physics, not the sweep. A narrow box makes adjacency certain, leaving exactly
+     * one thing under test: **the sweep pairs the adjacent same-level pair.**
+     */
+    const session = makeNarrow(SOLO_LV1, 120, { dropCooldownMs: 0 });
+
+    dropAndSettle(session, 60, 90);
+    dropAndSettle(session, 60, 120);
+
+    expect(session.mergedCount).toBe(1);
+    expect(session.bodies.map((body) => body.levelId)).toEqual([2]);
+  });
+
+  it('does not merge different levels even when they are touching', () => {
+    /*
+     * 近接掃描**不能**放寬等級限制：不同級別的兩顆就算完全重疊也不該合成。
+     *
+     * 這裡必須讓「場上剛好同時有兩個不同級」—— 若兩顆都是 Lv1，它們會先自己合成，測不到
+     * 等級限制。作法是先合成出一顆 Lv2，再投放一顆 Lv1 到同一個 X：窄容器讓 Lv1 必定
+     * 靠上 Lv2，而 Lv1 與 Lv2 不同級，所以**不該**再合成。
+     * The sweep must **not** loosen the level rule: two different levels never merge, however
+     * closely they sit.
+     *
+     * The room has to actually hold two different levels at once — two Lv1s would merge with
+     * each other first and never exercise the rule. So: merge a Lv2 into existence, then drop a
+     * Lv1 onto the same X. The narrow box guarantees the Lv1 ends up against the Lv2, and
+     * Lv1-vs-Lv2 differs in level, so **no** second merge may happen.
+     */
+    const session = makeNarrow(SOLO_LV1, 120, { dropCooldownMs: 0 });
+
+    /* 先造出一顆 Lv2。 */
+    dropAndSettle(session, 60, 90);
+    dropAndSettle(session, 60, 120);
+    expect(session.mergedCount).toBe(1);
+    expect(session.bodies.map((body) => body.levelId)).toEqual([2]);
+
+    /* 再丟一顆 Lv1 貼上去：不同級，合成數不該變。 */
+    dropAndSettle(session, 60, 120);
+
+    expect(session.mergedCount).toBe(1);
+    expect(session.bodies.map((body) => body.levelId).sort()).toEqual([1, 2]);
+  });
+
+  it('never pairs a body that a real collision already claimed', () => {
+    /*
+     * 一顆只能參與一次合成。碰撞對先跑、近接後跑，兩者共用 `claimed` —— 所以三顆同級
+     * 排在一起時只會合成**一次**（用掉兩顆），不會出現 A-B 與 A-C 同時成立把 A 用兩次。
+     * One body joins one merge only. The collision pass runs first and the sweep second, sharing
+     * `claimed` — so three same-level bodies in a row merge **once** (consuming two), never
+     * A-B and A-C together reusing A.
+     */
+    const session = makeNarrow(SOLO_LV1, 120, { dropCooldownMs: 0 });
+
+    dropAndSettle(session, 60, 90);
+    dropAndSettle(session, 60, 90);
+
+    /*
+     * 第三顆落地後，場上曾有 3 顆 Lv1。一輪只配走兩顆，所以合成數不會一次跳到 2 以上。
+     * After the third lands there were three Lv1s. One pass consumes two, so the merge count
+     * cannot leap past 1 in a single flush.
+     */
+    session.setAim(60);
+    session.drop();
+    runFrames(session, 120);
+
+    expect(session.mergedCount).toBeLessThanOrEqual(2);
+    expect(session.mergedCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it('still honours the merge cooldown for proximity pairs', () => {
+    /*
+     * 近接路徑也必須尊重冷卻，否則一顆剛生成（投下或剛合成）的顆粒會立刻跟鄰居連鎖合成，
+     * 整局變成「一次投放合成到頂」。
+     * The sweep must honour the cooldown too, or a freshly born body (just dropped, just merged)
+     * immediately chains into its neighbour and one drop runs the whole ladder.
+     */
+    const session = makeNarrow(SOLO_LV1, 120, { mergeCooldownMs: 1_000_000, dropCooldownMs: 0 });
+
+    dropAndSettle(session, 60, 90);
+    dropAndSettle(session, 60, 120);
+
+    expect(session.mergedCount).toBe(0);
+    expect(session.bodies).toHaveLength(2);
+  });
+
+  it('leaves far-apart same-level dumplings unmerged', () => {
+    /*
+     * 容差**不是無限大**：把兩顆丟到容器兩端，它們永遠不該合成。這是「擴大範圍」與
+     * 「整個容器隨機合成」之間的那條界線。
+     *
+     * 這一條必須用**寬**容器 —— 窄容器會強制相鄰，反而測不出「遠處不合成」。
+     * The tolerance is **not unbounded**: drop the two at opposite ends and they must never
+     * merge. This is the line between "wider detection" and "merges at random".
+     *
+     * This one needs a **wide** box: a narrow one forces adjacency and would defeat the point.
+     */
+    const session = makeCustom(SOLO_LV1, { dropCooldownMs: 0 });
+
+    dropAndSettle(session, 80, 90);
+    dropAndSettle(session, 420, 120);
+
+    expect(session.mergedCount).toBe(0);
+    expect(session.bodies).toHaveLength(2);
+  });
+
+  /*
+   * 輪廓路徑（有素材時真正會走的那一條）。
+   * The outline path — the one actually taken when sprites are present.
+   *
+   * 上面幾條走的是**圓形退回**，因為測試環境沒有輪廓素材。這裡注入一份真實輪廓，驗證
+   * session 把兩顆的**局部頂點轉到世界座標**、再交給純幾何判定的接線是對的。
+   * The tests above take the **circle fallback** because the environment has no sprites. Here a
+   * real outline is injected so the wiring — local vertices to world space, then the pure
+   * geometry test — is exercised.
+   */
+  it('merges two same-level dumplings whose outlines meet, using the injected outline', () => {
+    /*
+     * 用一個邊長 28 的正方形輪廓（half 14），丟進窄容器讓兩顆必然相依。若 session 沒有把
+     * 輪廓接進判定（例如忘了轉世界座標），這一條就會失敗。
+     * A square outline of half 14 in a narrow box, so the pair is guaranteed adjacent. If the
+     * session failed to wire outlines into the predicate (a forgotten world transform, say),
+     * this fails.
+     */
+    const squareOutline = [
+      { x: -14, y: -14 },
+      { x: 14, y: -14 },
+      { x: 14, y: 14 },
+      { x: -14, y: 14 },
+    ];
+    const session = makeWithOutline(SOLO_LV1, squareOutline, 120, { dropCooldownMs: 0 });
+
+    dropAndSettle(session, 60, 90);
+    dropAndSettle(session, 60, 120);
+
+    expect(session.mergedCount).toBe(1);
+    expect(session.bodies.map((body) => body.levelId)).toEqual([2]);
+  });
+
+  it('does not merge outline dumplings that stay clearly apart', () => {
+    /*
+     * 有輪廓時也要守住「遠處不合成」：寬容器裡兩顆會滾開，輪廓自然拉遠。
+     * The outline path must still refuse distant pairs: in a wide box the two roll apart and
+     * their outlines end up far from each other.
+     */
+    const squareOutline = [
+      { x: -14, y: -14 },
+      { x: 14, y: -14 },
+      { x: 14, y: 14 },
+      { x: -14, y: 14 },
+    ];
+    const session = makeWithOutline(SOLO_LV1, squareOutline, 500, { dropCooldownMs: 0 });
+
+    dropAndSettle(session, 80, 90);
+    dropAndSettle(session, 420, 120);
+
+    expect(session.mergedCount).toBe(0);
+    expect(session.bodies).toHaveLength(2);
   });
 });
 

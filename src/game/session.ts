@@ -28,10 +28,16 @@
 
 import Matter from 'matter-js';
 import { createCircleBody, createPolygonBody, lockRotation, Physics } from '../core/physics';
-import { POP_ANIMATION_MS, POP_PEAK_SCALE, WALL_THICKNESS } from '../core/constants';
+import {
+  MERGE_OUTLINE_GAP,
+  POP_ANIMATION_MS,
+  POP_PEAK_SCALE,
+  WALL_THICKNESS,
+} from '../core/constants';
 import { computeContainerBounds, computeWallOverhang, createContainerBodies } from './containerBox';
 import { ComboTracker } from './combo';
 import { mergeResultId } from './merge';
+import { outlinesWithinReach, toWorldPolygon } from './outlineProximity';
 import { OverflowMonitor } from './overflow';
 import { SpawnQueue } from './spawnQueue';
 import { computeContainerGeometry, type ContainerGeometry } from '../render/container';
@@ -140,6 +146,20 @@ export class GameSession {
   private readonly pops = new Map<number, number>();
   /** 碰撞事件收集到的合成，等物理步跑完才執行。 */
   private pendingMerges: PendingMerge[] = [];
+  /**
+   * 本次物理步已經被配走的剛體 id。碰撞路徑（`collectMerges`）與近接掃描
+   * （`collectProximityMerges`）**共用同一個集合**，所以一顆每步最多只參與一次合成 ——
+   * 兩條路徑先後執行時不會把同一顆配給兩對。
+   * Body ids already paired in this physics step. The collision path (`collectMerges`) and the
+   * proximity sweep (`collectProximityMerges`) **share this one set**, so a body joins at most
+   * one merge per step no matter which path finds it first.
+   *
+   * 每步在 `step()` 開頭清空；`collectMerges` 由碰撞事件在物理步**之中**回呼，所以清空
+   * 必須早於 `physics.step()`。
+   * Cleared at the top of `step()`; `collectMerges` is called back by the engine *during*
+   * `physics.step()`, so the clear has to happen before it.
+   */
+  private stepClaimed = new Set<number>();
   /** 取消碰撞訂閱；`destroy()` 用。 */
   private readonly unsubscribeCollisions: () => void;
 
@@ -505,12 +525,17 @@ export class GameSession {
    *
    * 同一次碰撞可能連續觸發多場合併，所以用 `claimed` 確保一顆只參與一次；同一物理步的
    * 多場合併共用同一個 `elapsedMs`，`ComboTracker` 因此會把它們算成同一批。
+   *
+   * **這一支只收集碰撞對**；近接掃描由 `step()` 每步執行（見 `collectProximityMerges` 的
+   * 說明：它不能掛在碰撞回呼裡，否則「相鄰但沒碰上」的兩顆永遠不會被檢查）。
+   * **This one collects collision pairs only**; the proximity sweep runs every step from
+   * `step()` (see `collectProximityMerges`: it cannot live in the collision callback, or two
+   * adjacent-but-not-touching dumplings would never be examined).
    */
   private readonly collectMerges = (pairs: readonly Matter.Pair[]): void => {
     if (this.over) return;
 
     const atMs = this.elapsedMs;
-    const claimed = new Set<number>();
 
     for (const pair of pairs) {
       /*
@@ -532,17 +557,136 @@ export class GameSession {
       a.entered = true;
       b.entered = true;
 
-      if (claimed.has(a.body.id) || claimed.has(b.body.id)) continue;
+      /* 已經在本步被配走（碰撞或近接）就不再排一次。 */
+      if (this.stepClaimed.has(a.body.id) || this.stepClaimed.has(b.body.id)) continue;
       if (mergeResultId(a.level, b.level) === null) continue;
       /* 剛生成（投下或剛合成）的方團團先冷卻一下，避免鏈式合成一次跑完。 */
       if (atMs - a.bornAtMs < this.mergeCooldownMs) continue;
       if (atMs - b.bornAtMs < this.mergeCooldownMs) continue;
 
-      claimed.add(a.body.id);
-      claimed.add(b.body.id);
+      this.stepClaimed.add(a.body.id);
+      this.stepClaimed.add(b.body.id);
       this.pendingMerges.push({ a, b, atMs });
     }
   };
+
+  /**
+   * 掃出「輪廓相接或幾乎相接」的同級配對（使用者定案：改用輪廓實際接觸判定）。
+   * Sweep for same-level pairs whose outlines touch or nearly touch (the user's decision:
+   * judge by the outlines actually meeting).
+   *
+   * **為什麼不能掛在碰撞回呼裡**：碰撞事件（`collisionStart`）只在「兩顆從不接觸變成接觸」
+   * 的那一瞬間發射。兩顆方團團滾到相鄰位置卻始終差一點沒碰上時，事件永遠不會來 —— 掃描也
+   * 就跟著永遠不跑。輪廓碰撞體讓這個縫隙變成常態（方形身體＋頭飾尖角使圓身之間留縫），
+   * 所以近接掃描必須**每步都跑**，而不是等碰撞來敲門。
+   * **Why it cannot live in the collision callback**: `collisionStart` fires only at the instant
+   * a pair goes from not-touching to touching. Two dumplings that settle adjacent but never
+   * quite touch would never fire it, and the sweep would never run. Outline colliders make that
+   * seam the normal case (a square body with pointed decorations leaves a gap between round
+   * middles), so the sweep must run **every step** rather than wait to be called.
+   *
+   * 因此它在 `step()` 裡、物理跑完之後執行，與 `flushMerges()` 同一拍；`collectMerges`
+   * 仍然只在碰撞時收集，兩條路徑共用 `claimed` 去重（在 `step()` 裡一次配一個集合）。
+   * It therefore runs in `step()`, after physics, on the same tick as `flushMerges()`;
+   * `collectMerges` still collects only on collision, and the two paths share one `claimed`
+   * set (paired per step in `step()`).
+   *
+   * **判定用輪廓邊緣間隙，不是圓心距離**（使用者定案）。圓心距離法對**不同尺寸**的配對會
+   * 系統性失準：一顆小顆粒夾在兩顆大顆粒之間時視覺上已經相依，圓心距離卻被「自己的半徑 ＋
+   * 鄰居的半徑」綁死。改用輪廓就沒有這個偏誤 —— 見 `game/outlineProximity.ts`。
+   * **The test is the outline edge gap, not the centre distance** (the user's decision). A
+   * centre-radius rule is systematically wrong for **mixed-size** pairs: a small dumpling
+   * wedged between larger ones is visually adjacent, but its centre distance is pinned by
+   * "my radius + their radius". Outlines have no such bias — see `game/outlineProximity.ts`.
+   *
+   * **沒有輪廓時退回圓形**：測試環境與素材載入失敗時 `silhouettes` 為空或該級為 `null`，
+   * 這時退回「圓心距離 < (r₁+r₂)」的舊判定，讓純圓形碰撞體仍然可以合成（圓形本來就會真的
+   * 接觸，所以退回的判定不會漏掉）。
+   * **Falls back to circles when no outline exists**: in tests, or when a sprite fails to
+   * load, `silhouettes` is empty or the level maps to `null`; the old "centre distance <
+   * r₁+r₂" test then applies, so plain circle colliders still merge (they genuinely touch, so
+   * the fallback never misses).
+   *
+   * 兩兩比對是 O(n²)，但 `maxBodies` 上限是 80（見 `levels.json`）—— 每步都在做也不太需要
+   * 最佳化，而空間切分帶來的複雜度與維護成本遠高於它省下的時間。
+   * The pairwise scan is O(n²), but `maxBodies` caps the field at 80 (see `levels.json`) — not
+   * worth a spatial index whose complexity and maintenance would cost far more than it saves.
+   *
+   * @param claimed 本次物理步已經被配走的剛體 id（由碰撞路徑先填）。
+   */
+  private collectProximityMerges(claimed: Set<number>, atMs: number): void {
+    const entries = this.entries;
+
+    for (let i = 0; i < entries.length; i += 1) {
+      const a = entries[i];
+      if (a === undefined || claimed.has(a.body.id)) continue;
+      /* 剛生成的要先冷卻，否則一次投放會連鎖合成到頂。 */
+      if (atMs - a.bornAtMs < this.mergeCooldownMs) continue;
+
+      for (let j = i + 1; j < entries.length; j += 1) {
+        const b = entries[j];
+        if (b === undefined || claimed.has(b.body.id)) continue;
+        /* 等級不同就不可能合成，先篩掉再算幾何。 */
+        if (mergeResultId(a.level, b.level) === null) continue;
+        if (atMs - b.bornAtMs < this.mergeCooldownMs) continue;
+
+        if (!this.outlinesReach(a, b)) continue;
+
+        claimed.add(a.body.id);
+        claimed.add(b.body.id);
+        this.pendingMerges.push({ a, b, atMs });
+        /* 這顆已經配掉了，不必再跟後面的顆粒比。 */
+        break;
+      }
+    }
+  }
+
+  /**
+   * 兩顆方團團的輪廓是否相接（或幾乎相接）到足以合成。
+   * Whether two dumplings' outlines meet — or nearly meet — closely enough to merge.
+   *
+   * 先把**局部**輪廓轉到世界座標（用剛體目前的位置與角度），再交給純幾何判定。沒有輪廓的
+   * 那顆退回圓形路徑。
+   * Local outlines are first brought into world space using each body's current position and
+   * angle, then handed to the pure-geometry test. A body with no outline takes the circle path.
+   */
+  private outlinesReach(a: Entry, b: Entry): boolean {
+    const polyA = this.silhouettes?.get(a.level.id);
+    const polyB = this.silhouettes?.get(b.level.id);
+
+    const hasA = polyA !== undefined && polyA !== null;
+    const hasB = polyB !== undefined && polyB !== null;
+
+    /*
+     * 兩顆都有輪廓：用真實輪廓邊緣間隙判定 —— 這是使用者要的「看畫面上有沒有接觸」。
+     */
+    if (hasA && hasB) {
+      const worldA = toWorldPolygon(
+        polyA,
+        a.body.position.x,
+        a.body.position.y,
+        a.body.angle,
+      );
+      const worldB = toWorldPolygon(
+        polyB,
+        b.body.position.x,
+        b.body.position.y,
+        b.body.angle,
+      );
+
+      return outlinesWithinReach(worldA, worldB, MERGE_OUTLINE_GAP);
+    }
+
+    /*
+     * 只要有一顆沒有輪廓，就退回圓形判定。混用兩套座標系沒有意義：一邊是圓、一邊是多邊形
+     * 時，「邊緣間隙」沒有共同的定義，而圓形那顆本來就會真的接觸，所以圓心距離就夠。
+     */
+    const dx = a.body.position.x - b.body.position.x;
+    const dy = a.body.position.y - b.body.position.y;
+    const reach = a.level.radius + b.level.radius;
+
+    return dx * dx + dy * dy <= reach * reach;
+  }
 
   /**
    * 把碰撞事件裡的剛體（可能是一個**子塊**）解析回它所屬的方團團。
@@ -659,12 +803,28 @@ export class GameSession {
    *
    * 時鐘**先**加再跑物理，所以碰撞回呼看到的 `elapsedMs` 就是這一步的時刻 —— 同一物理步
    * 的多場合併因此共用時間戳，連擊才判得成「同一批」。
+   *
+   * **近接掃描在物理跑完之後、`flushMerges()` 之前執行**，並且與碰撞路徑共用 `stepClaimed`：
+   *   - 碰撞對在 `physics.step()` **之中**由事件回呼收集（那時剛體位置還是碰撞前的）；
+   *   - 近接掃描在**之後**讀剛體位置，拿到的是這一步解算完的座標，判定才與畫面一致。
+   * 兩者都寫進 `pendingMerges`，`flushMerges()` 一次套用，所以同一批合併共用同一個時間戳、
+   * 算同一次連擊。
+   * **The proximity sweep runs after physics and before `flushMerges()`**, sharing `stepClaimed`
+   * with the collision path:
+   *   - collision pairs are collected *during* `physics.step()`, when positions are pre-solve;
+   *   - the sweep reads positions *afterwards*, so its geometry matches what is on screen.
+   * Both write into `pendingMerges`, which `flushMerges()` applies in one pass, so the batch
+   * shares one timestamp and one combo entry.
    */
   step(deltaMs: number): void {
     const dt = Math.max(0, deltaMs);
     this.elapsedMs += dt;
 
+    /* 清空必須早於 `physics.step()` —— 碰撞回呼在那之中就會填它。 */
+    this.stepClaimed.clear();
+
     this.physics.step(dt);
+    if (!this.over) this.collectProximityMerges(this.stepClaimed, this.elapsedMs);
     this.flushMerges();
     this.prunePops();
     this.recycle();
@@ -741,6 +901,7 @@ export class GameSession {
     this.byBodyId.clear();
     this.pops.clear();
     this.pendingMerges = [];
+    this.stepClaimed.clear();
     this.combo.reset();
     this.overflow.reset();
     this.scoreValue = 0;
