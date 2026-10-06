@@ -299,6 +299,190 @@ describe('搖晃！—— 地震要把睡着的堆疊甩動 / the earthquake act
   });
 });
 
+describe('搖晃！—— 天花板與展示餘裕 / the shake ceiling and the display margin', () => {
+  /**
+   * 以自訂的搖晃參數開一局（其餘沿用 `CONFIG`）。
+   * Open a session with custom shake params, reusing everything else from `CONFIG`.
+   *
+   * `gravityY` 可以調低：**天花板只有在顆粒真的被甩上去時才驗得到**。實測（重力 1、幅度比例
+   * 0.3、向上力夾到上限）單顆最多只升到頂緣下方約 120 單位，**根本碰不到**那片平面，於是
+   * 「有沒有裝平面」在斷言上分不出來；把重力壓到 0.2 之後顆粒會一路頂住平面，兩者才有差
+   * （見下方兩條測試的實測數字）。
+   * `gravityY` can be lowered: **the ceiling is only verifiable if a body really gets thrown up
+   * there.** Measured (gravity 1, ratio 0.3, upward force at its clamp) a lone body only reaches
+   * about 120 units below the rim and **never touches** the plane, so the assertions cannot tell
+   * whether it was installed. At gravity 0.2 the body pins against the plane, and the two cases
+   * separate cleanly (numbers are in the two tests below).
+   */
+  function makeSessionWithShake(
+    virtualWidth: number,
+    params: Record<string, unknown>,
+    gravityY = 1,
+  ): GameSession {
+    const config: AllConfig = {
+      ...CONFIG,
+      levels: {
+        ...CONFIG.levels,
+        settings: { ...CONFIG.levels.settings, gravityY },
+      },
+      skills: {
+        ...CONFIG.skills,
+        skills: CONFIG.skills.skills.map((skill) =>
+          skill.id === 'shake' ? { ...skill, params } : skill,
+        ) as SkillDef[],
+      },
+    };
+    return new GameSession({ config, rng: createRng(20261006), virtualWidth });
+  }
+
+  /** 向上力與幅度都開到技能端的硬上限，讓地震真的把顆粒往容器口甩。 */
+  const QUAKE_AT_MAX = {
+    durationMs: 2000,
+    revolutions: 5,
+    radiusFactor: 0.3,
+    axisTiltDeg: 15,
+    /* 技能端會把它夾到 0.5。 */
+    upwardFactor: 1,
+  };
+
+  it('never lets a dumpling past the invisible ceiling, however hard it is thrown up', () => {
+    /*
+     * 重力刻意壓低，讓顆粒被那個持續向上的力一路頂到平面上 —— 否則它根本飛不到那麼高，
+     * 這條測試就變成什麼都沒驗（見 `makeSessionWithShake` 的說明）。
+     * 實測（種子 20261006）：**有平面時最高只到 y - r = 99.93（天花板 100）**；把搖晃的平面
+     * 關掉則同一組參數會飛到 y - r = -114，也就是**衝出容器口、越過溢位線 164 單位**。
+     * Gravity is deliberately low so the steady upward force drives the body all the way onto the
+     * plane — otherwise it never gets that high and the test verifies nothing (see
+     * `makeSessionWithShake`). Measured (seed 20261006): **with the plane the highest top edge is
+     * 99.93 against a ceiling of 100**; with the shake ceiling disabled the same params fly to
+     * -114, i.e. **164 units past the overflow line and out of the container mouth**.
+     */
+    const session = makeSessionWithShake(600, QUAKE_AT_MAX, 0.2);
+
+    dropAndSettle(session, 300);
+    settleToSleep(session);
+
+    /* 天花板的深度是相對**靜止**的頂緣算的，所以要在施放前記下來。 */
+    const ceilingY = session.containerGeometry.frame.y + CONFIG.container.floatCeilingBelowRim;
+
+    expect(session.activateSkill('shake')).toBe(true);
+
+    let highest = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < 120; i += 1) {
+      session.step(FRAME_MS);
+      for (const body of session.bodies) {
+        highest = Math.min(highest, body.y - body.radius);
+      }
+    }
+
+    /* 每一步、每一顆都不得越過平面（留 5 單位的求解器穿透餘裕）。 */
+    expect(highest).toBeGreaterThan(ceilingY - 5);
+    /* 而且真的頂到了平面 —— 否則這條在「平面根本沒裝上」時也會通過。 */
+    expect(highest).toBeLessThan(ceilingY + 20);
+  });
+
+  it('drops the ceiling again once the quake is over, so the pile falls back', () => {
+    /*
+     * 與浮動同一條道理：技能結束後平面必須離開世界，否則壓在它上面的顆粒會**懸在半空**。
+     * 實測（重力 0.2、種子 20261006）：搖晃結束那一刻顆粒貼在平面上（y ≈ 140）；再跑 240 幀
+     * 之後落到 y ≈ 954，也就是回到地板（1000 − 半徑 30 ≈ 970）。
+     * Same reasoning as the float: the plane must leave the world when the skill ends, or the
+     * bodies resting on it would stay hanging. Measured (gravity 0.2, seed 20261006): the body is
+     * pinned on the plane when the quake ends (y ≈ 140) and has fallen to y ≈ 954 — the floor —
+     * after 240 more frames.
+     */
+    const session = makeSessionWithShake(600, QUAKE_AT_MAX, 0.2);
+
+    dropAndSettle(session, 300);
+    settleToSleep(session);
+
+    const ceilingY = session.containerGeometry.frame.y + CONFIG.container.floatCeilingBelowRim;
+
+    expect(session.activateSkill('shake')).toBe(true);
+
+    /* 跑完整段搖晃（2 秒 ＝ 120 幀）。 */
+    runFrames(session, 120);
+    expect(session.isShaking).toBe(false);
+
+    const pinned = session.bodies[0];
+    expect(pinned).toBeDefined();
+    /* 先確認它真的被壓在平面上，否則「之後掉下來」證明不了平面被收走了。 */
+    expect(pinned!.y - pinned!.radius).toBeLessThan(ceilingY + 20);
+
+    /* 平面離開世界之後，重力才有辦法把它拉回地板。 */
+    runFrames(session, 240);
+
+    const body = session.bodies[0];
+    expect(body).toBeDefined();
+    expect(body!.y).toBeGreaterThan(ceilingY + 200);
+  });
+
+  it('clamps the container offset inside the display margin', () => {
+    /*
+     * 幅度比例 1/3（技能的硬上限）× 容器寬 500 ＝ 167，遠大於左右各 50 的餘裕。實作必須把
+     * 它夾進餘裕內，否則容器邊線會被畫布切掉 —— 那正是這次要修的「邊界被切掉」。
+     * A 1/3 ratio (the skill's hard cap) on a 500-wide container is 167, far more than the 50 of
+     * margin per side. The implementation has to clamp it, or the canvas slices the outline —
+     * exactly the "boundary gets cut" symptom this change is fixing.
+     */
+    const session = makeSessionWithShake(600, {
+      durationMs: 2000,
+      revolutions: 5,
+      radiusFactor: 1 / 3,
+      axisTiltDeg: 15,
+      upwardFactor: 0.1,
+    });
+
+    const restX = session.containerGeometry.frame.x;
+
+    /* 沒有場上沒有顆粒的技能一律不受理，技力也還沒賺到 —— 先投一顆。 */
+    dropAndSettle(session, 300);
+    expect(session.activateSkill('shake')).toBe(true);
+
+    let maxShift = 0;
+    for (let i = 0; i < 120; i += 1) {
+      session.step(FRAME_MS);
+      maxShift = Math.max(maxShift, Math.abs(session.containerGeometry.frame.x - restX));
+    }
+
+    /* 先證明容器真的在動，再證明它沒有走出餘裕（留 1 單位給浮點與夾制）。 */
+    expect(maxShift).toBeGreaterThan(1);
+    expect(maxShift).toBeLessThanOrEqual(CONFIG.container.leftOffset + 1);
+  });
+
+  it('leaves no ceiling behind after a restart in the middle of a quake', () => {
+    /*
+     * 上一局在搖晃中結束 —— 那片靜態平面不會被 `removeDynamicBodies()` 帶走，`reset()` 必須
+     * 自己收掉它。重力同樣壓低，這樣「平面還在」才會表現成「顆粒卡在半空」，否則兩種情況
+     * 的下場一模一樣。
+     * The previous run ended mid-quake: the static plane is not carried away by
+     * `removeDynamicBodies()`, so `reset()` has to remove it itself. Gravity is lowered here too,
+     * so a leftover plane would show up as a body stuck in mid-air instead of falling.
+     */
+    const session = makeSessionWithShake(
+      600,
+      { ...QUAKE_AT_MAX, upwardFactor: 0.1 },
+      0.2,
+    );
+
+    dropAndSettle(session, 300);
+    settleToSleep(session);
+
+    expect(session.activateSkill('shake')).toBe(true);
+    runFrames(session, 30);
+
+    session.reset();
+    dropAndSettle(session, 300);
+    runFrames(session, 240);
+
+    const body = session.bodies[0];
+    expect(body).toBeDefined();
+
+    const ceilingY = session.containerGeometry.frame.y + CONFIG.container.floatCeilingBelowRim;
+    expect(body!.y).toBeGreaterThan(ceilingY + 200);
+  });
+});
+
 describe('命運互換 —— 累計消耗的解鎖資訊要傳到卡片 / the gated skill reports its progress', () => {
   it('reports n/m and the cumulative unlock kind', () => {
     const session = makeSession(600);

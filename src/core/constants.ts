@@ -135,18 +135,19 @@ export const SHAKE_MAX_BODY_SPEED = 12;
 export const SHAKE_BODY_ACCEL_COUPLING = 0.3;
 
 /**
- * 浮動天花板那片隱形平面的厚度，虛擬單位。
- * Thickness of the invisible float-ceiling plane, in virtual units.
+ * 技能天花板那片隱形平面的厚度，虛擬單位（協議：浮動與搖晃！共用同一片）。
+ * Thickness of the invisible skill-ceiling plane, in virtual units (Protocol: Float and
+ * Shake! share the same plate).
  *
- * 平面本身不畫出來，厚度只影響兩件事：夠厚才不會被高速顆粒穿透，但太厚會在浮動開始的
+ * 平面本身不畫出來，厚度只影響兩件事：夠厚才不會被高速顆粒穿透，但太厚會在技能開始的
  * 那一刻「包住」正在下墜的顆粒。40 約等於兩片半牆厚 —— 遠大於任何一顆每步的位移，
  * 又遠小於投放點到天花板的距離。
  * The plane is never drawn; its thickness only matters twice over: thick enough that a fast body
- * cannot tunnel through, thin enough not to swallow a body that is mid-drop when the float
+ * cannot tunnel through, thin enough not to swallow a body that is mid-drop when the skill
  * starts. 40 is about two and a half wall thicknesses — far more than any body's per-step
  * travel, far less than the gap between the drop point and the ceiling.
  */
-export const FLOAT_CEILING_THICKNESS = 40;
+export const CEILING_THICKNESS = 40;
 
 /** Matter.js 的重力縮放（與 `core/physics.ts` 的引擎設定必須一致）。 */
 export const ENGINE_GRAVITY_SCALE = 0.001;

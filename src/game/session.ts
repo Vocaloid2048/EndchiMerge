@@ -36,7 +36,7 @@ import {
   pushBody,
 } from '../core/physics';
 import {
-  FLOAT_CEILING_THICKNESS,
+  CEILING_THICKNESS,
   FLOAT_OVERFLOW_BUFFER_MS,
   MERGE_OUTLINE_GAP,
   MERGE_PUSH_FACTOR,
@@ -238,7 +238,7 @@ export class GameSession implements SkillBoard {
    * contact surface the bodies **hit** the ceiling rather than being teleported back under it
    * every step — the former stacks them naturally under a lid, the latter jitters.
    */
-  private floatCeilingBody: Matter.Body | null = null;
+  private ceilingBody: Matter.Body | null = null;
   /** 搖晃：開始時刻、時長、圈數、幅度（世界單位）、擺動軸傾角（弧度）與持續向上力比例。 */
   private shakeStartedAtMs = 0;
   private shakeDurationMs = 0;
@@ -366,12 +366,20 @@ export class GameSession implements SkillBoard {
    * 目前的容器線框幾何；渲染器直接使用。
    * The current container geometry, consumed directly by the renderer.
    *
-   * 搖晃期間會疊上位移：容器（連同溢位線、警戒區、裁切範圍）整體沿圓周晃動，而方團團留在
-   * 世界座標系 —— 因此畫面上看到的是「容器在動、球被晃到」，而不是「整張圖平移」。
-   * During a shake the orbit offset is folded in: the container — along with the overflow line,
-   * the warning zone and the clip region — orbits, while the dumplings stay in world coordinates.
+   * 搖晃期間會疊上位移：容器（連同溢位線、警戒區）整體沿斜線晃動，而方團團留在世界座標系
+   * —— 因此畫面上看到的是「容器在動、球被晃到」，而不是「整張圖平移」。
+   * During a shake the offset is folded in: the container — along with the overflow line and the
+   * warning zone — slides along the tilted line, while the dumplings stay in world coordinates.
    * On screen that reads as "the container is moving and the balls get rattled", not as "the
    * whole picture slid".
+   *
+   * **只動 `frame`，`display` 不動。** 裁切範圍若跟着晃，貼在另一側牆邊的方團團就會被切掉
+   * 半邊；`display` 固定為外框＋左右餘裕（見 `ContainerGeometry`），所以一顆都切不到，
+   * 而搖晃幅度本身也被夾在那個餘裕內，容器邊線同樣不會被畫布切到。
+   * **Only `frame` moves; `display` does not.** A clip region that shook along would slice the
+   * wall-hugging dumplings on the opposite side. `display` stays at the box plus both margins
+   * (see `ContainerGeometry`), so nothing is cut — and the shake amplitude is itself clamped
+   * inside that margin, so the outline is never cut by the canvas either.
    */
   get containerGeometry(): ContainerGeometry {
     if (this.shakeOffsetX === 0 && this.shakeOffsetY === 0) return this.geometry;
@@ -1005,15 +1013,16 @@ export class GameSession implements SkillBoard {
    *
    * 使用者定案：「像杯口被壓住」—— 誰都不可以升到溢位線。實作有三部分：
    * 1. 重力翻成向上的淨加速度（`liftFactor` 倍重力），見 `applyFloatGravity()`；
-   * 2. 一片**隱形靜態平面**擋在 `floatCeilingBelowRim` 的深度上（見 `syncFloatCeiling()`）；
+   * 2. 一片**隱形靜態平面**擋在 `floatCeilingBelowRim` 的深度上（見 `syncCeiling()`；這片平面與
+   *    搖晃！共用）；
    * 3. 浮動期間每步叫醒全部顆粒（見 `step()`）—— 少了這一步，只有剛動過的顆粒會浮，
    *    因為休眠剛體收不到重力（`Engine._bodiesApplyGravity` 會跳過它們）。
    * The user's decision: "like a lid pressed on a cup" — nothing may rise into the overflow line.
    * Three parts: (1) gravity flipped into a net upward acceleration (`liftFactor` times gravity,
    * see `applyFloatGravity()`); (2) an **invisible static plane** parked at `floatCeilingBelowRim`
-   * (see `syncFloatCeiling()`); (3) waking every body each step while afloat (see `step()`) —
-   * without that last part only the recently-moved bodies would rise, because sleeping bodies
-   * receive no gravity (`Engine._bodiesApplyGravity` skips them).
+   * (see `syncCeiling()`; the plate is shared with Shake!); (3) waking every body each step while
+   * afloat (see `step()`) — without that last part only the recently-moved bodies would rise,
+   * because sleeping bodies receive no gravity (`Engine._bodiesApplyGravity` skips them).
    */
   floatAll(request: FloatRequest): void {
     this.floatStartedAtMs = this.elapsedMs;
@@ -1036,8 +1045,8 @@ export class GameSession implements SkillBoard {
      * The other order leaves those bodies inside the plane, and the solver pushes them out of the
      * nearest face — usually the top, i.e. straight out of the container.
      */
-    this.clampFloatCeiling();
-    this.syncFloatCeiling();
+    this.clampCeiling();
+    this.syncCeiling();
   }
 
   /**
@@ -1046,10 +1055,10 @@ export class GameSession implements SkillBoard {
    * dumplings are genuinely thrown around.
    *
    * 使用者 2026-10-06 定案：不再是順時針圓周晃動，改成水平地震，但擺動軸斜 15°、另加 10%
-   * 的持續向上力。幅度以容器寬度為基準（技能已把比例夾在硬上限 1/3 內）。
+   * 的持續向上力。幅度以容器寬度為基準，但**再被展示餘裕夾一次**（見下）。
    * The user's 2026-10-06 decision: no more clockwise orbit — a horizontal quake, but with the
    * oscillation axis tilted 15° and an extra steady 10% upward force. The amplitude is relative to
-   * the container width (the skill already clamped the ratio to the 1/3 hard cap).
+   * the container width, then **clamped again by the display margin** (see below).
    *
    * **牆只是畫面**：把牆搬來搬去並不會讓顆粒跟着動 —— 牆是靜態剛體，`Body.translate` 不帶
    * 速度，而且 `Sleeping.afterCollisions` 對「靜態 vs 休眠」直接 `continue`，所以牆掃過去
@@ -1058,17 +1067,44 @@ export class GameSession implements SkillBoard {
    * bodies, `Body.translate` carries no velocity, and `Sleeping.afterCollisions` `continue`s
    * outright for "static vs sleeping", so a sweeping wall cannot even wake them. What actually
    * moves the pile is `applyShakeImpulse()`.
+   *
+   * **幅度必須塞得進展示餘裕。** 容器左右各只有 `leftOffset` / `rightOffset` 的活動空間
+   * （見 `ContainerConfig`），超過就會被畫布切掉邊線。所以水平峰值位移被夾在兩側餘裕的
+   * 較小值內：`shakeRadius × cos(傾角) ≤ min(left, right)`。想搖得更遠就調大餘裕，而不是
+   * 讓容器被切一半。傾角 90°（純垂直）時水平位移本來就是 0，此時不設限。
+   * **The amplitude has to fit the display margin.** The container only has `leftOffset` /
+   * `rightOffset` of room to move (see `ContainerConfig`), and overshooting it means the canvas
+   * slices its outline. The peak horizontal displacement is therefore clamped inside the smaller
+   * of the two margins: `shakeRadius × cos(tilt) ≤ min(left, right)`. To shake further, widen the
+   * margin rather than letting the box get cut in half. At a 90° tilt (pure vertical) the
+   * horizontal displacement is zero anyway, so no limit applies.
    */
   shakeContainer(request: ShakeRequest): void {
     this.shakeStartedAtMs = this.elapsedMs;
     this.shakeDurationMs = Math.max(1, request.durationMs);
     this.shakeRevolutions = Math.max(1, request.revolutions);
-    this.shakeRadius = Math.max(0, request.radiusFactor) * this.geometry.frame.width;
     this.shakeAxisTiltRad = (Math.max(0, request.axisTiltDeg) * Math.PI) / 180;
     this.shakeUpwardFactor = Math.max(0, request.upwardFactor);
 
-    /* 一樣要叫醒：睡着的顆粒既收不到重力也不吃衝量，整箱會像沒被搖到。 */
+    const requestedRadius = Math.max(0, request.radiusFactor) * this.geometry.frame.width;
+    const horizontal = Math.abs(Math.cos(this.shakeAxisTiltRad));
+    const margin = Math.min(this.displayMargin.left, this.displayMargin.right);
+    const fit = horizontal > 1e-6 ? margin / horizontal : Number.POSITIVE_INFINITY;
+
+    this.shakeRadius = Math.min(requestedRadius, fit);
+
+    /*
+     * 一樣要叫醒：睡着的顆粒既收不到重力也不吃衝量，整箱會像沒被搖到。
+     * 另外先把衝到天花板之上的顆粒壓回平面下方，再讓平面接手（理由與 `floatAll()` 相同：
+     * 平面是「加進世界」的，搶先佔位的顆粒會被求解器從最近的出口擠出去）。
+     * Wake everything too: a sleeping body receives neither gravity nor an impulse, so the box
+     * would look untouched. Anything already above the ceiling is pressed back under it first,
+     * for the same reason as in `floatAll()`: installing a plane is not the same as stopping
+     * bodies that were already above it, and those get squeezed out of its nearest face.
+     */
     this.wakeAll();
+    this.clampCeiling();
+    this.syncCeiling();
   }
 
   /** 是否正在浮動。 */
@@ -1207,82 +1243,126 @@ export class GameSession implements SkillBoard {
   }
 
   /**
-   * 浮動天花板的 Y：容器頂緣**下方** `floatCeilingBelowRim`，虛擬單位。
-   * The float ceiling's Y, `floatCeilingBelowRim` **below** the container's rim.
+   * 技能天花板的 Y：容器頂緣**下方** `floatCeilingBelowRim`，虛擬單位。
+   * The skill ceiling's Y, `floatCeilingBelowRim` **below** the container's rim.
    *
    * 取頂緣下方而不是直接取溢位線（溢位線在頂緣**上方** 30）：使用者定案要「警戒區下方」一片
    * 透明的平面，而警戒區的下緣就是頂緣，再往下一段是為了讓 sprite 的美術也不那麼容易冒出
-   * 容器口。因為天花板一定在溢位線之下，浮動期間的上緣永遠不可能觸發溢位判定。
+   * 容器口。因為天花板一定在溢位線之下，技能期間的上緣永遠不可能觸發溢位判定。
    * Below the rim rather than at the overflow line (which sits 30 **above** the rim): the user
    * asked for a transparent plane "below the warning zone", and that band's lower edge *is* the
    * rim; the extra depth keeps the artwork from poking out of the mouth. Because the ceiling is
-   * always under the line, a floating body's top edge can never trip the overflow test.
+   * always under the line, a body's top edge can never trip the overflow test during a skill.
    */
-  private get floatCeilingY(): number {
+  private get ceilingY(): number {
     return this.geometry.frame.y + Math.max(0, this.config.container.floatCeilingBelowRim);
   }
 
   /**
-   * 建立／移除浮動天花板那片隱形平面，並在浮動期間持續叫醒所有顆粒。
-   * Create or remove the invisible float-ceiling plane, and keep every body awake while afloat.
+   * 容器左右兩側的展示餘裕，已扣掉 `computeContainerGeometry()` 的 40% 上限。
+   * The container's left/right display margins, net of `computeContainerGeometry()`'s 40% cap.
    *
-   * 每步都呼叫，但它只在狀態**改變**時動世界：`isFloating` 由真轉假時把平面移出世界，
-   * 並叫醒全部 —— 貼在天花板上的顆粒在重力還原的那一刻若還在睡，就會繼續懸空。
-   * Called every step, but it only touches the world on a **change**: when `isFloating` goes true
-   * to false the plane leaves the world and everything is woken, because a body resting on the
-   * ceiling would otherwise stay asleep — and therefore hanging — the moment gravity returns.
+   * 從幾何推導而不是直接讀配置：幾何才是畫面上真正生效的那一組，萬一配置被夾制，這裡也會
+   * 跟着夾 —— 否則搖晃會以為自己還有不存在的空間可走。
+   * Derived from the geometry rather than read from the config: the geometry is what actually took
+   * effect, so if the config was clamped this follows it. Otherwise the shake would believe it has
+   * room that does not exist.
    */
-  private syncFloatCeiling(): void {
-    if (this.isFloating) {
-      if (this.floatCeilingBody === null) {
-        const frame = this.geometry.frame;
-        const ceiling = this.floatCeilingY;
+  private get displayMargin(): { left: number; right: number } {
+    const { frame, display } = this.geometry;
+    return {
+      left: Math.max(0, frame.x - display.x),
+      right: Math.max(0, display.x + display.width - (frame.x + frame.width)),
+    };
+  }
 
-        this.floatCeilingBody = createStaticRect(
-          frame.x + frame.width / 2,
-          ceiling - FLOAT_CEILING_THICKNESS / 2,
-          frame.width,
-          FLOAT_CEILING_THICKNESS,
+  /**
+   * 現在是否有技能需要那片隱形天花板（協議：浮動或搖晃！）。
+   * Whether a skill currently needs the invisible ceiling (Protocol: Float, or Shake!).
+   */
+  private get ceilingNeeded(): boolean {
+    return this.isFloating || this.isShaking;
+  }
+
+  /**
+   * 建立／移除技能天花板那片隱形平面，並在技能作用期間持續叫醒所有顆粒。
+   * Create or remove the invisible skill-ceiling plane, and keep every body awake while a skill
+   * needs it.
+   *
+   * **兩個技能共用同一片。** 浮動要的是「像杯口被壓住」，搖晃要的是「別被甩出容器口」——
+   * 幾何上完全一樣，所以是一份平面、一個開關（`ceilingNeeded`），而不是兩套會漂移的副本。
+   * **Both skills share one plate.** Float wants "like a lid pressed on a cup" and the shake wants
+   * "don't get thrown out of the mouth" — geometrically identical, so there is one plane and one
+   * switch (`ceilingNeeded`) rather than two copies that drift.
+   *
+   * 每步都呼叫，但它只在狀態**改變**時動世界：由真轉假時把平面移出世界，並叫醒全部 ——
+   * 貼在天花板上的顆粒若還在睡，就會繼續懸空。
+   * Called every step, but it only touches the world on a **change**: when the need goes true to
+   * false the plane leaves the world and everything is woken, because a body resting on the
+   * ceiling would otherwise stay asleep — and therefore hanging.
+   */
+  private syncCeiling(): void {
+    if (this.ceilingNeeded) {
+      if (this.ceilingBody === null) {
+        /*
+         * 平面橫跨**整個可繪製範圍**（`display`）而不是外框：搖晃時容器會左右跑，而這片平面
+         * 是靜態的（不跟着晃），只蓋住外框寬度的話，容器移到極左／極右時容器口就會露出一段
+         * 沒被蓋住，顆粒正好從那裡飛出去。多出來的寬度看不見，所以沒有代價。
+         * The plane spans the whole drawable region (`display`) rather than the box: the container
+         * slides sideways during a shake while this plane is static (it does not shake), so
+         * covering only the box's width would leave a strip of the mouth uncovered at either
+         * extreme — exactly where a body would escape. The extra width is invisible, so it is free.
+         */
+        const { display } = this.geometry;
+        const ceiling = this.ceilingY;
+
+        this.ceilingBody = createStaticRect(
+          display.x + display.width / 2,
+          ceiling - CEILING_THICKNESS / 2,
+          display.width,
+          CEILING_THICKNESS,
         );
-        this.physics.add(this.floatCeilingBody);
+        this.physics.add(this.ceilingBody);
       }
 
       /*
-       * 浮動期間每步都叫醒：顆粒在平面上壓穩之後會進入休眠，而休眠剛體收不到重力 ——
+       * 技能期間每步都叫醒：顆粒在平面上壓穩之後會進入休眠，而休眠剛體收不到重力 ——
        * 一旦重力翻回向下，它們就不會掉回來。
-       * Wake every step while afloat: a body pressed against the plane falls asleep, and sleeping
-       * bodies receive no gravity — so once gravity flips back down, they would never come back.
+       * Wake every step while a skill needs the plane: a body pressed against it falls asleep, and
+       * sleeping bodies receive no gravity — so once gravity flips back down, it would never come
+       * back.
        */
       this.wakeAll();
       return;
     }
 
-    if (this.floatCeilingBody === null) return;
+    if (this.ceilingBody === null) return;
 
-    this.physics.remove(this.floatCeilingBody);
-    this.floatCeilingBody = null;
+    this.physics.remove(this.ceilingBody);
+    this.ceilingBody = null;
     this.wakeAll();
   }
 
   /**
-   * 浮動天花板的一次性夾制：把已經在平面上方的顆粒壓回平面下方，並抵銷向上的速度。
-   * The float ceiling's one-shot clamp: press any body already above the plane back under it and
+   * 技能天花板的一次性夾制：把已經在平面上方的顆粒壓回平面下方，並抵銷向上的速度。
+   * The skill ceiling's one-shot clamp: press any body already above the plane back under it and
    * cancel its upward velocity.
    *
-   * **只在施放的那一刻跑一次**（見 `floatAll()`），之後由那片靜態平面接手。之所以還留著它，
-   * 是因為平面是「加進世界」而不是「無中生有地擋住」—— 施放前就在天花板之上的顆粒會直接
-   * 卡在平面內部，被求解器往最近的出口（通常是上方）擠出去。
-   * It runs **once, at cast time** (see `floatAll()`), after which the static plane takes over. It
-   * survives because installing a plane is not the same as stopping bodies that were already above
-   * it: those would sit inside the plane and be squeezed out of its nearest face — usually the top.
+   * **只在技能施放的那一刻跑一次**（見 `floatAll()` 與 `shakeContainer()`），之後由那片靜態
+   * 平面接手。之所以還留著它，是因為平面是「加進世界」而不是「無中生有地擋住」—— 施放前就
+   * 在天花板之上的顆粒會直接卡在平面內部，被求解器往最近的出口（通常是上方）擠出去。
+   * It runs **once, at cast time** (see `floatAll()` and `shakeContainer()`), after which the
+   * static plane takes over. It survives because installing a plane is not the same as stopping
+   * bodies that were already above it: those would sit inside the plane and be squeezed out of its
+   * nearest face — usually the top.
    *
    * 只夾**上緣**（`y - radius`），與溢位判定同一套定義，這樣「浮到貼住平面」與「越線」
    * 在畫面與規則上是同一件事。
    * Only the **top edge** is clamped (`y - radius`), matching the overflow test, so "floating right
    * up to the plane" and "crossing the line" mean the same thing in the picture and in the rules.
    */
-  private clampFloatCeiling(): void {
-    const ceilingY = this.floatCeilingY;
+  private clampCeiling(): void {
+    const ceilingY = this.ceilingY;
 
     for (const entry of this.entries) {
       const ceiling = ceilingY + entry.level.radius;
@@ -1884,18 +1964,18 @@ export class GameSession implements SkillBoard {
     this.elapsedMs += dt;
 
     /*
-     * 技能在自己的一小段前置之後才跑物理：先算好容器位移並搬到牆上、維護浮動天花板那片平面、
+     * 技能在自己的一小段前置之後才跑物理：先算好容器位移並搬到牆上、維護技能天花板那片平面、
      * 依浮動狀態設定重力、再把搖晃的慣性衝量加到顆粒上，這一刻的 `physics.step()` 才會反映
      * 它們。順序反過來的話，效果會慢整整一幀。
      * Skills run their physics prep before stepping: the container offset is computed and moved
-     * onto the walls, the float ceiling plane is created or torn down, gravity is set from the
+     * onto the walls, the skill ceiling plane is created or torn down, gravity is set from the
      * float state, and the shake's inertial impulse is added to the bodies — so *this*
      * `physics.step()` already reflects them. The other order would lag the effect by a whole
      * frame.
      */
     this.updateShakeOffset();
     this.applyShakeToWalls();
-    this.syncFloatCeiling();
+    this.syncCeiling();
     this.applyFloatGravity();
     this.applyShakeImpulse(dt);
 
@@ -2021,9 +2101,9 @@ export class GameSession implements SkillBoard {
      * to be removed here, or the leftover invisible plane would make the new run hit a ceiling
      * from the very first frame.
      */
-    if (this.floatCeilingBody !== null) {
-      this.physics.remove(this.floatCeilingBody);
-      this.floatCeilingBody = null;
+    if (this.ceilingBody !== null) {
+      this.physics.remove(this.ceilingBody);
+      this.ceilingBody = null;
     }
     this.shakeStartedAtMs = 0;
     this.shakeDurationMs = 0;
