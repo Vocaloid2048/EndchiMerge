@@ -37,7 +37,6 @@ import {
 } from '../core/physics';
 import {
   CEILING_THICKNESS,
-  ENGINE_GRAVITY_SCALE,
   FLOAT_OVERFLOW_BUFFER_MS,
   MERGE_OUTLINE_GAP,
   MERGE_PUSH_FACTOR,
@@ -134,14 +133,38 @@ interface PendingMerge {
 const HIT_SLACK = 1.15;
 
 /**
- * 浮動追趕帶：顆粒的**上緣**仍比技能天花板低這麼多時，每步獲得額外的向上追趕力
- * （見 `applyFloatCatchup()`）。帶寬取一次身位，讓顆粒在貼住天花板前先失去追趕力，
+ * 浮動追趕帶：顆粒的**上緣**仍比技能天花板低這麼多時，每步被強制維持一個最低上升速度
+ * （見 `applyFloatCatchup()`）。帶寬取一次身位，讓顆粒在貼住天花板前先失去追趕速度，
  * 不會對平面抖動。
- * The float catch-up band: a body whose **top edge** is still this far below the skill ceiling
- * earns an extra upward force each step (see `applyFloatCatchup()`). One body-height of band lets
- * a body shed the force just before settling on the plane, so it never jitters against it.
+ * The float catch-up band: a body whose **top edge** is still this far below the skill ceiling is
+ * forced to keep a minimum upward speed each step (see `applyFloatCatchup()`). One body-height of
+ * band lets a body shed the catch-up just before settling on the plane, so it never jitters against
+ * it.
  */
 const FLOAT_CATCHUP_BAND = 40;
+
+/**
+ * 浮動追趕的最低上升速度基準，虛擬單位／步。
+ * The baseline minimum upward speed for a float catch-up, in virtual units per step.
+ *
+ * 翻轉重力只能「推」整堆向上，力得靠接觸一顆傳一顆；輪廓多邊形偶爾在角落被卡住，或被鄰居
+ * 的接觸抵住，求解器每步把向上的力抵消掉，畫面上就是「完全沒動」。位置式的速度地板繞過接觸
+ * 鏈：只要還在帶下方，就直接把垂直速度設成至少 `-riseSpeed`，每步都重新設，被鄰居擋住的顆粒
+ * 會像棘輪一樣一格格被推上去，直到進帶為止 —— 「整堆都升上去」由機制保證。
+ * Flipping gravity only *pushes* the pile; the force travels body to body. With outline polygons a
+ * body occasionally wedges in a corner, or is braced by a neighbour, and the solver cancels the
+ * upward force every step — on screen it reads as "completely motionless". A positional velocity
+ * floor bypasses the contact chain: any body still below the band has its vertical velocity forced
+ * to at least `-riseSpeed` every step, so a wedged body ratchets upward past its neighbours until
+ * it enters the band — "the whole pile rises" is guaranteed by mechanism, not luck.
+ *
+ * 實際速度再乘 `catchupFactor`：預設 2 即每步至少升 `4 × 2 = 8` 虛擬單位（容器高約 700，
+ * 1.5 秒浮動足足跨越），調大 `catchupFactor` 就追得更快。
+ * The actual speed is multiplied by `catchupFactor`: the default 2 forces at least `4 × 2 = 8`
+ * units/step (a ~700 unit container is crossed comfortably within the 1.5 s float), and a larger
+ * `catchupFactor` chases faster.
+ */
+const FLOAT_CATCHUP_RISE_SPEED = 4;
 
 /** 技能卡要顯示的狀態（給 `ui/skillBar.ts`）。 */
 export interface SkillCardState {
@@ -1257,43 +1280,52 @@ export class GameSession implements SkillBoard {
   }
 
   /**
-   * 浮動追趕：仍落在天花板帶下方的顆粒，每步再獲得 `catchupFactor` 倍重力的向上力。
-   * Float catch-up: any body still below the ceiling band earns `catchupFactor` gravities of
-   * extra upward force per step.
+   * 浮動追趕：仍落在天花板帶下方的顆粒，每步被強制維持一個最低上升速度（`catchupFactor`
+   * 倍 `FLOAT_CATCHUP_RISE_SPEED`）。
+   * Float catch-up: any body still below the ceiling band is forced to keep a minimum upward speed
+   * (`catchupFactor` times `FLOAT_CATCHUP_RISE_SPEED`) every step.
    *
-   * 翻轉重力只能「推」整堆向上 —— 力要靠接觸一顆傳一顆。輪廓多邊形（帶耳朵的不規則形狀）
-   * 偶爾會有一顆在角落被卡住，或被鄰居的接觸抵住，1.5 秒走不完全程；畫面上就是「大家都貼住
-   * 天花板了，就它還在下面」。追趕力繞過接觸鏈，對遲到的顆粒直接加力，直到它進帶為止 ——
-   * 「整堆都升上去」由機制保證，而不是靠調強度碰運氣。
-   * Flipping gravity only *pushes* the pile — the force travels body to body through contacts.
-   * With outline polygons (irregular shapes with ears) the occasional body wedges in a corner or
-   * is braced by a neighbour and cannot finish the trip in 1.5 s; on screen that reads as "everyone
-   * is pinned to the ceiling except this one". The catch-up force bypasses the contact chain and
-   * pushes laggards directly until they enter the band — "the whole pile rises" is guaranteed by
-   * mechanism, not by luck with strength tuning.
-   *
-   * 力的大小照 Matter 內部的重力比例（`force = mass × gravity × 0.001`）折算，所以
-   * `catchupFactor = 2` 就恰好是「再多 2 倍重力」；`applyForce` 的作用點取質心，不引入扭矩。
-   * The magnitude follows Matter's own gravity scale (`force = mass × gravity × 0.001`), so
-   * `catchupFactor = 2` is exactly two extra gravities; applying at the centre of mass keeps the
-   * torque at zero.
+   * 翻轉重力只能「推」整堆向上，力得靠接觸一顆傳一顆。輪廓多邊形（帶耳朵的不規則形狀）偶爾
+   * 有一顆在角落被卡住，或被鄰居的接觸抵住，求解器每步把向上的力抵消掉，1.5 秒走不完全程，
+   * 畫面上就是「大家都貼住天花板了，就它還在地板上完全沒動」。位置式的速度地板繞過接觸鏈：
+   * 只要還在帶下方，就直接把垂直速度設成至少 `-riseSpeed`，每步重設，被擋住的顆粒像棘輪一樣
+   * 一格格被推上去，直到進帶為止 —— 「整堆都升上去」由機制保證，而不是靠調強度碰運氣。
+   * Flipping gravity only *pushes* the pile; the force travels body to body through contacts. With
+   * outline polygons (irregular shapes with ears) a body occasionally wedges in a corner or is
+   * braced by a neighbour, and the solver cancels the upward force every step, so it never finishes
+   * the trip in 1.5 s — on screen it reads as "everyone is on the ceiling except this one, frozen
+   * on the floor". A positional velocity floor bypasses the contact chain: any body still below the
+   * band has its vertical velocity forced to at least `-riseSpeed` every step, so a blocked body
+   * ratchets up past its neighbours until it enters the band — "the whole pile rises" is guaranteed
+   * by mechanism, not by luck with strength tuning.
    */
   private applyFloatCatchup(): void {
     if (!this.isFloating || this.floatCatchupFactor <= 0) return;
 
-    const base = this.config.levels.settings.gravityY;
     const ceilingY = this.ceilingY;
     const bandBottom = ceilingY + FLOAT_CATCHUP_BAND;
+    const riseSpeed = FLOAT_CATCHUP_RISE_SPEED * this.floatCatchupFactor;
 
     for (const entry of this.entries) {
       const body = entry.body;
-      /* 上緣仍低於帶底 ＝ 還沒抵達天花板，補一把向上的力。 */
+      /* 上緣仍低於帶底 ＝ 還沒抵達天花板，補一把最低上升速度。 */
       if (body.position.y - entry.level.radius <= bandBottom) continue;
 
-      Matter.Body.applyForce(body, body.position, {
-        x: 0,
-        y: -body.mass * base * this.floatCatchupFactor * ENGINE_GRAVITY_SCALE,
-      });
+      /* 叫醒：syncCeiling 每步已叫醒一次，這裡再補一道，確保這一步的速度會被積分。 */
+      if (body.isSleeping) Matter.Sleeping.set(body, false);
+
+      /*
+       * 速度地板：只在「向上速度還不夠快」時設。已經升得比這更快的顆粒（包含被浮動帶著跑的
+       * 整堆）維持原速，只有落後的才被拉到最低速度 —— 被鄰居擋住的顆粒每步都被重新推一把，
+       * 棘輪式地升上去，不會卡死在地板。
+       * Velocity floor: only set when the body is not already rising fast enough. Bodies already
+       * rising faster (including the pile carried by the float) keep their speed; only laggards are
+       * pulled up to the minimum, so a wedged body is re-pushed every step and ratchets up instead
+       * of freezing on the floor.
+       */
+      if (body.velocity.y > -riseSpeed) {
+        Matter.Body.setVelocity(body, { x: body.velocity.x, y: -riseSpeed });
+      }
     }
   }
 

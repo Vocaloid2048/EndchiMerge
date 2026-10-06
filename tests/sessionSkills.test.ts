@@ -134,6 +134,24 @@ function makeSession(virtualWidth: number): GameSession {
   return new GameSession({ config: CONFIG, rng: createRng(20261006), virtualWidth });
 }
 
+/**
+ * 與 `makeSession` 相同，但把所有等級的 `mergeResult` 設成 `null`，讓場上無論怎麼疊都不會
+ * 合成 —— 這樣才能堆出「一整堆」去驗「每一顆都升上去」，而不是被合成吃掉。
+ * Same as `makeSession` but every level's `mergeResult` is `null`, so bodies never merge no
+ * matter how they pile — only then can we build a whole pile to check "every one rises" instead
+ * of watching the pile get eaten by merges.
+ */
+function makeNonMergingSession(virtualWidth: number): GameSession {
+  const config: AllConfig = {
+    ...CONFIG,
+    levels: {
+      ...CONFIG.levels,
+      levels: CONFIG.levels.levels.map((lv) => ({ ...lv, mergeResult: null })),
+    },
+  };
+  return new GameSession({ config, rng: createRng(20261006), virtualWidth });
+}
+
 const FRAME_MS = 1000 / 60;
 
 /** 前進若干幀。 */
@@ -268,6 +286,38 @@ describe('協議：浮動 —— 每一顆都要浮起 / float lifts every dumpl
     const ceilingY =
       session.containerGeometry.frame.y + CONFIG.container.floatCeilingBelowRim;
     expect(body!.y).toBeGreaterThan(ceilingY + 200);
+  });
+
+  it('leaves no body stuck at the floor when a whole pile floats', () => {
+    const session = makeNonMergingSession(600);
+
+    /* 散布投放七顆，堆出一座不會合成的實體堆疊。 */
+    for (const aimX of [150, 300, 450, 220, 380, 100, 500]) dropAndSettle(session, aimX);
+    settleToSleep(session);
+
+    const count = session.bodies.length;
+    expect(count).toBeGreaterThan(4);
+
+    expect(session.activateSkill('protocol_float')).toBe(true);
+    /* 浮動還在作用（1.5 秒＝ 90 幀）時取樣，避免結束後重力翻回、堆疊落回的階段干擾。 */
+    runFrames(session, 85);
+    expect(session.isFloating).toBe(true);
+
+    const frame = session.containerGeometry.frame;
+    const floorLeeway = frame.height * 0.3;
+
+    for (const body of session.bodies) {
+      /*
+       * 每一顆都必須已經離開底部三成 —— 這條就是「至少有一顆卡在地板上完全沒動」的回歸鎖。
+       * 速度地板（見 `applyFloatCatchup`）對仍低於天花板帶的顆粒每步重設最低上升速度，
+       * 被鄰居擋住的也會棘輪式升上去，所以不會有落單的。
+       * Every body must have cleared the bottom third — this is the regression lock against
+       * "at least one dumpling frozen on the floor". The velocity floor (see `applyFloatCatchup`)
+       * re-forces a minimum upward speed every step on any body still below the ceiling band, so
+       * even one braced by neighbours ratchets up and none are left behind.
+       */
+      expect(body.y).toBeLessThan(frame.y + frame.height - floorLeeway);
+    }
   });
 });
 
