@@ -88,9 +88,9 @@
 
 .leaderboard__publish {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px 20px;
+  gap: 10px 28px;
   padding: 20px 24px;
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.05);
@@ -100,6 +100,7 @@
 .leaderboard__field {
   display: grid;
   gap: 6px;
+  min-width: 0;
 }
 
 .leaderboard__field-label {
@@ -108,9 +109,18 @@
   letter-spacing: 0.06em;
 }
 
+/* 名稱欄：儲存鍵浮在它裏面、貼齊右緣（使用者定案）。 */
+.leaderboard__name-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
 .leaderboard__name {
   width: 100%;
-  padding: 12px 18px;
+  min-width: 0;
+  /* 右內距要留得下浮在上面的儲存鍵，否則長名字的尾巴會滑到按鈕底下。 */
+  padding: 12px 124px 12px 18px;
   border: 1px solid var(--color-border);
   border-radius: 14px;
   background: rgba(0, 0, 0, 0.28);
@@ -147,16 +157,24 @@
   cursor: pointer;
 }
 
+/* 儲存鍵：貼合文字（wrap-content）、貼緊輸入框右緣。 */
 .leaderboard__save {
-  padding: 14px 40px;
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: auto;
+  white-space: nowrap;
+  padding: 10px 24px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--color-accent);
   color: var(--color-accent-ink);
   font-family: inherit;
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 600;
   letter-spacing: 0.06em;
+  line-height: 1;
   cursor: pointer;
   transition: filter var(--transition-fast);
 }

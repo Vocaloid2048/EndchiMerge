@@ -34,6 +34,14 @@ export interface LeaderboardOptions {
   host: HTMLElement;
   /** 榜單來源（現階段是本地實作）。 */
   source: LeaderboardSource;
+  /**
+   * 儲存成功且同意分享之後呼叫一次。呼叫端用它在這一刻把「正在進行的一局」也交出去 ——
+   * 玩家按下儲存就預期看到自己的紀錄，不是等這一局結束。
+   * Called once after a successful save with sharing on. The caller uses it to hand over the
+   * **run in progress** at that moment: the player expects to see his record as soon as save is
+   * pressed, not once the run ends.
+   */
+  onPublish?: () => void;
 }
 
 export interface LeaderboardView {
@@ -74,7 +82,7 @@ function primaryValue(entry: LeaderboardEntry, category: LeaderboardCategory): s
 }
 
 export function createLeaderboard(options: LeaderboardOptions): LeaderboardView {
-  const { source } = options;
+  const { source, onPublish } = options;
 
   let category: LeaderboardCategory = LEADERBOARD_CATEGORIES[0]!.id;
 
@@ -97,30 +105,45 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
   /* ── 發布列：名稱 ＋ 分享意願 ────────────────────────────────────────── */
 
   const nameLabel = el('label', 'leaderboard__field-label', '顯示名稱');
+  nameLabel.htmlFor = 'leaderboard-name';
+
   const nameInput = el('input', 'leaderboard__name');
+  nameInput.id = 'leaderboard-name';
   nameInput.type = 'text';
   nameInput.autocomplete = 'off';
   nameInput.spellcheck = false;
   nameInput.placeholder = '輸入你的名稱';
   nameInput.setAttribute('aria-label', '顯示名稱');
-  const nameField = el('div', 'leaderboard__field');
-  appendChildren(nameField, nameLabel, nameInput);
+
+  const saveButton = el('button', 'leaderboard__save', '儲存');
+  saveButton.type = 'button';
+
+  /*
+   * 儲存鍵放在名稱欄**裡面**、貼齊右緣（使用者定案）：對輸入框而言它是浮在右上的一顆小鍵，
+   * 寬度隨文字（`width: auto`），所以欄位的右內距要留得下它 —— 否則打到後面的字會滑到
+   * 按鈕底下。
+   * The save button sits **inside** the name field pinned to the right edge (the user's decision):
+   * it floats over the input, sized to its own text (`width: auto`), so the field keeps a right
+   * inset large enough for it — otherwise the tail of a long name slides under the button.
+   */
+  const nameBox = el('div', 'leaderboard__name-box');
+  appendChildren(nameBox, nameInput, saveButton);
 
   const units = el('p', 'leaderboard__units', `0 / ${String(NAME_MAX_UNITS)} 單位`);
+
+  const nameField = el('div', 'leaderboard__field');
+  appendChildren(nameField, nameLabel, nameBox, units);
 
   const shareInput = el('input', 'leaderboard__share-input');
   shareInput.type = 'checkbox';
   const shareLabel = el('label', 'leaderboard__share', '同意將我的成績顯示在排行榜上');
   shareLabel.prepend(shareInput);
 
-  const saveButton = el('button', 'leaderboard__save', '儲存');
-  saveButton.type = 'button';
-
   const error = el('p', 'leaderboard__error');
   error.hidden = true;
 
   const publish = el('div', 'leaderboard__publish');
-  appendChildren(publish, nameField, units, shareLabel, saveButton, error);
+  appendChildren(publish, nameField, shareLabel, error);
 
   /* ── 分頁 ──────────────────────────────────────────────────────────── */
 
@@ -157,10 +180,22 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
 
   /* ── 渲染 ──────────────────────────────────────────────────────────── */
 
-  function renderPublish(): void {
-    /* 尚未輸入時不要蓋掉玩家正在打的字。 */
-    if (document.activeElement !== nameInput) nameInput.value = source.displayName;
-    shareInput.checked = source.sharing;
+  function renderPublish(syncInputs: boolean): void {
+    /*
+     * 只有在**開榜**時才把兩個輸入框同步回來源。之後由 `notify` 引發的重繪（例如設定名稱
+     * 的那一刻）**不可以**再同步 —— 那會把玩家剛勾好的「同意」蓋回未勾選，而緊接著的
+     * `setSharing()` 讀到的就是被蓋掉的值，於是分享永遠開不起來、榜永遠是空的。
+     * Only sync the two inputs back from the source when the popup **opens**. Re-renders driven by
+     * `notify` (for instance the moment the name is set) must not re-sync: that would stamp the
+     * player's freshly ticked "agree" back to unchecked, and the `setSharing()` right after would
+     * read the clobbered value — leaving sharing permanently off and the board permanently empty.
+     */
+    if (syncInputs) {
+      /* 尚未輸入時不要蓋掉玩家正在打的字。 */
+      if (document.activeElement !== nameInput) nameInput.value = source.displayName;
+      shareInput.checked = source.sharing;
+    }
+
     units.textContent = `${String(nameUnits(nameInput.value))} / ${String(NAME_MAX_UNITS)} 單位`;
   }
 
@@ -215,8 +250,8 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
     summary.textContent = `你的最佳：${primaryValue(entry, category)}（${formatNumber(entry.score)} 分）· 超越你自己 ${String(percentile)}% 的場次（共 ${String(total)} 場）`;
   }
 
-  function render(): void {
-    renderPublish();
+  function render(syncInputs = false): void {
+    renderPublish(syncInputs);
     renderList();
   }
 
@@ -234,10 +269,19 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
   saveButton.addEventListener('click', (): void => {
     const result = validateDisplayName(nameInput.value);
 
+    /*
+     * 先把兩個輸入框的值抓成區域變數**再**動來源。`setDisplayName()` 會同步觸發重繪，
+     * 若之後才去讀 `shareInput.checked`，讀到的可能是已經被重繪蓋掉的值 —— 那正是
+     * 「勾了同意、按了儲存，卻沒有上榜」的原因。
+     * Capture both inputs into locals **before** touching the source. `setDisplayName()`
+     * re-renders synchronously, so reading `shareInput.checked` afterwards could pick up a
+     * clobbered value — which is exactly how "tick agree, press save, nothing appears" happened.
+     */
+    const wantSharing = shareInput.checked;
+
     if (!result.ok) {
       /* 只想瀏覽、不想分享的人可以留空；但一旦要上榜，名稱就是必要的。 */
-      const browseOnly =
-        result.reason === 'empty' && !shareInput.checked;
+      const browseOnly = result.reason === 'empty' && !wantSharing;
 
       if (!browseOnly) {
         error.textContent = nameErrorText(result.reason);
@@ -252,9 +296,19 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
     }
 
     source.setDisplayName(result.value);
-    source.setSharing(shareInput.checked);
+    source.setSharing(wantSharing);
     nameInput.value = result.value;
     error.hidden = true;
+
+    /*
+     * 同意分享之後，把正在進行的一局也交出去 —— 玩家按完儲存就該在榜上看到自己。
+     * 先 `setDisplayName` 再交出成績，那一局才會掛上新名字（資料層會認領無名的紀錄）。
+     * After agreeing to share, hand over the run in progress too — the player should see himself
+     * on the board the moment save is pressed. The name is set first so the run carries it (the
+     * data layer claims the previously nameless records).
+     */
+    if (wantSharing) onPublish?.();
+
     render();
   });
 
@@ -291,7 +345,8 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
 
     previouslyFocused =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    render();
+    /* 開榜是唯一把輸入框同步回來源的時機（見 `renderPublish`）。 */
+    render(true);
     root.hidden = false;
     document.addEventListener('keydown', onKeyDown, true);
     root.addEventListener('pointerdown', onBackdropPointerDown);
