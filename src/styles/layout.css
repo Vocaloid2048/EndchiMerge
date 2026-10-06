@@ -418,12 +418,18 @@
 /* ── 技能卡（`1408:2333` 等，120×150）────────────────────────────────── */
 
 /*
- * 技能卡：圖示 ＋ 名稱 ＋ 右上角消耗徽章；未解鎖時整張被一層灰遮罩蓋住。
- * A skill card: icon, name and a cost badge in the top-right; while locked the whole card is
- * covered by a grey mask.
+ * 技能卡：**圓圈框住的圖示 ＋ 名稱 ＋ 右上角徽章**；累計消耗型技能在名稱下方多一行說明，
+ * 未解鎖時整張被一層灰遮罩蓋住。（使用者定案，比照參考圖。）
+ * A skill card: a **ringed icon, the name and a top-right badge**; cumulative-spend skills add a
+ * caption line under the name, and while locked the whole card sits under a grey mask. (The user's
+ * decision, following the reference mock.)
  *
- * 底色取設計稿的技能卡色 `#D2AEAE`（tokens 的 `--color-skill-card`）。
- * The fill is the mock's card colour `#D2AEAE` (`--color-skill-card`).
+ * 底色取設計稿的技能卡色 `#D2AEAE`（tokens 的 `--color-skill-card`）；圓角 32 對應使用者
+ * 定案的「edge round 32dp」。徽章貼齊右緣時，右側兩角就是靠這個圓角 ＋ `overflow: hidden`
+ * 裁出來的 —— 所以兩者必須一起看。
+ * The fill is the mock's card colour `#D2AEAE` (`--color-skill-card`); the 32 radius is the user's
+ * "edge round 32dp". When the badge sits flush right, its outer corners are clipped by exactly
+ * this radius and `overflow: hidden`, so the two must be read together.
  */
 .skill-card {
   position: relative;
@@ -431,12 +437,12 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 5px;
   width: 120px;
   height: 150px;
   padding: 10px;
   border: 0;
-  border-radius: 16px;
+  border-radius: 32px;
   overflow: hidden;
   background: var(--color-skill-card);
   color: var(--color-accent-ink);
@@ -460,32 +466,82 @@
   box-shadow: 0 0 0 3px var(--color-accent), 0 0 18px var(--color-accent-soft);
 }
 
+/*
+ * 圖示外面的圓圈框（使用者定案，比照參考圖）。框線取 `--color-accent-ink` 的 35% 淡版，
+ * 所以未解鎖、選取中都不必再寫一組顏色。
+ * The ring around the icon (the user's decision, following the reference mock). Its stroke is a
+ * 35% tint of `--color-accent-ink`, so no extra rules are needed for the locked or active states.
+ */
+.skill-card__glyph {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: 2px solid rgba(27, 28, 32, 0.35);
+}
+
+/* 技能卡裡的圖示比工具列小（48 → 28）；24 單位的 viewBox 放到 28px 約 1.9 設計像素線寬。 */
+.skill-card__glyph .icon {
+  width: 28px;
+  height: 28px;
+}
+
 .skill-card__name {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
-  line-height: 1.25;
+  line-height: 1.2;
   text-align: center;
 }
 
 /*
+ * 累計消耗型技能的說明行（使用者定案）：告訴玩家徽章裡的 `n/m` 是哪一種進度。
+ * 空的時候整行收起來，所以收費技能的卡片不會白白多一段空白。
+ * The cumulative-spend skill's caption (the user's decision): it tells the player which progress
+ * the badge's `n/m` refers to. It collapses when empty, so a paid card gains no blank strip.
+ */
+.skill-card__caption {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+  opacity: 0.75;
+}
+
+.skill-card__caption:empty {
+  display: none;
+}
+
+/*
  * 消耗徽章＝該技能所需的技力值（design.md D14），依消耗分級配色（§5.4）。
- * The cost badge is the skill's SP cost (D14), coloured by cost tier (§5.4).
+ * 形狀是**貼齊卡片右緣的長方形**、數字加大、文字靠右（使用者定案）；左側兩角留 32 圓角，
+ * 右側兩角交給卡片自己的圓角裁切，看起來像從邊緣長出來的標籤。
+ * The cost badge is the skill's SP cost (D14), coloured by cost tier (§5.4). Its shape is a
+ * **rectangle flush with the card's right edge** with a larger number and right-aligned text (the
+ * user's decision); the left corners keep the 32 radius while the right ones are clipped by the
+ * card's own rounding, so it reads as a tab growing out of the edge.
+ *
+ * 累計消耗型技能（免費）顯示的是 `n/m` 進度而不是消耗，由 `skillBar.ts` 決定文字。
+ * A cumulative-spend (free) skill shows `n/m` progress instead of a cost; `skillBar.ts` picks the
+ * text.
  */
 .skill-card__badge {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  display: grid;
-  place-items: center;
-  min-width: 30px;
-  height: 30px;
-  padding: 0 6px;
-  border-radius: 999px;
+  top: 10px;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 54px;
+  height: 38px;
+  padding: 0 10px 0 14px;
+  border-radius: 32px 0 0 32px;
   background: var(--color-badge-1);
   color: var(--color-accent-ink);
-  font-size: 17px;
+  font-size: 22px;
   font-weight: 700;
   line-height: 1;
+  text-align: right;
 }
 
 .skill-card[data-cost='2'] .skill-card__badge {
@@ -523,7 +579,7 @@
   display: none;
 }
 
-/* 免費技能的解鎖進度用文字表示（沒有消耗值可以當作分母視覺化）。 */
+/* 解鎖進度是文字百分比（技力計本身已經用「一條一點」表達絕對值）。 */
 .skill-card__progress {
   display: block;
 }
