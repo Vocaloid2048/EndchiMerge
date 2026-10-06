@@ -10,9 +10,14 @@
  *
  * **單一真實來源**：`frame` 是 U 形（也就是容器）的外框矩形。物理邊界由
  * `game/containerBox.ts` 從**同一個矩形**內縮出空腔與牆，所以畫面與碰撞永遠對得上。
+ * 外框左右各讓開 `leftOffset` / `rightOffset` 的展示餘裕（`display`），那段空間只給搖晃用 ——
+ * 畫布的虛擬寬度已同步加寬，所以容器尺寸不變、可玩寬度也不變。
  * **One source of truth**: `frame` is the U's outer rectangle, i.e. the container. The
  * physics boundaries are derived from **that same rectangle** by `game/containerBox.ts`,
- * so the drawn shell and the collider can never disagree.
+ * so the drawn shell and the collider can never disagree. The box gives up `leftOffset` /
+ * `rightOffset` on each side as display margin (`display`), and that strip exists purely for
+ * the shake — the canvas' virtual width grows to match, so neither the container's size nor
+ * the play width changes.
  *
  * 可調參數全部來自 `public/config/container.json`：
  * `cornerRadius`（底部圓角）、`strokeWidth` / `strokeColor`（線框）、`fill`（內部填充）、
@@ -37,6 +42,22 @@ import type { ContainerConfig, Rect } from '../core/types';
 export interface ContainerGeometry {
   /** U 形（容器）的外框矩形；**物理遊戲區就是這個矩形**，再由 `containerBox` 內縮出空腔。 */
   frame: Rect;
+  /**
+   * **可繪製範圍**：外框（`frame`）**加上左右展示餘裕**，也就是整張畫布。
+   * The **drawable region**: `frame` **plus the left/right display margins**, i.e. the canvas.
+   *
+   * 它與 `frame` 分開的理由只有一個：**裁切不該跟著容器晃動**。裁切若等於外框，容器一晃動
+   * 裁切窗也跟著平移，貼在另一側牆邊的方團團就會被切掉半邊。這裡固定回容器「靜止」時的
+   * 範圍，所以永遠不會切到任何方團團。
+   * It exists for exactly one reason: **the clip must not shake with the container**. If the clip
+   * were the frame itself, it would slide along with the container and slice the wall-hugging
+   * dumplings on the opposite side in half. This stays at the container's **resting** extent, so
+   * nothing is ever cut.
+   *
+   * 也因此 `GameSession.containerGeometry` 疊上搖晃位移時**只改 `frame`、不動這裡**。
+   * Which is why `GameSession.containerGeometry` folds the shake offset into `frame` only.
+   */
+  display: Rect;
   /** 底部兩個圓角的半徑，虛擬單位。 */
   cornerRadius: number;
   /** U 形線框粗細，虛擬單位。 */
@@ -57,6 +78,14 @@ export interface ContainerGeometry {
  * and that is where the in-flight dumpling appears. The offset is clamped to
  * `[0, height - 1]` so even degenerate input (zero-height canvas) yields a positive rect.
  *
+ * **左右各讓開 `leftOffset` / `rightOffset`。** 畫布的虛擬寬度已經同步加寬了兩者的和
+ * （見 `ui/layout.ts`），所以 `width - leftOffset - rightOffset` **等於從前的容器寬度** ——
+ * 外框只是被推向畫布中間，尺寸一個單位都沒變。讓開的那段是搖晃的活動空間。
+ * **`leftOffset` / `rightOffset` are given up on each side.** The canvas' virtual width has
+ * already grown by their sum (see `ui/layout.ts`), so `width - leftOffset - rightOffset` is
+ * **the container's old width** — the box is merely pushed toward the middle of the canvas and
+ * has not changed size by a single unit. The strip that is given up is the room to shake in.
+ *
  * @param width 容器寬（虛擬單位）/ Container width in virtual units.
  * @param height 容器高（虛擬單位）/ Container height in virtual units.
  */
@@ -69,8 +98,34 @@ export function computeContainerGeometry(
   const h = Math.max(1, height);
   const top = Math.max(0, Math.min(config.topOffset, h - 1));
 
+  /*
+   * 餘裕逐一夾在畫布寬的 40% 以內：兩邊都吃滿會讓容器退化成一條線，而那個值是設定失誤
+   * 而不是意圖。`WALL_THICKNESS` 已經保證空腔還會更窄，所以這裡先擋在最前面。
+   * Each margin is clamped to 40% of the canvas width: letting both run away collapses the
+   * container to a line, and that would be a config mistake rather than an intent. The cavity
+   * is narrower still (`WALL_THICKNESS`), so the guard belongs here, up front.
+   */
+  const maxMargin = w * 0.4;
+  const left = Math.max(0, Math.min(config.leftOffset, maxMargin));
+  const right = Math.max(0, Math.min(config.rightOffset, maxMargin));
+
+  const frame: Rect = {
+    x: left,
+    y: top,
+    width: Math.max(1, w - left - right),
+    height: Math.max(1, h - top),
+  };
+
   return {
-    frame: { x: 0, y: top, width: w, height: Math.max(1, h - top) },
+    frame,
+    /*
+     * 可繪製範圍＝整張畫布：左右從 0 到 w（＝外框＋兩側餘裕），垂直從頂緣到畫布底部。
+     * `clipToPlayField()` 會再用 `clipY` 把頂端往下拉，所以這裡給到頂緣即可。
+     * The drawable region is the whole canvas: 0..w horizontally (the box plus both margins) and
+     * from the rim to the canvas bottom vertically. `clipToPlayField()` pulls the top down with
+     * `clipY` when asked, so starting at the rim is enough.
+     */
+    display: { x: 0, y: top, width: w, height: Math.max(1, h - top) },
     cornerRadius: Math.max(0, config.cornerRadius),
     strokeWidth: Math.max(0, config.strokeWidth),
     strokeColor: config.strokeColor,
@@ -116,9 +171,9 @@ function uPath(ctx: CanvasRenderingContext2D, frame: Rect, radius: number): void
 }
 
 /**
- * 把繪製範圍裁到「看得見的遊戲區」：容器 frame 的橫向範圍，加上畫布頂端以上不放行。
- * Clip drawing to the **visible** play field: the container frame's horizontal span, and no
- * drawing above the top of the canvas.
+ * 把繪製範圍裁到「看得見的遊戲區」：容器的**可繪製範圍**（`display`），加上畫布頂端以上不放行。
+ * Clip drawing to the **visible** play field: the container's **drawable region** (`display`), and
+ * no drawing above the top of the canvas.
  *
  * **為什麼需要顯式裁切。** Canvas 本身就會裁，但那是「靜默」的 —— 一張 sprite 若一半在
  * 畫布之外，你只會看到它被切掉，卻說不出是被誰切的。方團團的素材是
@@ -131,6 +186,13 @@ function uPath(ctx: CanvasRenderingContext2D, frame: Rect, radius: number): void
  * only 1.21 below; once the pile is tall, both the topmost dumpling and the **drop preview**
  * (spawned above the overflow line) can have a slice outside the canvas. Writing the clip out
  * in the open, with an explicit `clipY`, also documents that the top is open on purpose.
+ *
+ * **裁切的是 `display` 而不是 `frame`。** 容器左右晃動時 `frame` 會平移，若拿它當裁切窗，
+ * 貼在另一側牆邊的方團團就會被切掉半邊。`display` 固定在容器靜止時的範圍（外框＋兩側餘裕），
+ * 所以晃動期間也一顆都切不到。
+ * **The clip is `display`, not `frame`.** `frame` slides while the container shakes, and using it
+ * as the clip window would slice the wall-hugging dumplings on the opposite side. `display` stays
+ * at the container's resting extent (the box plus both margins), so nothing is cut mid-shake.
  *
  * 裁切**不碰** U 形線框：線框在裁切之外繪製，所以底部圓角與左右牆永遠是完整的。
  * The clip deliberately **excludes** the U outline: it is drawn outside the clip so the
@@ -146,15 +208,15 @@ export function clipToPlayField(
   geometry: ContainerGeometry,
   clipY = 0,
 ): void {
-  const frame = geometry.frame;
+  const display = geometry.display;
   /* `clipY` 以上的內容不放行；用矩形裁切而非把 Y 夾到 0，讓呼叫端能自己決定界線。 */
-  const top = Math.min(clipY, frame.y);
-  const height = frame.y + frame.height - top;
+  const top = Math.min(clipY, display.y);
+  const height = display.y + display.height - top;
 
-  if (frame.width <= 0 || height <= 0) return;
+  if (display.width <= 0 || height <= 0) return;
 
   ctx.beginPath();
-  ctx.rect(frame.x, top, frame.width, height);
+  ctx.rect(display.x, top, display.width, height);
   ctx.clip();
 }
 

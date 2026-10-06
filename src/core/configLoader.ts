@@ -106,6 +106,8 @@ const DEFAULT_CONTAINER: ContainerConfig = {
   dropAboveRim: 40,
   overflowAboveRim: 30,
   floatCeilingBelowRim: 20,
+  leftOffset: 50,
+  rightOffset: 50,
   aspectMin: 0.62,
   aspectMax: 1.45,
 };
@@ -500,6 +502,8 @@ function sanitizeContainer(raw: unknown, warn: ConfigWarning): ContainerConfig {
     dropAboveRim: read.number(raw, 'dropAboveRim', DEFAULT_CONTAINER.dropAboveRim, { min: 0 }),
     overflowAboveRim: read.number(raw, 'overflowAboveRim', DEFAULT_CONTAINER.overflowAboveRim, { min: 0 }),
     floatCeilingBelowRim: read.number(raw, 'floatCeilingBelowRim', DEFAULT_CONTAINER.floatCeilingBelowRim, { min: 0 }),
+    leftOffset: read.number(raw, 'leftOffset', DEFAULT_CONTAINER.leftOffset, { min: 0 }),
+    rightOffset: read.number(raw, 'rightOffset', DEFAULT_CONTAINER.rightOffset, { min: 0 }),
     aspectMin: usableRange ? aspectMin : DEFAULT_CONTAINER.aspectMin,
     aspectMax: usableRange ? aspectMax : DEFAULT_CONTAINER.aspectMax,
   };

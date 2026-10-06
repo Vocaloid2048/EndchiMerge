@@ -257,8 +257,8 @@ export interface ContainerConfig {
    */
   overflowAboveRim: number;
   /**
-   * 浮動天花板的深度：隱形平面距離 U 形**頂緣下方**多遠，虛擬單位（使用者定案：20）。
-   * How far **below** the U's rim the float's invisible ceiling sits, in virtual units (20, the
+   * 技能天花板的深度：隱形平面距離 U 形**頂緣下方**多遠，虛擬單位（使用者定案：20）。
+   * How far **below** the U's rim the invisible skill ceiling sits, in virtual units (20, the
    * user's decision).
    *
    * 使用者定案「警戒區下方加一片透明平面」。警戒區是頂緣與溢位線之間那條淺紅帶，所以它的
@@ -269,11 +269,41 @@ export interface ContainerConfig {
    * little deeper keeps even the artwork from poking out of the container mouth (the art reaches
    * 2.16 radii above the collider — see `SPRITE_ANCHOR`).
    *
+   * **協議：浮動與搖晃！共用同一個深度。** 兩者要的東西一模一樣：把顆粒封在容器口以下。
+   * 使用者對搖晃的指示是「添加跟浮動一樣的透明平面」，所以這裡刻意只有一個旋鈕 ——
+   * 兩個技能各留一個只會造出兩份會漂移的副本。
+   * **Protocol: Float and Shake! share one depth.** They want the same thing — bodies sealed
+   * below the container mouth. The user's instruction for the shake was "add a transparent plane
+   * like the float one", so there is deliberately a single knob; one per skill would only make
+   * two copies that drift apart.
+   *
    * 它**不影響溢位判定**：溢位看的是碰撞體上緣，而天花板保證上緣停在溢位線下方。
    * It does **not** change the overflow rule: that reads the collider's top edge, and the ceiling
    * already keeps that edge below the line.
    */
   floatCeilingBelowRim: number;
+  /**
+   * 容器左右兩側的**展示餘裕**：U 形外框距離畫布左右邊緣多遠，虛擬單位（預設 50）。
+   * The container's **display margin**: how far the U's outer box sits from the canvas'
+   * left/right edge, in virtual units (default 50).
+   *
+   * 容器的**寬度不變** —— 畫布的虛擬寬度會同步加寬 `leftOffset + rightOffset`，兩者相抵，
+   * 所以物理可玩寬度與從前逐單位相同。餘裕只有兩個用途：
+   * 1. **給搖晃用**：容器左右移動時仍留在畫布內，邊線不會被畫布切掉；搖晃的水平幅度會被
+   *    夾在這個餘裕之內（見 `GameSession.shakeContainer()`）。
+   * 2. **給繪製用**：方團團的裁切範圍是「外框 ＋ 兩側餘裕」而不是外框本身，所以貼牆的
+   *    方團團在容器晃動時不會被裁掉半邊。
+   * The container's **width is unchanged** — the canvas' virtual width grows by
+   * `leftOffset + rightOffset` to match, so the physics play width is identical to before.
+   * The margin has exactly two jobs: (1) **room to shake**, so the container stays on-canvas
+   * while it slides and the outline is never cut — the horizontal shake amplitude is clamped
+   * inside this margin (see `GameSession.shakeContainer()`); and (2) **room to draw**, so the
+   * clip region is the box *plus* both margins rather than the box itself, which is what stops
+   * wall-hugging dumplings being sliced while the container moves.
+   */
+  leftOffset: number;
+  /** 右側的展示餘裕，語意同 `leftOffset`。 / Right-hand display margin; see `leftOffset`. */
+  rightOffset: number;
   /** 容器寬高比下限。 */
   aspectMin: number;
   /** 容器寬高比上限。 */

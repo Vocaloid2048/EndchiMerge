@@ -70,6 +70,17 @@ const CONFIG: AllConfig = {
     dropAboveRim: 40,
     overflowAboveRim: 30,
     floatCeilingBelowRim: 20,
+    /*
+     * 這一支測的是幾何、瞄準與溢位，斷言直接以 `virtualWidth` 為準（例如「900 寬的容器」），
+     * 所以刻意把展示餘裕設為 0：容器吃滿畫布，數字不必再換算。餘裕本身的行為在
+     * `container.test.ts`（幾何）與 `sessionSkills.test.ts`（搖晃幅度）另行釘住。
+     * This file tests geometry, aiming and overflow, and asserts straight against `virtualWidth`
+     * ("a 900-wide container"), so the display margins are deliberately zero: the container fills
+     * the canvas and no number needs converting. The margins' own behaviour is pinned in
+     * `container.test.ts` (geometry) and `sessionSkills.test.ts` (shake amplitude).
+     */
+    leftOffset: 0,
+    rightOffset: 0,
     aspectMin: 0.62,
     aspectMax: 1.45,
   },

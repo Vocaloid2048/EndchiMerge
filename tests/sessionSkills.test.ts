@@ -103,6 +103,8 @@ const CONFIG: AllConfig = {
     dropAboveRim: 40,
     overflowAboveRim: 30,
     floatCeilingBelowRim: 20,
+    leftOffset: 50,
+    rightOffset: 50,
     aspectMin: 0.62,
     aspectMax: 1.45,
   },
@@ -116,7 +118,18 @@ const CONFIG: AllConfig = {
   },
 };
 
-/** 固定種子；窄容器讓兩顆必定疊起來，寬容器讓搖晃有足夠幅度。 */
+/**
+ * 固定種子；窄容器讓兩顆必定疊起來，寬容器讓搖晃有足夠幅度。
+ * Fixed seed; a narrow container forces the pair into a tower and a wide one gives the shake room.
+ *
+ * 傳進來的是**畫布**寬度，容器本身還要再扣掉兩側各 50 的展示餘裕（`CONFIG.container`）——
+ * 所以「容器寬 110」的測試要傳 210。餘裕是搖晃的活動空間，也正是這次要驗的東西之一，
+ * 所以這裡不放 0（放 0 會把搖晃幅度夾成 0）。
+ * The argument is the **canvas** width; the container itself gives up 50 per side of display
+ * margin (`CONFIG.container`), so a test that wants a 110-wide container passes 210. The margin
+ * is the shake's room and is part of what is under test, so it is not zeroed — zero would clamp
+ * the shake amplitude to nothing.
+ */
 function makeSession(virtualWidth: number): GameSession {
   return new GameSession({ config: CONFIG, rng: createRng(20261006), virtualWidth });
 }
@@ -147,17 +160,18 @@ function dropAndSettle(session: GameSession, aimX: number): void {
 describe('當棄即棄！—— 移除支撐後，上面的堆疊必須落下 / discard drops the stack above', () => {
   it('wakes the sleeping stack so it falls onto the floor', () => {
     /*
-     * 容器寬 110：空腔 78 剛好**放得下一顆**（直徑 60）但放不下並排的兩顆（需要 120），
-     * 所以兩顆必定疊成一座塔。太窄反而會把它們擠出容器口（空腔小於直徑時求解器只能往上推），
-     * 那就變成在測別的 bug 了。
-     * Width 110: a 78-unit cavity fits **one** dumpling (60 across) but not two side by side
-     * (120), so the pair is forced into a tower. Narrower than that and the solver can only push
-     * them **up** out of the mouth, which would be testing a different bug entirely.
+     * 畫布 210 ＝ 容器 110 ＋ 兩側各 50 的展示餘裕。空腔 78 剛好**放得下一顆**（直徑 60）但
+     * 放不下並排的兩顆（需要 120），所以兩顆必定疊成一座塔。太窄反而會把它們擠出容器口
+     * （空腔小於直徑時求解器只能往上推），那就變成在測別的 bug 了。
+     * Canvas 210 = a 110-wide container plus 50 of display margin per side. A 78-unit cavity
+     * fits **one** dumpling (60 across) but not two side by side (120), so the pair is forced
+     * into a tower. Narrower than that and the solver can only push them **up** out of the
+     * mouth, which would be testing a different bug entirely.
      */
-    const session = makeSession(110);
+    const session = makeSession(210);
 
-    dropAndSettle(session, 55);
-    dropAndSettle(session, 55);
+    dropAndSettle(session, 105);
+    dropAndSettle(session, 105);
     settleToSleep(session);
 
     const before = session.bodies.map((body) => ({ x: body.x, y: body.y, radius: body.radius }));
@@ -190,8 +204,8 @@ describe('當棄即棄！—— 移除支撐後，上面的堆疊必須落下 / 
 
 describe('協議：浮動 —— 每一顆都要浮起 / float lifts every dumpling', () => {
   it('raises a body that had settled and fallen asleep', () => {
-    const session = makeSession(500);
-    dropAndSettle(session, 250);
+    const session = makeSession(600);
+    dropAndSettle(session, 300);
     settleToSleep(session);
 
     const startY = session.bodies[0]!.y;
@@ -209,8 +223,8 @@ describe('協議：浮動 —— 每一顆都要浮起 / float lifts every dumpl
   });
 
   it('stops every body at the invisible ceiling below the rim', () => {
-    const session = makeSession(500);
-    dropAndSettle(session, 250);
+    const session = makeSession(600);
+    dropAndSettle(session, 300);
     settleToSleep(session);
 
     expect(session.activateSkill('protocol_float')).toBe(true);
@@ -231,8 +245,8 @@ describe('協議：浮動 —— 每一顆都要浮起 / float lifts every dumpl
   });
 
   it('leaves no ceiling behind after a restart', () => {
-    const session = makeSession(500);
-    dropAndSettle(session, 250);
+    const session = makeSession(600);
+    dropAndSettle(session, 300);
     settleToSleep(session);
 
     expect(session.activateSkill('protocol_float')).toBe(true);
@@ -240,7 +254,7 @@ describe('協議：浮動 —— 每一顆都要浮起 / float lifts every dumpl
 
     /* 上一局在浮動中結束 —— 那片靜態平面不會被 `removeDynamicBodies()` 帶走。 */
     session.reset();
-    dropAndSettle(session, 250);
+    dropAndSettle(session, 300);
     runFrames(session, 120);
 
     const body = session.bodies[0];
@@ -259,8 +273,8 @@ describe('協議：浮動 —— 每一顆都要浮起 / float lifts every dumpl
 
 describe('搖晃！—— 地震要把睡着的堆疊甩動 / the earthquake actually moves the pile', () => {
   it('moves a body that had settled and fallen asleep', () => {
-    const session = makeSession(500);
-    dropAndSettle(session, 250);
+    const session = makeSession(600);
+    dropAndSettle(session, 300);
     settleToSleep(session);
 
     const startX = session.bodies[0]!.x;
@@ -287,7 +301,7 @@ describe('搖晃！—— 地震要把睡着的堆疊甩動 / the earthquake act
 
 describe('命運互換 —— 累計消耗的解鎖資訊要傳到卡片 / the gated skill reports its progress', () => {
   it('reports n/m and the cumulative unlock kind', () => {
-    const session = makeSession(500);
+    const session = makeSession(600);
 
     const gated = session.skillCards.find((card) => card.id === 'fate_swap');
     expect(gated?.unlockKind).toBe('cumulativeSpent');
@@ -295,7 +309,7 @@ describe('命運互換 —— 累計消耗的解鎖資訊要傳到卡片 / the g
     expect(gated?.cumulativeSpent).toBe(0);
 
     /* 用掉 3 點（搖晃）之後累計應該跟着走 —— 徽章顯示的 `n/m` 就是這個數字。 */
-    dropAndSettle(session, 250);
+    dropAndSettle(session, 300);
     expect(session.activateSkill('shake')).toBe(true);
 
     const after = session.skillCards.find((card) => card.id === 'fate_swap');

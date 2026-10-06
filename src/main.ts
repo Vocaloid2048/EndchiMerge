@@ -69,6 +69,17 @@ async function bootstrap(): Promise<void> {
   document.title = `${config.branding.gameName} ${config.branding.gameNameZh}`;
   layout.notice.append(createNotice({ zh: config.branding.noticeZh, en: config.branding.notice }));
 
+  /*
+   * 容器的左右展示餘裕（`container.json`）必須在畫布**被量測之前**套用：舞台一變寬，
+   * `Viewport.resize()` 算出的虛擬寬度就跟著變，而外框會再內縮同樣的距離 —— 兩者相抵，
+   * 容器尺寸與可玩寬度都不變，只是左右多了搖晃用的空間。
+   * The container's display margins must be applied **before the canvas is measured**: widening
+   * the stage changes the virtual width `Viewport.resize()` derives, and the frame insets by
+   * the same amount. The two cancel, so the container's size and the play width are untouched
+   * and only the room to shake is added.
+   */
+  layout.setContainerMargin(config.container.leftOffset, config.container.rightOffset);
+
   /* 技力條的段數由 `sp.max` 決定（一點一條），所以要在配置到手之後才建。 */
   const spMeter = createSpMeter(hook<HTMLElement>(layout.regions.skill, 'sp-meter'));
   spMeter.update({ value: config.skills.sp.initial, max: config.skills.sp.max });

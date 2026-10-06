@@ -27,6 +27,7 @@
  */
 
 import { DESIGN_HEIGHT, DESIGN_WIDTH, LAYOUT_RECTS } from '../core/design';
+import { VIRTUAL_HEIGHT } from '../core/constants';
 import type { Rect } from '../core/types';
 import { applyDesignTokens } from './designTokens';
 import { appendChildren, el } from './dom';
@@ -50,6 +51,14 @@ export interface Layout {
   };
   /** 非官方聲明的宿主；內容由配置載入後填入。 */
   notice: HTMLElement;
+  /**
+   * 依容器的左右展示餘裕重新擺放舞台（`container.json` 的 `leftOffset` / `rightOffset`，
+   * 虛擬單位）。版面比配置更早建立，所以這一手要在 `loadConfig()` 之後補上。
+   * Re-place the stage from the container's left/right display margins (`leftOffset` /
+   * `rightOffset` in `container.json`, virtual units). The layout is built before the config
+   * loads, so this has to be applied afterwards.
+   */
+  setContainerMargin(leftOffset: number, rightOffset: number): void;
 }
 
 /** 工具列每個圖示的語意（design.md D23）。 */
@@ -277,11 +286,45 @@ export function createLayout(host: HTMLElement): Layout {
   stage.append(root);
   host.append(stage);
 
+  /*
+   * 容器的左右展示餘裕：畫布（`.stage`）必須比容器區域左右各寬一段，容器才搖得動而不被畫布
+   * 切掉。設計稿像素 / 虛擬單位這把尺由「容器區域高度 ↔ `VIRTUAL_HEIGHT`」決定，與寬度無關
+   * （`render/viewport.ts` 的 `scale = cssHeight / VIRTUAL_HEIGHT`），所以不會遞迴。
+   * The container's left/right display margins: the canvas (`.stage`) must be wider than the
+   * container region by one margin on each side, or the box would be sliced by the canvas the
+   * moment it shakes. The design-px-per-virtual-unit ruler comes from the region height
+   * against `VIRTUAL_HEIGHT` and is independent of the width (`scale = cssHeight /
+   * VIRTUAL_HEIGHT` in `render/viewport.ts`), so this is not circular.
+   */
+  const setContainerMargin = (leftOffset: number, rightOffset: number): void => {
+    const rect = LAYOUT_RECTS.container;
+    const designPerUnit = rect.height / VIRTUAL_HEIGHT;
+    const left = Math.max(0, leftOffset) * designPerUnit;
+    const right = Math.max(0, rightOffset) * designPerUnit;
+
+    /*
+     * 舞台以容器為中心向左右長出去，所以容器在設計稿上的座標一個都沒動，只有畫布變寬。
+     * 畫布的虛擬寬度因此增加 `left + right` 個虛擬單位，而 `render/container.ts` 又把外框
+     * 左右各內縮同樣的距離 —— 兩者相抵，**容器的尺寸與可玩寬度都不變**。
+     * The stage grows symmetrically outward, so the box keeps the mock's coordinates exactly
+     * and only the canvas gets wider. That adds `left + right` virtual units to the canvas'
+     * virtual width, and `render/container.ts` insets the frame by the same amount — the two
+     * cancel, so **neither the container's size nor the play width changes**.
+     */
+    place(container, {
+      x: rect.x - left,
+      y: rect.y,
+      width: rect.width + left + right,
+      height: rect.height,
+    });
+  };
+
   return {
     root,
     stage,
     regions: { score, toolbar, next, combo, skill, container, melting },
     chrome: { music },
     notice,
+    setContainerMargin,
   };
 }
