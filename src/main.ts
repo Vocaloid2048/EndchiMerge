@@ -3,6 +3,7 @@ import { attachDropInput } from './core/input';
 import { loadConfig } from './core/configLoader';
 import type { AllConfig } from './core/types';
 import { FrameLoop } from './game/loop';
+import { createLocalLeaderboard, type LeaderboardSource } from './game/leaderboard';
 import { createProgressStore, type ProgressStore } from './game/progress';
 import { GameSession } from './game/session';
 import { SpriteLoader } from './render/spriteLoader';
@@ -12,6 +13,7 @@ import { hook } from './ui/dom';
 import { createGameOver, type GameOverView } from './ui/gameOver';
 import { Hud } from './ui/hud';
 import { createLayout, type Layout } from './ui/layout';
+import { createLeaderboard, type LeaderboardView } from './ui/leaderboard';
 import { createMeltingList, type MeltingList } from './ui/meltingList';
 import { createNotice } from './ui/notice';
 import { attachRestartConfirm } from './ui/restartButton';
@@ -45,6 +47,10 @@ export interface AppContext {
   hud: Hud;
   loop: FrameLoop;
   gameOver: GameOverView;
+  /** 榜單資料層（現階段為本地實作；接真後端時換掉這一個即可）。 */
+  leaderboardSource: LeaderboardSource;
+  /** 排行榜彈窗。 */
+  leaderboard: LeaderboardView;
   /** 卸下投放輸入的事件綁定。 */
   detachInput: () => void;
   /** 停止監看視窗尺寸與名冊尺寸。 */
@@ -173,6 +179,44 @@ async function bootstrap(): Promise<void> {
    */
   let runStartBest = progress.highScore;
 
+  /*
+   * 榜單資料層（現階段為本地實作）。UI 只依賴 `LeaderboardSource` 介面 —— 日後接真後端
+   * （使用者定案：Docker 的 Postgres container，或 Vercel 支援的後端＋微資料庫；騰訊雲再後）
+   * 時只要換掉這一行，排行榜彈窗與其餘 UI 都不必改。
+   * The leaderboard data layer (local today). The UI depends only on the `LeaderboardSource`
+   * interface, so wiring the real backend later (the user's plan: a Docker Postgres container, or
+   * Vercel's backend plus a micro database; Tencent Cloud after that) replaces this one line and
+   * leaves the popup and the rest of the UI untouched.
+   */
+  const leaderboardSource = createLocalLeaderboard();
+
+  /**
+   * 把剛結束的一局送進榜單，**一局只記一次**。
+   * Record the run that just ended, **once per run**.
+   *
+   * 一局有兩個結束途徑：自然結束（溢位逾時）與玩家按重新開始把它丟掉。兩條都經由這裡記錄，
+   * `runRecorded` 保證不會重複 —— 否則「結束之後再按重新開始」會把同一局記兩次。
+   * A run ends two ways: naturally (overflow timed out) or because the player restarted. Both
+   * record through here, and `runRecorded` keeps it to once — otherwise "end, then restart"
+   * would count the same run twice.
+   *
+   * 完全沒有動靜的一局（0 分、0 次合成）不記：那些是誤按，記進去只會把榜洗掉。
+   * A run with no activity at all (0 score, 0 merges) is skipped: a stray tap would otherwise
+   * wash out the board.
+   */
+  let runRecorded = false;
+  const recordFinishedRun = (): void => {
+    if (runRecorded) return;
+    if (session.score <= 0 && session.mergedCount <= 0) return;
+
+    leaderboardSource.record({
+      score: session.score,
+      maxCombo: session.maxCombo,
+      merges: session.mergedCount,
+    });
+    runRecorded = true;
+  };
+
   /**
    * 重設進行中的一局。結算覆蓋層的「再玩一次」與工具列的重新開始鍵共用這一條路，
    * 兩邊的行為（包括 BEST TRY 的基準點）才不會各養一份。
@@ -180,7 +224,10 @@ async function bootstrap(): Promise<void> {
    * this one path so both behaviours (including the BEST TRY baseline) stay identical.
    */
   const restartRun = (): void => {
+    /* 先記錄再重設：`reset()` 會把這一局的成績清掉。 */
+    recordFinishedRun();
     session.reset();
+    runRecorded = false;
     shownGameOver = false;
     gameOver?.hide();
     runStartBest = progress.highScore;
@@ -227,6 +274,22 @@ async function bootstrap(): Promise<void> {
   }
 
   /*
+   * 排行榜（工具列獎盃鍵）：按下彈出模態 popup（使用者定案：不做獨立頁面）。彈窗掛在
+   * `layout.root`，所以它與整張畫布一起被等比縮放；榜的內容與名次全部由
+   * `leaderboardSource` 提供。
+   * The leaderboard (toolbar trophy): a press opens a modal popup (the user's decision — no
+   * separate page). It mounts on `layout.root` so it scales with the canvas, and every row and
+   * rank comes from `leaderboardSource`.
+   */
+  const leaderboard = createLeaderboard({ host: layout.root, source: leaderboardSource });
+  const leaderboardButton = layout.regions.toolbar.querySelector<HTMLButtonElement>(
+    'button[data-action="leaderboard"]',
+  );
+  if (leaderboardButton !== null) {
+    leaderboardButton.addEventListener('click', (): void => leaderboard.open());
+  }
+
+  /*
    * 除錯輔助線：開發模式下加上 `?debug=1` 就會疊出容器外框、物理空腔與投放線。
    */
   const debugOverlay = import.meta.env.DEV && new URLSearchParams(window.location.search).has('debug');
@@ -255,6 +318,8 @@ async function bootstrap(): Promise<void> {
 
       if (current.isOver && !shownGameOver) {
         shownGameOver = true;
+        /* 這一局到此為止：先上榜，再彈結算（`runRecorded` 保證只記一次）。 */
+        recordFinishedRun();
         gameOver?.show({
           score: current.score,
           merged: current.mergedCount,
@@ -332,6 +397,8 @@ async function bootstrap(): Promise<void> {
     hud,
     loop,
     gameOver,
+    leaderboardSource,
+    leaderboard,
     detachInput,
     detachScale,
   };

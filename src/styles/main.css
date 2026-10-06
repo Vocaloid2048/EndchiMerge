@@ -4,11 +4,11 @@
  *
  * 這支只負責「重設 + 版面宿主」。設計 token 在 tokens.css、面板外觀在 panels.css、
  * 主畫面幾何在 layout.css、名冊在 melting-list.css、結算覆蓋層在 game-over.css、
- * 確認對話框在 confirm-dialog.css。
+ * 確認對話框在 confirm-dialog.css、排行榜在 leaderboard.css。
  * This file owns only the reset and the layout host. Tokens live in tokens.css, panel
  * appearance in panels.css, main-screen geometry in layout.css, the roster in
- * melting-list.css, the end-of-run overlay in game-over.css and the confirmation dialog in
- * confirm-dialog.css.
+ * melting-list.css, the end-of-run overlay in game-over.css, the confirmation dialog in
+ * confirm-dialog.css and the leaderboard in leaderboard.css.
  */
 
 @import './tokens.css';
@@ -18,6 +18,7 @@
 @import './melting-list.css';
 @import './game-over.css';
 @import './confirm-dialog.css';
+@import './leaderboard.css';
 
 *,
 *::before,
