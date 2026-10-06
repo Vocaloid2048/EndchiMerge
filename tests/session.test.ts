@@ -69,6 +69,7 @@ const CONFIG: AllConfig = {
     spawnGap: 8,
     dropAboveRim: 40,
     overflowAboveRim: 30,
+    floatCeilingBelowRim: 20,
     aspectMin: 0.62,
     aspectMax: 1.45,
   },

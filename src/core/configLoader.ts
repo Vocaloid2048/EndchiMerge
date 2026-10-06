@@ -92,7 +92,7 @@ const DEFAULT_SP: SpSettings = {
 const DEFAULT_SKILLS: readonly SkillDef[] = [
   { id: 'discard', name: '當棄即棄！', cost: 1, targeting: 'user_pick', pickCount: 1, unlock: { kind: 'sp' }, params: {} },
   { id: 'protocol_float', name: '協議：浮動', cost: 2, targeting: 'immediate', pickCount: 0, unlock: { kind: 'sp' }, params: { durationMs: 1500, liftFactor: 1.6 } },
-  { id: 'shake', name: '搖晃！', cost: 3, targeting: 'immediate', pickCount: 0, unlock: { kind: 'sp' }, params: { durationMs: 2000, revolutions: 5, radiusFactor: 0.12 } },
+  { id: 'shake', name: '搖晃！', cost: 3, targeting: 'immediate', pickCount: 0, unlock: { kind: 'sp' }, params: { durationMs: 2000, revolutions: 5, radiusFactor: 0.12, axisTiltDeg: 15, upwardFactor: 0.1 } },
   { id: 'fate_swap', name: '命運互換', cost: 0, targeting: 'user_pick', pickCount: 2, unlock: { kind: 'cumulativeSpent', threshold: 6 }, params: { disturbance: 6 } },
 ];
 
@@ -105,6 +105,7 @@ const DEFAULT_CONTAINER: ContainerConfig = {
   spawnGap: 8,
   dropAboveRim: 40,
   overflowAboveRim: 30,
+  floatCeilingBelowRim: 20,
   aspectMin: 0.62,
   aspectMax: 1.45,
 };
@@ -340,6 +341,8 @@ function sanitizeParams(raw: unknown, fallback: SkillParams, section: string, wa
     liftFactor: optional('liftFactor', fallback.liftFactor),
     revolutions: optional('revolutions', fallback.revolutions),
     radiusFactor: optional('radiusFactor', fallback.radiusFactor),
+    axisTiltDeg: optional('axisTiltDeg', fallback.axisTiltDeg),
+    upwardFactor: optional('upwardFactor', fallback.upwardFactor),
     disturbance: optional('disturbance', fallback.disturbance),
   };
 }
@@ -496,6 +499,7 @@ function sanitizeContainer(raw: unknown, warn: ConfigWarning): ContainerConfig {
     spawnGap: read.number(raw, 'spawnGap', DEFAULT_CONTAINER.spawnGap, { min: 0 }),
     dropAboveRim: read.number(raw, 'dropAboveRim', DEFAULT_CONTAINER.dropAboveRim, { min: 0 }),
     overflowAboveRim: read.number(raw, 'overflowAboveRim', DEFAULT_CONTAINER.overflowAboveRim, { min: 0 }),
+    floatCeilingBelowRim: read.number(raw, 'floatCeilingBelowRim', DEFAULT_CONTAINER.floatCeilingBelowRim, { min: 0 }),
     aspectMin: usableRange ? aspectMin : DEFAULT_CONTAINER.aspectMin,
     aspectMax: usableRange ? aspectMax : DEFAULT_CONTAINER.aspectMax,
   };

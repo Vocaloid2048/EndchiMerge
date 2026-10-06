@@ -3,9 +3,12 @@
  * "Discard It Right Now!": pick one dumpling inside the container and remove it.
  *
  * 選取方式＝**點選 1 顆**（design.md §5.5）。移除之後其餘方團團自然落下補位 —— 那是物理
- * 的事，這裡不做任何「補位」計算，否則會與引擎打架。
+ * 的事，這裡不做任何「補位」計算，否則會與引擎打架。**但**「自然落下」有個前提：被壓在
+ * 上面的堆疊必須是醒着的，那由 `GameSession.removeTarget()` 負責（見該處說明）。
  * Targeting is **pick one** (design.md §5.5). The rest then fall in on their own; that is
- * physics' job, and computing a "fill-in" here would only fight the engine.
+ * physics' job, and computing a "fill-in" here would only fight the engine. **But** "fall on
+ * their own" has a precondition — the stack above must be awake, which is
+ * `GameSession.removeTarget()`'s job (see the note there).
  */
 
 import type { BoardTarget, SkillBoard } from './board';

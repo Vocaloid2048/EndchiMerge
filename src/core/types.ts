@@ -163,15 +163,36 @@ export interface SkillParams {
    */
   liftFactor?: number;
   /**
-   * 搖晃時容器沿圓周轉動的圈數（使用者定案：2 秒約 5 圈）。
-   * Revolutions the container orbits during a shake (the user's decision: about 5 in 2 s).
+   * 搖晃時容器往復擺動的圈數（使用者定案：2 秒約 5 圈）。
+   * Cycles the container oscillates through during a shake (the user's decision: about 5 in 2 s).
    */
   revolutions?: number;
   /**
-   * 搖晃的位移半徑，以**容器寬度**為比例。硬上限 1/3（使用者定案）。
-   * The shake's orbit radius as a fraction of the **container width**. Hard cap 1/3.
+   * 搖晃的位移幅度，以**容器寬度**為比例。硬上限 1/3（使用者定案）。
+   * The shake's displacement amplitude as a fraction of the **container width**. Hard cap 1/3.
    */
   radiusFactor?: number;
+  /**
+   * 搖晃擺動軸相對水平線的傾角，度（使用者定案：15）。
+   * How far the shake's oscillation axis tilts above the horizontal, in degrees (15, the user's
+   * decision).
+   *
+   * 容器沿這條斜線往復，所以擺動天生帶一點垂直分量 —— 0 度是純水平地震，90 度是純上下震。
+   * The container oscillates along that line, so the motion inherently carries a vertical
+   * component: 0° is a purely horizontal quake, 90° a purely vertical one.
+   */
+  axisTiltDeg?: number;
+  /**
+   * 搖晃時持續施加的向上力，以**水平衝量的峰值**為比例（使用者定案：0.10）。
+   * A steady upward force during the shake, as a fraction of the **peak horizontal impulse**
+   * (0.10, the user's decision).
+   *
+   * 它與 `axisTiltDeg` 是兩件事：傾角讓擺動**交替**上下，這個則是固定往上的托力，讓堆疊
+   * 稍微被抬起、更容易鬆開。
+   * Distinct from `axisTiltDeg`: the tilt alternates up and down, while this is a constant upward
+   * bias that slightly lifts the pile so it loosens more readily.
+   */
+  upwardFactor?: number;
   /** 命運互換時對鄰居的擾動衝量，世界單位／步。 */
   disturbance?: number;
 }
@@ -235,6 +256,24 @@ export interface ContainerConfig {
    * dumpling would trigger overflow the instant it appears.
    */
   overflowAboveRim: number;
+  /**
+   * 浮動天花板的深度：隱形平面距離 U 形**頂緣下方**多遠，虛擬單位（使用者定案：20）。
+   * How far **below** the U's rim the float's invisible ceiling sits, in virtual units (20, the
+   * user's decision).
+   *
+   * 使用者定案「警戒區下方加一片透明平面」。警戒區是頂緣與溢位線之間那條淺紅帶，所以它的
+   * 下緣就是頂緣；再往下一段是為了連 sprite 的美術都不那麼容易冒出容器口（方團團的美術比
+   * 碰撞體高 2.16 倍半徑，見 `SPRITE_ANCHOR`）。
+   * The user's decision: "add a transparent plane below the warning zone". The warning band is
+   * the strip between the rim and the overflow line, so its lower edge *is* the rim; going a
+   * little deeper keeps even the artwork from poking out of the container mouth (the art reaches
+   * 2.16 radii above the collider — see `SPRITE_ANCHOR`).
+   *
+   * 它**不影響溢位判定**：溢位看的是碰撞體上緣，而天花板保證上緣停在溢位線下方。
+   * It does **not** change the overflow rule: that reads the collider's top edge, and the ceiling
+   * already keeps that edge below the line.
+   */
+  floatCeilingBelowRim: number;
   /** 容器寬高比下限。 */
   aspectMin: number;
   /** 容器寬高比上限。 */

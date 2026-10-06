@@ -114,6 +114,40 @@ export const FLOAT_OVERFLOW_BUFFER_MS = 500;
  */
 export const SHAKE_MAX_BODY_SPEED = 12;
 
+/**
+ * 搖晃時，方團團吃到的加速度相對「容器本身加速度」的耦合比例。
+ * How much of the container's own acceleration the dumplings actually receive during a shake.
+ *
+ * 物理上，站在震動地面上的物體會感受到與地面**相同**的加速度（慣性力），也就是耦合
+ * 應該等於 1。但容器寬 789 虛擬單位 × 半徑比例 0.12 × 2 秒 5 圈，峰值加速度換算成
+ * 「每步速度增量」約 6.5 單位／步 —— 全量耦合會讓整箱方團團像彈珠一樣亂飛。
+ * Physically a body standing on shaking ground feels the **same** acceleration as the ground, so
+ * the coupling "should" be 1. Taken literally, a 789-unit-wide container at 0.12 × width with 5
+ * cycles in 2 s works out to about 6.5 units/step of peak velocity — full coupling flings the
+ * whole box around like marbles.
+ *
+ * 所以這個值把「物理正確」折衷成「玩起來對」：顆粒仍被確實甩動、卡住的堆疊會鬆開，
+ * 但不會失控。它與 `SHAKE_MAX_BODY_SPEED` 是同一類東西 —— **手感護欄**，改它之前先試玩。
+ * It trades physical exactness for feel: the pile is genuinely thrown around and jams break up,
+ * without going out of control. Like `SHAKE_MAX_BODY_SPEED` it is a **feel guard**; play it
+ * before changing it.
+ */
+export const SHAKE_BODY_ACCEL_COUPLING = 0.3;
+
+/**
+ * 浮動天花板那片隱形平面的厚度，虛擬單位。
+ * Thickness of the invisible float-ceiling plane, in virtual units.
+ *
+ * 平面本身不畫出來，厚度只影響兩件事：夠厚才不會被高速顆粒穿透，但太厚會在浮動開始的
+ * 那一刻「包住」正在下墜的顆粒。40 約等於兩片半牆厚 —— 遠大於任何一顆每步的位移，
+ * 又遠小於投放點到天花板的距離。
+ * The plane is never drawn; its thickness only matters twice over: thick enough that a fast body
+ * cannot tunnel through, thin enough not to swallow a body that is mid-drop when the float
+ * starts. 40 is about two and a half wall thicknesses — far more than any body's per-step
+ * travel, far less than the gap between the drop point and the ceiling.
+ */
+export const FLOAT_CEILING_THICKNESS = 40;
+
 /** Matter.js 的重力縮放（與 `core/physics.ts` 的引擎設定必須一致）。 */
 export const ENGINE_GRAVITY_SCALE = 0.001;
 

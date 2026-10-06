@@ -7,12 +7,13 @@
  * Targeting is **immediate** (design.md §5.5). Same-level contacts still merge while they
  * float, so this is a "create merge chances" skill.
  *
- * **以警戒線為天花板**（使用者 2026-10-06 定案）：像杯口被壓住一樣，不能讓任何一顆越過
- * 溢位線跑出容器。實作在 `GameSession`（它才知道警戒線在哪），這裡只把參數傳下去。
- * **The overflow line is the ceiling** (the user's 2026-10-06 decision): like a lid pressed on
- * a cup, nothing may rise past it and leave the container. The clamping lives in
- * `GameSession`, which is the only thing that knows where the line is; this class just passes
- * the parameters along.
+ * **以「警戒區下方的一片隱形平面」為天花板**（使用者 2026-10-06 定案）：像杯口被壓住一樣，
+ * 不能讓任何一顆升到溢位線。平面由 `GameSession` 建立與移除（它才知道容器幾何與溢位線在
+ * 哪），這裡只把參數傳下去。
+ * **The ceiling is an invisible plane below the warning zone** (the user's 2026-10-06 decision):
+ * like a lid pressed on a cup, nothing may rise into the overflow line. `GameSession` builds and
+ * removes the plane — it is the only thing that knows the container geometry and where the line
+ * is — while this class just passes the parameters along.
  */
 
 import type { BoardTarget, SkillBoard } from './board';

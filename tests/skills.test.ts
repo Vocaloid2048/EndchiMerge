@@ -175,6 +175,36 @@ describe('搖晃！/ shake', () => {
     expect(skill.durationMs).toBe(2000);
     expect(board.shakes[0]?.revolutions).toBe(5);
   });
+
+  it('defaults the earthquake axis to 15 degrees and a 10% upward force', () => {
+    const board = new FakeBoard([target(1)]);
+    new ShakeSkill(def({ id: 'shake' })).apply(board, []);
+
+    expect(board.shakes[0]?.axisTiltDeg).toBe(15);
+    expect(board.shakes[0]?.upwardFactor).toBe(0.1);
+  });
+
+  it('clamps the tilt to 60 degrees and the upward force to half the impulse', () => {
+    const board = new FakeBoard([target(1)]);
+    new ShakeSkill(def({ id: 'shake', params: { axisTiltDeg: 400, upwardFactor: 9 } })).apply(
+      board,
+      [],
+    );
+
+    expect(board.shakes[0]?.axisTiltDeg).toBe(60);
+    expect(board.shakes[0]?.upwardFactor).toBe(0.5);
+  });
+
+  it('never lets a negative tilt or upward force through', () => {
+    const board = new FakeBoard([target(1)]);
+    new ShakeSkill(def({ id: 'shake', params: { axisTiltDeg: -30, upwardFactor: -1 } })).apply(
+      board,
+      [],
+    );
+
+    expect(board.shakes[0]?.axisTiltDeg).toBe(0);
+    expect(board.shakes[0]?.upwardFactor).toBe(0);
+  });
 });
 
 describe('命運互換 / fate swap', () => {

@@ -39,10 +39,14 @@ export interface FloatRequest {
 export interface ShakeRequest {
   /** 作用時間，毫秒。 */
   durationMs: number;
-  /** 容器沿圓周轉動的圈數。 */
+  /** 容器往復擺動的圈數。 */
   revolutions: number;
-  /** 位移半徑相對容器寬度的比例（已由技能夾在硬上限內）。 */
+  /** 位移幅度相對容器寬度的比例（已由技能夾在硬上限內）。 */
   radiusFactor: number;
+  /** 擺動軸相對水平線的傾角，度（0 ＝ 純水平地震）。 */
+  axisTiltDeg: number;
+  /** 持續向上力，以水平衝量峰值為比例。 */
+  upwardFactor: number;
 }
 
 /**
