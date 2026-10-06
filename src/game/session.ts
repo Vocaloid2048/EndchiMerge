@@ -361,6 +361,14 @@ export class GameSession implements SkillBoard {
   private elapsedMs = 0;
   private scoreValue = 0;
   private mergedCountValue = 0;
+  /**
+   * 這一局連勝**最高**爬到幾連。`combo.count` 是「當下」的串長，會被中途斷連歸零，所以
+   * 榜單要的是它的歷史最大值 —— 只在這裡錄一次上限，讀取端不必自己每幀追蹤。
+   * The highest chain length this run has reached. `combo.count` is the *current* streak and
+   * resets on a break, so the leaderboard wants its running maximum — kept here once, so no
+   * reader has to track it frame by frame.
+   */
+  private maxComboValue = 0;
   private over = false;
 
   /**
@@ -2005,6 +2013,9 @@ export class GameSession implements SkillBoard {
     const snapshot = this.combo.record();
     const gain = level.score * snapshot.multiplier;
 
+    /* 這一局的連勝上限（榜單的 COMBO 分類用）；`record()` 之後的串長才是本次的連擊數。 */
+    if (this.combo.count > this.maxComboValue) this.maxComboValue = this.combo.count;
+
     this.scoreValue += gain;
 
     /* 本次投放的計分；倍率曲線全在 `game/combo.ts`，這裡只累加。 */
@@ -2386,6 +2397,7 @@ export class GameSession implements SkillBoard {
 
     this.scoreValue = 0;
     this.mergedCountValue = 0;
+    this.maxComboValue = 0;
     this.over = false;
     this.elapsedMs = 0;
     /*
@@ -2536,6 +2548,19 @@ export class GameSession implements SkillBoard {
    */
   get comboCount(): number {
     return this.combo.count;
+  }
+
+  /**
+   * 這一局連勝爬到過的**最高**連擊數。
+   * The highest chain length this run ever reached.
+   *
+   * 榜單的「COMBO 數」分類用它，而不是 `comboCount`：後者是**當下**串長，斷連歸零之後就
+   * 再也回不到峰值，拿去上榜會讓「曾經 20 連」的紀錄變成 0。
+   * The leaderboard's COMBO category uses this rather than `comboCount`, which is the *current*
+   * streak and reads 0 again after a break — scoring that would turn a 20-chain run into a 0.
+   */
+  get maxCombo(): number {
+    return this.maxComboValue;
   }
 
   /**

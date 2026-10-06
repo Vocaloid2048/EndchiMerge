@@ -285,13 +285,26 @@ export const MERGE_SETTLE_MAX_DROP = 80;
 /** 本地儲存鍵的前綴，避免與同網域其他專案衝突。 */
 export const STORAGE_PREFIX = 'endchimerge';
 
-/** 本地儲存鍵。 */
+/**
+ * 本地儲存鍵。
+ * Local storage keys.
+ *
+ * 排行榜相關的三個鍵（`leaderboard` / `playerName` / `shareScore`）在純本地階段由
+ * `game/leaderboard.ts` 使用；日後接上真後端（Docker Postgres／Vercel）時，`leaderboard`
+ * 之外兩個仍留在本地 —— 名稱與分享意願是**玩家的設定**，不是伺服器資料。
+ * The three leaderboard keys are used by `game/leaderboard.ts` while the board is local. When
+ * a real backend lands (Docker Postgres / Vercel) the last two stay local: the display name and
+ * the sharing preference are **player settings**, not server data.
+ */
 export const STORAGE_KEYS = {
   profile: `${STORAGE_PREFIX}:profile`,
   unlocks: `${STORAGE_PREFIX}:unlocks`,
   highScore: `${STORAGE_PREFIX}:high-score`,
   deviceId: `${STORAGE_PREFIX}:device-id`,
   preferences: `${STORAGE_PREFIX}:preferences`,
+  leaderboard: `${STORAGE_PREFIX}:leaderboard`,
+  playerName: `${STORAGE_PREFIX}:player-name`,
+  shareScore: `${STORAGE_PREFIX}:share-score`,
 } as const;
 
 /** 版面斷點（像素）。低於 tablet 視為手機，低於 desktop 視為平板。 */

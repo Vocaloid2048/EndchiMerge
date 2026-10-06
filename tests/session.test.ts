@@ -824,6 +824,8 @@ describe('GameSession — 合成與計分 / merging and scoring', () => {
 
     expect(session.mergedCount).toBe(2);
     expect(session.comboCount).toBe(2);
+    /* 榜單的 COMBO 分類讀的是歷史峰值；此時當下串長與峰值都是 2。 */
+    expect(session.maxCombo).toBe(2);
     /* 倍率沿著曲線爬升，不是每次都重算同一格。 */
     expect(session.comboMultiplier).toBeGreaterThan(comboMultiplier(1));
   });
@@ -869,6 +871,44 @@ describe('GameSession — 合成與計分 / merging and scoring', () => {
     expect(session.comboCount).toBe(0);
     expect(session.comboMultiplier).toBe(1);
     expect(session.dropScore).toBe(0);
+
+    /*
+     * 但**峰值不會跟著歸零**：`comboCount` 是「當下串長」，斷連後讀到 0；`maxCombo` 是這一局
+     * 爬到過的最高點，榜單要的是後者 —— 少了這條，一個「曾經 20 連」的紀錄會在上榜時變成 0。
+     * The **peak does not reset with the streak**: `comboCount` reads 0 after the break, while
+     * `maxCombo` keeps what the run actually reached. The leaderboard needs the latter; without
+     * this, a run that once hit a 20-chain would score as 0.
+     */
+    expect(session.maxCombo).toBe(before);
+  });
+
+  it('zeroes the combo peak on reset, not just the current streak', () => {
+    /*
+     * 榜單是**每一局**的紀錄，所以峰值必須跟分數、合成數一起在新局歸零。少了這條，開新局
+     * 之後的第一筆紀錄會沿用上一局的高峰，記進一個玩家其實沒打出來的數字。
+     * The board records **per run**, so the peak must reset with the score and the merge count.
+     * Without this, the first record of a new run would inherit the previous run's peak — a
+     * number the player never actually produced in that run.
+     */
+    const session = makeCustom(SOLO_LV1, { dropCooldownMs: 0 });
+
+    /* 複製上面「跨投放累積」的序列，把串長推到 2。 */
+    dropAndSettle(session, 250, 90);
+    dropAndSettle(session, 250, 90);
+    session.drop();
+    runFrames(session, 90);
+    session.drop();
+    const before = session.mergedCount;
+    for (let frame = 0; frame < 400 && session.mergedCount === before; frame += 1) {
+      session.step(1000 / 60);
+    }
+
+    expect(session.maxCombo).toBeGreaterThan(0);
+
+    session.reset();
+
+    expect(session.comboCount).toBe(0);
+    expect(session.maxCombo).toBe(0);
   });
 
   it('accumulates this drop\'s score across its merges', () => {
