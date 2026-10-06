@@ -297,6 +297,18 @@ export interface ContainerConfig {
    */
   floatCeilingBelowRim: number;
   /**
+   * 容器**底部的托高量**：U 形外框底緣距離畫布底端多遠，虛擬單位（預設 0 ＝ 貼底）。
+   * How far the U's outer box bottom sits **above** the canvas bottom, in virtual units
+   * (default 0, flush with the bottom).
+   *
+   * 使用者定案：技能選取提示（當棄即棄／命運互換）顯示在容器下方，所以底部要托高一點，
+   * 留出一條提示帶避免文字蓋住容器。物理地板跟著 `frame` 走，托高後可玩深度等量變淺。
+   * The user's decision: the skill-selection hint (Discard! / Fate Swap) shows below the
+   * container, so the bottom is raised to leave a hint strip the text can never cover. The
+   * physics floor follows `frame`, so the play depth shrinks by the same amount.
+   */
+  bottomOffset: number;
+  /**
    * 容器左右兩側的**展示餘裕**：U 形外框距離畫布左右邊緣多遠，虛擬單位（預設 50）。
    * The container's **display margin**: how far the U's outer box sits from the canvas'
    * left/right edge, in virtual units (default 50).

@@ -338,6 +338,40 @@
   outline-offset: 3px;
 }
 
+/*
+ * 技能選取提示帶：當棄即棄／命運互換啟動時顯示在容器**下方**。
+ * The skill-selection hint strip: shown **below** the container while Discard! or Fate Swap
+ * is arming.
+ *
+ * 容器底部已為此托高（`container.json` 的 `bottomOffset`），畫布底端留出一條不屬於容器的
+ * 空帶，提示就坐在那裡 —— 永遠不會蓋住容器本身。`pointer-events: none` 讓點擊穿透到畫布
+ * （提示帶上點空白處一樣是「取消選取」）。
+ * The container bottom is raised for this (`bottomOffset` in `container.json`), leaving a strip
+ * at the canvas bottom that does not belong to the container — the hint sits there and can never
+ * cover the container itself. `pointer-events: none` lets clicks fall through to the canvas, so
+ * tapping "empty space" on the hint still cancels the selection.
+ */
+.stage__hint {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 12px 26px;
+  border-radius: 999px;
+  background: rgba(20, 21, 26, 0.82);
+  border: 2px solid var(--color-border);
+  color: var(--color-fg);
+  font-size: 24px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.stage__hint[hidden] {
+  display: none;
+}
+
 /* ── ⑤ SKILL LIST 面板（`1408:2694`，435×641）────────────────────────── */
 
 /* 標題盒 y=20（`1408:2244`）。 */

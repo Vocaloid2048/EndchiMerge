@@ -29,6 +29,7 @@ const CONFIG: ContainerConfig = {
   dropAboveRim: 40,
   overflowAboveRim: 30,
   floatCeilingBelowRim: 20,
+  bottomOffset: 0,
   leftOffset: 50,
   rightOffset: 50,
   aspectMin: 0.62,
@@ -54,7 +55,35 @@ describe('computeContainerGeometry — U 形外框 / the U frame', () => {
     expect(display.x).toBe(0);
     expect(display.width).toBe(500);
     expect(display.y).toBe(frame.y);
-    expect(display.y + display.height).toBe(frame.y + frame.height);
+    /* 裁切範圍一直伸到畫布底端：即使外框底緣被托高（見下一條），也切不到探出底緣的美術。 */
+    expect(display.y + display.height).toBe(1000);
+  });
+
+  it('raises the frame bottom by bottomOffset but keeps the clip to the canvas bottom', () => {
+    /*
+     * 技能選取提示住在容器下方那條帶裡（使用者定案）：外框底緣托高 70，物理地板跟著升，
+     * 可玩深度等量變淺；但裁切範圍刻意**不**跟著縮 —— 搖晃時探出底緣的方團團美術仍完整。
+     * The skill-selection hint lives in the strip below the container (the user's decision):
+     * the frame bottom is raised by 70, the physics floor follows, and the play depth shrinks
+     * by the same amount — but the clip deliberately does **not** follow, so a dumpling poking
+     * past the frame bottom mid-shake stays whole.
+     */
+    const { frame, display } = computeContainerGeometry(500, 1000, { ...CONFIG, bottomOffset: 70 });
+
+    expect(frame.y + frame.height).toBe(1000 - 70);
+    expect(display.y + display.height).toBe(1000);
+  });
+
+  it('clamps bottomOffset so the frame keeps at least one unit of height', () => {
+    /*
+     * 托高量先吃掉畫布：5000 被夾成「頂緣以下只留 1 個單位」，外框底緣落在頂緣 + 1。
+     * The raise is clamped against the canvas: 5000 collapses to "one unit below the rim",
+     * so the frame bottom lands at rim + 1.
+     */
+    const { frame } = computeContainerGeometry(500, 1000, { ...CONFIG, bottomOffset: 5000 });
+
+    expect(frame.height).toBe(1);
+    expect(frame.y + frame.height).toBe(CONFIG.topOffset + 1);
   });
 
   it('falls back to a full-width frame when both margins are zero', () => {

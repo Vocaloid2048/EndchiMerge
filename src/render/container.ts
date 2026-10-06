@@ -21,10 +21,12 @@
  *
  * 可調參數全部來自 `public/config/container.json`：
  * `cornerRadius`（底部圓角）、`strokeWidth` / `strokeColor`（線框）、`fill`（內部填充）、
- * `topOffset`（U 形頂緣距畫布頂端的留白，投放用的頭部空間）。
+ * `topOffset`（U 形頂緣距畫布頂端的留白，投放用的頭部空間）、`bottomOffset`（U 形底緣
+ * 距畫布底端的托高量，技能選取提示的留帶）。
  * Every tunable comes from `public/config/container.json`: `cornerRadius` (bottom corners),
- * `strokeWidth` / `strokeColor` (the outline), `fill` (interior), and `topOffset` (the
- * headroom between the canvas top and the U's rim, which the drop needs).
+ * `strokeWidth` / `strokeColor` (the outline), `fill` (interior), `topOffset` (the headroom
+ * between the canvas top and the U's rim, which the drop needs), and `bottomOffset` (how far
+ * the U's bottom is raised off the canvas bottom, the strip the skill-selection hint lives in).
  *
  * 繪製順序是「裝在容器內」這個效果的全部來源：
  * The draw order is what sells "inside the container":
@@ -99,6 +101,15 @@ export function computeContainerGeometry(
   const top = Math.max(0, Math.min(config.topOffset, h - 1));
 
   /*
+   * 底部托高：提示帶留給技能選取提示。托高量不得吃掉整個畫布 —— 至少要剩 1 個單位的
+   * 外框，退化輸入（畫布高 0）也拿得到正尺寸的矩形。
+   * The bottom raise: the hint strip reserved for the skill-selection hint. The raise must not
+   * swallow the whole canvas — at least one unit of the frame remains, so even degenerate input
+   * (zero-height canvas) yields a positive rect.
+   */
+  const bottom = Math.max(0, Math.min(config.bottomOffset, h - top - 1));
+
+  /*
    * 餘裕逐一夾在畫布寬的 40% 以內：兩邊都吃滿會讓容器退化成一條線，而那個值是設定失誤
    * 而不是意圖。`WALL_THICKNESS` 已經保證空腔還會更窄，所以這裡先擋在最前面。
    * Each margin is clamped to 40% of the canvas width: letting both run away collapses the
@@ -113,17 +124,22 @@ export function computeContainerGeometry(
     x: left,
     y: top,
     width: Math.max(1, w - left - right),
-    height: Math.max(1, h - top),
+    height: Math.max(1, h - top - bottom),
   };
 
   return {
     frame,
     /*
-     * 可繪製範圍＝整張畫布：左右從 0 到 w（＝外框＋兩側餘裕），垂直從頂緣到畫布底部。
+     * 可繪製範圍＝整張畫布：左右從 0 到 w（＝外框＋兩側餘裕），垂直從頂緣到**畫布底端**。
+     * 刻意不隨 `bottom` 縮短：托高後的底帶屬於提示，而方團團的美術（比碰撞體矮）可能因為
+     * 搖晃位移短暫探出外框底緣，裁切跟著縮會把那半截切掉 —— 留到畫布底就永遠切不到。
+     * The drawable region is the whole canvas: 0..w horizontally (the box plus both margins)
+     * and from the rim to the **canvas bottom** vertically. Deliberately not shortened by
+     * `bottom`: the raised strip belongs to the hint, and a dumpling's art may briefly poke
+     * past the frame's bottom edge while the container shakes — a clip that followed the raise
+     * would slice it, while clipping to the canvas bottom never does.
      * `clipToPlayField()` 會再用 `clipY` 把頂端往下拉，所以這裡給到頂緣即可。
-     * The drawable region is the whole canvas: 0..w horizontally (the box plus both margins) and
-     * from the rim to the canvas bottom vertically. `clipToPlayField()` pulls the top down with
-     * `clipY` when asked, so starting at the rim is enough.
+     * `clipToPlayField()` pulls the top down with `clipY` when asked, so starting at the rim is enough.
      */
     display: { x: 0, y: top, width: w, height: Math.max(1, h - top) },
     cornerRadius: Math.max(0, config.cornerRadius),

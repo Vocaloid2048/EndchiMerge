@@ -103,6 +103,7 @@ const CONFIG: AllConfig = {
     dropAboveRim: 40,
     overflowAboveRim: 30,
     floatCeilingBelowRim: 20,
+    bottomOffset: 0,
     leftOffset: 50,
     rightOffset: 50,
     aspectMin: 0.62,

@@ -70,6 +70,7 @@ const CONFIG: AllConfig = {
     dropAboveRim: 40,
     overflowAboveRim: 30,
     floatCeilingBelowRim: 20,
+    bottomOffset: 0,
     /*
      * 這一支測的是幾何、瞄準與溢位，斷言直接以 `virtualWidth` 為準（例如「900 寬的容器」），
      * 所以刻意把展示餘裕設為 0：容器吃滿畫布，數字不必再換算。餘裕本身的行為在

@@ -16,6 +16,7 @@ import { createMeltingList, type MeltingList } from './ui/meltingList';
 import { createNotice } from './ui/notice';
 import { attachStageScale } from './ui/scale';
 import { createSkillBar, type SkillBar } from './ui/skillBar';
+import { createSkillHint, type SkillHint } from './ui/skillHint';
 import { createSpMeter, type SpMeter } from './ui/spMeter';
 
 /**
@@ -38,6 +39,7 @@ export interface AppContext {
   meltingList: MeltingList;
   spMeter: SpMeter;
   skillBar: SkillBar;
+  skillHint: SkillHint;
   session: GameSession;
   hud: Hud;
   loop: FrameLoop;
@@ -134,6 +136,14 @@ async function bootstrap(): Promise<void> {
   });
   skillBar.update(session.skillCards);
 
+  /*
+   * 技能選取提示帶：當棄即棄／命運互換啟動時顯示在容器下方（容器底部已為它托高）。
+   * The skill-selection hint strip: shown below the container while Discard! or Fate Swap
+   * arms (the container bottom is raised to make room for it).
+   */
+  const skillHint = createSkillHint({ host: layout.regions.container });
+  skillHint.update(session.skillCards);
+
   const updateHud = (): void => {
     hud.update({
       nextLevelId: session.upcomingLevelId,
@@ -155,6 +165,7 @@ async function bootstrap(): Promise<void> {
   const updateSkills = (): void => {
     spMeter.update({ value: session.spValue, max: session.spMax });
     skillBar.update(session.skillCards);
+    skillHint.update(session.skillCards);
   };
 
   /*
@@ -263,6 +274,7 @@ async function bootstrap(): Promise<void> {
     meltingList,
     spMeter,
     skillBar,
+    skillHint,
     session,
     hud,
     loop,
