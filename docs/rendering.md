@@ -59,12 +59,14 @@ main.ts（組裝）
 | 瞄準範圍左右各內縮多少 | `container.json → spawnGap` | `16` |
 | **投放點在容器頂緣上方多高** | `container.json → dropAboveRim` | `40` |
 | **溢位紅線在容器頂緣上方多高** | `container.json → overflowAboveRim` | `30`（**必須小於上一項**，否則一生成就越線；載入器會警告） |
+| 技能天花板在頂緣下方多深 | `container.json → floatCeilingBelowRim` | `20`（浮動與搖晃共用） |
+| 容器左右兩側的展示餘裕 | `container.json → leftOffset / rightOffset` | `50 / 50`（寬度不變；見 §2.5） |
 | 一個方團團的半徑 | `public/config/levels.json → levels[].radius` | `20 … 115` |
 | 密度／彈性／摩擦／空氣阻力 | `levels.json → levels[].density / restitution / friction / frictionAir` | 見該檔 |
 | 各級分數 | `levels.json → levels[].score` | `0, 1, 2, 4, … 256` |
 | 重力 | `levels.json → settings.gravityY` | `1` |
 | **方團團是否可旋轉** | `levels.json → settings.lockRotation` | `false` ＝ 依真實物理翻滾 |
-| 溢位寬限秒數 | `levels.json → settings.overflowGraceMs` | `3000` |
+| 溢位寬限秒數 | `levels.json → settings.overflowGraceMs` | `5000` |
 | 連擊窗口 | `levels.json → settings.comboWindowMs` | `1000` |
 | 合成冷卻 | `levels.json → settings.mergeCooldownMs` | `100` |
 | 技能／技力 | `public/config/skills.json` | 見 `agent-readme.md` §SP |
@@ -127,6 +129,26 @@ spriteScaleForRadius(radius) = (2 × radius) / SPRITE_BODY
 追出來的輪廓會是整個方框，等於退回圓形的精度。素材規格見
 `public/assets/character/README.md`。
 
+### 2.5 容器外框與展示餘裕（`frame` vs `display`）
+
+`render/container.ts → computeContainerGeometry()` 一次產出兩個矩形，兩者**用途不同**：
+
+| 矩形 | 意義 | 誰在用 |
+|---|---|---|
+| `frame` | U 形外框；**物理就是從它內縮推導** | 物理邊界、線框、溢位線、`containerWidth` |
+| `display` | ＝ `frame` ＋ 左右兩側餘裕，**＝整張畫布** | `clipToPlayField()` 的**裁切範圍** |
+
+容器**寬度不變**：畫布的虛擬寬度加寬 `leftOffset + rightOffset`，而 `frame` 內縮同一個量，
+兩者相抵，所以**物理可玩寬度與從前逐單位相同**（只是整組往右挪回畫布中央）。
+
+- **餘裕從哪來**：`container.json → leftOffset / rightOffset`（預設 50；單邊超過畫布寬 40%
+  會被鉗住）。`main.ts` 在建 `Viewport` **之前**呼叫 `layout.setContainerMargin()`，把設計
+  矩形按同一個比例外擴，畫布因此量得到加寬後的寬度。
+- **為什麼裁切讀 `display` 而不是 `frame`**：`frame` 會隨搖晃左右平移，若裁切跟著它跑，
+  貼牆的方團團就會被裁掉半邊。`display` 是固定的，所以搖晃期間「容器在動、裁切不動」。
+- **搖晃的幅度上限**就來自這裡：水平分量被夾在「餘裕 ÷ |cos(傾角)|」之內，所以外框滑到兩端
+  時仍在畫布內。想讓它搖得更遠，調大這兩個值（而不是改容器尺寸）。
+
 ---
 
 ## 3. 除錯模式
@@ -140,9 +162,11 @@ http://127.0.0.1:5173/?debug=1
 
 | 顏色 | 代表 |
 |---|---|
-| 洋紅實線 | 容器 `frame` 矩形（＝ U 形外框；物理就是從它推導） |
+| 洋紅實線 | 容器 `frame` 矩形（＝ U 形外框；物理就是從它推導，會隨搖晃平移） |
 | 青色實線 | 物理空腔 `cavity`（方團團可活動的內緣） |
 | 黃色虛線 | 投放高度 `spawnYValue` |
+
+> `display`（裁切範圍）畫布本身就等於它的邊界，所以沒有另外畫線；它**不隨搖晃移動**（§2.5）。
 
 另可於 Console 用 `window.endchi`（僅開發模式）拿到 `session`、`viewport`、`layout` 等物件，
 例如 `endchi.session.spawnYValue`、`endchi.session.playArea`。

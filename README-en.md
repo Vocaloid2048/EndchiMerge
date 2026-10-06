@@ -46,9 +46,9 @@ Techstack:<br>
 
 > **Current state**: **all five steps are playable**. Dumplings really fall, tumble and stack;
 > same-level contact merges them, with a pop animation and a Combo multiplier of
-> `min(e^(0.075n)/10, 9) + 1` that reaches the ×10.0 ceiling at 60 chained merges.
+> `min(e^(0.25n)/10, 9) + 1` that reaches the ×10.0 ceiling at 18 chained merges.
 > Once the stack crosses the red dashed line 30 units above the container rim you get
-> **3 seconds** to fix it; time out and the run ends with a score summary and a one-tap restart.
+> **5 seconds** to fix it; time out and the run ends with a score summary and a one-tap restart.
 > Every level you merge into existence unlocks that character in the MELTING LIST, and **unlocks
 > and the high score persist locally and survive a new run**. Arrow keys aim and Space/Enter drops.
 > **SP and skills (M5) are done**: SP accrues from drops and merges, and four skills fire from
@@ -56,18 +56,18 @@ Techstack:<br>
 
 ### Combo multiplier
 
-| Chain | 1 | 10 | 23 | 30 | 42 | 60 |
+| Chain | 1 | 4 | 8 | 12 | 14 | 18 |
 |:--|:--|:--|:--|:--|:--|:--|
-| Multiplier | ×1.1 | ×1.2 | ×1.6 | ×1.9 | ×3.3 | **×10.0** |
+| Multiplier | ×1.1 | ×1.3 | ×1.7 | ×3.0 | ×4.3 | **×10.0** |
 
-> The curve climbs **deliberately slowly**: it only hits the ceiling at 60. Several merges inside
-> the same physics step count once; a cascade spread across steps accumulates normally. The curve
-> constants live in `src/game/combo.ts → COMBO_CURVE`.
+> The curve climbs **fast**: ×1.3 by chain 4, ×4.3 at 14, and the ×10.0 ceiling at 18. Several
+> merges inside the same physics step count once; a cascade spread across steps accumulates
+> normally. The curve constants live in `src/game/combo.ts → COMBO_CURVE`.
 
 ### Overflow rule
 
 A red dashed line sits 30 units above the container's rim, with a pale red warning band between
-the line and the rim. **As soon as anything in the stack crosses the line** a 3-second countdown
+the line and the rim. **As soon as anything in the stack crosses the line** a 5-second countdown
 starts; push the stack back down and you are fine, leave it and the run ends.
 
 > Only dumplings that have **joined the pile** count as crossing, and "joined the pile" means
@@ -117,11 +117,14 @@ Every successful drop banks **0.05 SP**, and every merge banks another **0.05 SP
 - ✅ **Hand-drawn art**: dumplings are authored as vector art and exported as lossless 512×512 WebP; the white outline hugs the character silhouette rather than the image bounds
 - ✅ **Art aligned to physics**: sprites scale from the collision radius, and the collider is traced from the very same alpha channel — the two coincide exactly
 - ✅ **Merging and combos**: same-level contact merges, handled in two phases (the collision callback only collects; the merge runs after the physics step). The combo multiplier is a non-linear curve topping out at ×10.0
-- ✅ **A visible overflow rule**: red dashed line, pale red warning band and a 3-second countdown — and it only measures dumplings that have **joined the pile** (touched another dumpling)
+- ✅ **A visible overflow rule**: red dashed line, pale red warning band and a 5-second countdown — and it only measures dumplings that have **joined the pile** (touched another dumpling)
 - ✅ **Unlocks and codex**: merging a level into existence unlocks that character (the MELTING LIST *is* the codex); unlocks and the high score persist across runs
 - ✅ **SP and skills**: SP accrues from drops and merges and gates skills on its **current** value
   (spending locks them again instantly); each of the four skills is its own class acting through
-  a narrow board interface, with costs and parameters all coming from JSON
+  a narrow board interface, with costs and parameters all coming from JSON. Float and Shake share
+  **one** invisible ceiling that keeps the pile below the container mouth, and the container
+  carries `leftOffset` / `rightOffset` display margins (its width is unchanged) so neither the
+  outline nor the dumplings get sliced while it shakes
 - ✅ **Fallback first**: missing art or config degrades gracefully and never leaves a blank screen
 - ✅ **Tested**: deterministic logic (config loading, layout, geometry, sampling, timestep) has unit coverage
 - ✅ **Free and open source**: MIT licensed. Play it, fork it, change it
@@ -281,7 +284,8 @@ EndchiMerge
 > 20% white fill) and both the drop point and the overflow line are now derived from the
 > container's rim (40 / 30) instead of hard-coded coordinates. Merge detection is split into
 > "the collision callback only collects → the merge runs after the physics step". The combo
-> multiplier is now a non-linear curve topping out at ×10.0 at 60 chained merges. Per the
+> multiplier became a non-linear curve (coefficient `0.075` back then, reaching ×10.0 at 60
+> chained merges; raised to `0.25` in M5, now topping out at 18). Per the
 > user's decision the MELTING LIST **is** the codex, unlock checks key off the level id, and the
 > spawn pool filters out anything not yet unlocked.
 

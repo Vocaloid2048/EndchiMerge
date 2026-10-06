@@ -1,7 +1,7 @@
 {
   "_meta": {
     "provisional": true,
-    "note": "容器是**平面 U 形**（左牆＋右牆＋底部，頂端開口，底部兩個圓角），不是 3D 盒體。所有欄位都是可調的美術參數；物理邊界由 game/containerBox.ts 從同一個 frame 矩形內縮推導，改這裡不會動到碰撞。調參位置：cornerRadius 底部圓角、strokeWidth/strokeColor 線框、fill 內部填充、topOffset 頂端留白（U 形頂緣距畫布頂端）、spawnGap 瞄準範圍左右各內縮多少、dropAboveRim 投放點在頂緣上方多高、overflowAboveRim 溢位線在頂緣上方多高、floatCeilingBelowRim 浮動天花板（協議：浮動的隱形平面）在頂緣下方多深、leftOffset/rightOffset 容器左右兩側的展示餘裕。",
+    "note": "容器是**平面 U 形**（左牆＋右牆＋底部，頂端開口，底部兩個圓角），不是 3D 盒體。所有欄位都是可調的美術參數；物理邊界由 game/containerBox.ts 從同一個 frame 矩形內縮推導，改這裡不會動到碰撞。調參位置：cornerRadius 底部圓角、strokeWidth/strokeColor 線框、fill 內部填充、topOffset 頂端留白（U 形頂緣距畫布頂端）、spawnGap 瞄準範圍左右各內縮多少、dropAboveRim 投放點在頂緣上方多高、overflowAboveRim 溢位線在頂緣上方多高、floatCeilingBelowRim 技能天花板（協議：浮動與搖晃！共用同一片隱形平面）在頂緣下方多深、leftOffset/rightOffset 容器左右兩側的展示餘裕。",
     "tuning": "改這個檔就能調外觀，不必碰程式。線框粗細單位是「虛擬單位」：VIRTUAL_HEIGHT=1000 對應畫布高，所以 strokeWidth=10 約等於畫布高度的 1%。dropAboveRim 必須大於 overflowAboveRim，否則方團團一出現就越線（載入器會發出警告）。leftOffset/rightOffset 預設 50：容器的**寬度不變**，畫布的虛擬寬度會同步加寬兩者的和，所以可玩寬度不受影響；餘裕是給搖晃左右移動用的，搖晃的水平幅度會被夾在餘裕之內，改大它才能搖得更遠。"
   },
 

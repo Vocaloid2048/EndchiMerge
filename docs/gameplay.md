@@ -175,16 +175,17 @@ at - 上次時刻 ≤ comboWindowMs(1000) → comboCount++（接續這一串）
 ### 3.2 倍率曲線
 
 ```
-comboMultiplier(n) = min( e^(0.075 × n) / 10, 9 ) + 1        // n = comboCount
+comboMultiplier(n) = min( e^(0.25 × n) / 10, 9 ) + 1        // n = comboCount
 ```
 
-| n | 1 | 10 | 23 | 30 | 42 | 50 | 60 |
-|---|---|---|---|---|---|---|---|
-| 倍率 | ×1.1 | ×1.2 | ×1.6 | ×1.9 | ×3.3 | ×5.3 | **×10.0**（天花板） |
+| n | 1 | 4 | 8 | 12 | 14 | 18 |
+|---|---|---|---|---|---|---|
+| 倍率 | ×1.1 | ×1.3 | ×1.7 | ×3.0 | ×4.3 | **×10.0**（天花板） |
 
 - **`n = 0` 回傳 `1.0`**，而不是公式算出的 `1.1`：靜止狀態顯示 ×1.1 會讓玩家以為一直有加成。
   這是唯一一處刻意偏離公式的地方。
-- 緩慢上升是刻意的：`n = 60` 才到上限，鼓勵長時間串接而不是靠單次連鎖爆分。
+- 曲線**上升很快**：`n = 4` 就到 ×1.3、`n = 14` 是 ×4.3，`n = 18` 觸頂 ×10.0（`e^4.5 / 10 ≈ 9`
+  剛好追上 `cap`）。HUD 取一位小數顯示。
 - **調參入口**：`src/game/combo.ts → COMBO_CURVE`。`coefficient` 越小上升越慢；
   `cap + base` 就是天花板。
 
@@ -251,6 +252,9 @@ spawnY        = frame.y - dropAboveRim          // container.json，預設 40（
 於是：**連續投放時（間隔短於 233ms）這些穿越會首尾相接**，計時器一路爬滿 3 秒。
 實測以每 100ms 投一顆，**第 31 顆、模擬時間 3.1 秒**就結束了這一局 ——
 而容器裡只有 24 顆散落的方團團，堆疊最高點離溢位線還很遠。**規則量到的是「投放」，不是「堆疊」。**
+
+> 上述實測是在 `overflowGraceMs` 還是 **3000ms** 的年代做的；該值之後統一為 **5000ms**，
+> 同樣的連續投放要約 61 顆才會填滿，但**成因與修法完全一樣**，所以數字保留原樣。
 
 **第一代修法（已作廢）**：`Entry.entered` 是單向旗標，**圓心曾經降到容器頂緣以下**就設為真。
 問題是它仍然是幾何判斷：一顆剛投下、還在半空但恰好掠過頂緣的方團團也會被判成「進槽」，
@@ -395,7 +399,7 @@ spawnY        = frame.y - dropAboveRim          // container.json，預設 40（
 
 > **為什麼是平面而不是每步傳送**：把越線的顆粒每步壓回線下，等於讓求解器的結果每幀被推翻
 > 一次（會抖），而且「碰到才停」與「被搬回來」在手感上是兩件事。有實體接觸面，顆粒就會自然
-> 疊成「壓在杯蓋下」的形狀。施放的那一刻另外做**一次** `clampFloatCeiling()`，把已經在天花板
+> 疊成「壓在杯蓋下」的形狀。施放的那一刻另外做**一次** `clampCeiling()`，把已經在天花板
 > 之上的顆粒先壓回平面下方 —— 否則它們會卡在平面內部，被求解器從最近的出口（通常是上方）
 > 擠出容器。
 >
@@ -407,13 +411,25 @@ spawnY        = frame.y - dropAboveRim          // container.json，預設 40（
 > 所以浮動期間的上緣不可能觸發溢位判定。
 >
 > 平面是**靜態**剛體，所以 `reset()` 的 `removeDynamicBodies()` 帶不走它，必須顯式移除 ——
-> 否則上一局留下的隱形平面會讓新的一局從第一幀就撞到一道看不見的天花板。
+> 否則上一局留下的隱形平面會讓新的一局從第一幀就撞到一道看不見的天花板。因為浮動與搖晃
+> 共用這片平面，建立／移除只由一個開關（`GameSession.ceilingNeeded`，＝浮動中或搖晃中）決定，
+> 兩邊同時結束才收掉，不會出現「浮動收掉、搖晃還在卻沒了蓋子」的空窗。
 
 **搖晃！**（`shake`，cost 3，即時）
 **地震**：容器沿一條與水平成 `axisTiltDeg`（15°）的斜線往復，位移疊在 `containerGeometry` 上，
 並以 `Body.translate` 的**差量**搬動靜態牆壁；同時**每步對每一顆方團團施加慣性力**
 （`applyShakeImpulse()`），另有 `upwardFactor`（10%）的持續向上托力。`sin(πt)` 包絡讓幅度從 0
 起、回到 0，容器不會在開始或結束的瞬間跳一下。
+
+> **搖晃也蓋同一片天花板。** 它與浮動共用 `container.json → floatCeilingBelowRim` 那片靜態
+> 平面：兩者要的其實是同一件事 —— 把顆粒封在容器口以下。上托的那 10% 若沒有東西擋住，
+> 顆粒會在往上的一瞬間集體冒出溢位線，所以施放時一樣叫醒全家、`clampCeiling()` 一次，
+> 平面也一樣橫跨整個**可視範圍**（`display`，見下）。**只有一個旋鈕**是刻意的：兩個技能各留
+> 一個，只會造出兩份日後各走各的副本。
+>
+> **為什麼「往上的一瞬間」不會真的越線**：天花板在溢位線下方，顆粒撞上它就在那裡定住，
+> 所以上緣永遠停在線下。實測把方向力開到最大時，最高上緣是 `99.93`（天花板在 `100`）；
+> 若把平面拿掉，同樣的參數會衝到 `-114` —— 越線 164 個單位。
 
 > **牆只是畫面，顆粒的力是另一回事。** 牆是**靜態**剛體：`Body.translate` 不帶速度，而
 > `Sleeping.afterCollisions` 對「靜態 vs 休眠」直接 `continue` —— 牆掃過去連叫醒都做不到。
@@ -422,6 +438,12 @@ spawnY        = frame.y - dropAboveRim          // container.json，預設 40（
 > 慣性力的量值取自容器自己的加速度：站在震動地面上的物體感受到與地面**相同**的加速度，
 > 容器位移是 `A·sin(ωt)`，所以 `Δv = A·ω²·sin(ωt)·Δt²`，再乘 `SHAKE_BODY_ACCEL_COUPLING`
 > （0.3）折算成手感。
+
+> **幅度會被夾在展示餘裕之內。** 容器的**寬度不變**，但畫布左右各讓出 `leftOffset`／
+> `rightOffset`（`container.json`，預設 50）的**展示餘裕** —— 畫布的虛擬寬度同步加寬兩者的和，
+> 所以可玩寬度與從前逐單位相同。搖晃的水平分量被夾在「餘裕 ÷ |cos(傾角)|」之內，容器滑到
+> 兩端時外框仍在畫布內、邊線不會被切掉；同時方團團的裁切範圍是「外框 ＋ 兩側餘裕」而不是
+> 外框本身，所以貼牆的方團團在晃動時也不會被裁掉半邊。想讓它搖得更遠就改大這兩個值。
 
 > **穩定性護欄**：使用者給的幅度（2 秒 5 圈、半徑最多 1/3 容器寬）換算成牆壁線速度是每步數十
 > 世界單位，照字面跑會把整箱甩飛、甚至穿透薄牆。`SHAKE_MAX_BODY_SPEED`（12）把最壞情況壓回
@@ -455,15 +477,16 @@ spawnY        = frame.y - dropAboveRim          // container.json，預設 40（
 | 近接合成的邊緣間隙容差 | `src/core/constants.ts → MERGE_OUTLINE_GAP` | `4` |
 | 合成後推開鄰居的力度 | `src/core/constants.ts → MERGE_PUSH_FACTOR / MERGE_PUSH_SPEED / MERGE_PUSH_MAX_DEPTH` | `1.15 / 0.05 / 12` |
 | 合成後找支撐的吸附上限 | `src/core/constants.ts → MERGE_SETTLE_MAX_DROP` | `80` |
-| 連擊曲線 | `src/game/combo.ts → COMBO_CURVE` | `coefficient 0.075 / cap 9 / base 1` |
+| 連擊曲線 | `src/game/combo.ts → COMBO_CURVE` | `coefficient 0.25 / cap 9 / base 1` |
 | 彈跳動畫時長與峰值 | `src/core/constants.ts → POP_ANIMATION_MS / POP_PEAK_SCALE` | `180ms / 1.3` |
 | 每次投放／合成的技力 | `skills.json → sp.gainPerDrop / sp.gainPerCombo` | `0.05 / 0.05` |
 | 技力上限 | `skills.json → sp.max` | `3`（可設 1–10 正整數；硬上限常數 `SP_MAX_CEILING`） |
 | 各技能的消耗 | `skills.json → skills[].cost` | `1 / 2 / 3 / 0` |
 | 命運互換的解鎖門檻 | `skills.json → skills[].unlock.threshold` | `6`（累計消耗） |
 | 浮動的時長與抬升倍率 | `skills.json → skills[].params.durationMs / liftFactor` | `1500 / 1.6` |
-| 浮動天花板在容器頂緣下方多深 | `container.json → floatCeilingBelowRim` | `20` |
-| 浮動天花板那塊隱形平面的厚度 | `src/core/constants.ts → FLOAT_CEILING_THICKNESS` | `40` |
+| 技能天花板在容器頂緣下方多深 | `container.json → floatCeilingBelowRim` | `20`（浮動與搖晃共用） |
+| 技能天花板那塊隱形平面的厚度 | `src/core/constants.ts → CEILING_THICKNESS` | `40` |
+| 容器左右兩側的展示餘裕 | `container.json → leftOffset / rightOffset` | `50 / 50`（寬度不變；搖晃幅度上限） |
 | 搖晃的時長／圈數／幅度比例 | `skills.json → skills[].params.durationMs / revolutions / radiusFactor` | `2000 / 5 / 0.12` |
 | 搖晃擺動軸的傾角／持續向上力 | `skills.json → skills[].params.axisTiltDeg / upwardFactor` | `15 / 0.1` |
 | 搖晃半徑的硬上限 | `src/core/constants.ts → SHAKE_RADIUS_FACTOR_MAX` | `1/3` |
