@@ -140,36 +140,45 @@ export const MELTING = {
   /** 右側蛇形走道寬度。 */
   laneWidth: 30,
   /**
-   * 蛇形走線的參數，全部來自設計稿的 `Arrow 1`（`1408:2184`）。
-   * The route parameters for the serpentine track, all from the mock's `Arrow 1`.
+   * 蛇形走線的參數。
+   * The serpentine track parameters.
    *
-   * 那個節點是一個 **VECTOR**：白色、`strokeWeight` 5、`strokeAlign: INSIDE`，
-   * 而 `vectorData.styleOverrideTable` 記下了 `cornerRadius: 32` 與
-   * `strokeCap: ARROW_LINES`。把它的 stroke geometry 解碼之後，走線就完全清楚了 ——
-   * **一條連續折線**，在欄中心之間上落，每個轉彎用 32 圓角，最後由右上角向右出欄、
-   * 沿右側走道落到下走道，並以一支向下的箭頭收尾。
-   * The node is a VECTOR: white, `strokeWeight` 5, `strokeAlign: INSIDE`, with
-   * `cornerRadius: 32` and `strokeCap: ARROW_LINES` recorded in
-   * `vectorData.styleOverrideTable`. Decoding its stroke geometry gives the whole route:
-   * one continuous polyline running down and up between the column centres, filleted by
-   * 32 at every turn, then exiting right from the top lane and descending the right-hand
-   * lane to finish in a downward arrow.
+   * **走法已由使用者改為橫向蛇形（S 形）**：第一列由左而右、第二列由右而左，如此類推 ——
+   * 不再是設計稿的直行蛇形。走線幾何仍然鏡像設計稿 `Arrow 1`（`1408:2184`）的內縮關係，
+   * 把直行版的數值沿對角鏡射到橫向：
+   * **The walk is now row-major (an S shape), per the user's decision**: row 1 runs left to
+   * right, row 2 right to left, and so on — no longer the mock's column-major walk. The track
+   * geometry still mirrors the inset relations of the mock's decoded `Arrow 1`
+   * (`1408:2184`), mapping the column-major numbers onto the row-major track:
    *
-   * **為何不是「每格一段短線」**：表面上看到的是一節一節的短線，但那是因為整條線畫在
-   * 素材**之下**，只有格與格之間的縫隙露得出來。所以正確的做法是一條連續線，不是十幾
-   * 條獨立線段 —— 兩者在縫隙裡看起來一樣，但連續線在轉彎處才有那四個圓角。
-   * **Why not one short tick per pair**: the broken line is an illusion — the path is drawn
-   * **under** the art, so only the gaps between cells show through. One continuous path is
-   * therefore the right model, not a dozen independent segments; they look the same inside
-   * the gaps, but only the continuous path carries the four fillets.
-   */
+   * - 直行版上走道 35 ＝ 首列中心 47.2 再往上 12.2 → 橫向版的**左走道** ＝ 首欄中心 42.125
+   *   再往左 12.2 ＝ 29.925。
+   *   The mock's top lane 35 = first row's centre 47.2 raised by 12.2 → the row-major
+   *   **left lane** = first column's centre 42.125 inset by 12.2 = 29.925.
+   * - 直行版下走道 458 ＝ 格網底緣 472 內縮 14 → 橫向版的**右走道** ＝ 格網右緣內縮 14
+   *   （欄數改變時跟著走，見 `ui/serpentine.ts` 的 `trackLanes()`）。
+   *   The mock's bottom lane 458 = grid bottom 472 inset by 14 → the row-major **right lane**
+   *   = grid right edge inset by 14 (it follows the column count — see `trackLanes()` in
+   *   `ui/serpentine.ts`).
+ * - 直行版出欄線 364 ＝ 內容區右緣 367 內縮 3 → 橫向版的**出欄線** ＝ 格網底緣內縮 3。
+ *   The mock's exit line 364 = content right edge 367 inset by 3 → the row-major **exit
+ *   line** = grid bottom inset by 3.
+ *
+ * **為何不是「每格一段短線」**：表面上看到的是一節一節的短線，但那是因為整條線畫在
+ * 素材**之下**，只有格與格之間的縫隙露得出來。所以正確的做法是一條連續線，不是十幾
+ * 條獨立線段 —— 兩者在縫隙裡看起來一樣，但連續線在轉彎處才有那四個圓角。
+ * **Why not one short tick per pair**: the broken line is an illusion — the path is drawn
+ * **under** the art, so only the gaps between cells show through. One continuous path is
+ * therefore the right model, not a dozen independent segments; they look the same inside
+ * the gaps, but only the continuous path carries the four fillets.
+ */
   track: {
-    /** 上走道與下走道的 y（內容區座標）。 */
-    topLane: 35,
-    bottomLane: 458,
-    /** 出欄後那條垂直線的 x（已內縮半個線寬，模擬 `strokeAlign: INSIDE`）。 */
-    exitX: 364,
-    /** 轉彎圓角；設計稿 `vectorData.styleOverrideTable` 的 `cornerRadius`。 */
+    /** 左走道的 x（內容區座標）：橫向蛇形在左側的 U 轉位置。 */
+    leftLane: 29.925,
+    /** 走道與出欄線距格網遠緣的內縮。 */
+    laneInset: 14,
+    exitInset: 3,
+    /** 轉彎圓角；沿用設計稿 `vectorData.styleOverrideTable` 的 `cornerRadius`。 */
     cornerRadius: 32,
     /** 線寬；設計稿的 `strokeWeight`。 */
     strokeWidth: 5,

@@ -2,13 +2,14 @@
  * 蛇形佈局的單元測試。
  * Unit tests for the serpentine layout.
  *
- * 守住三件事：(1) 走位是**直行蛇形**（column-major），(2) 設計稿的 19 個槽位會落在 4 欄
- * × 5 列的哪一格 —— 那個「缺一格」的位置就是判斷蛇形方向的唯一證據，(3) 走線是**一條**
- * 連續折線，帶著設計稿指定的 32 圓角與向下箭頭。
- * Three things are pinned: (1) the walk is **column-major**, (2) which of the 4×5 grid cells
- * the mock's 19 slots occupy — the single gap is the only evidence for the walking direction
- * — and (3) the track is **one** continuous polyline carrying the mock's 32-radius fillets
- * and a downward arrow.
+ * 守住三件事：(1) 走位是**橫向蛇形（S 形）**——第一列由左而右、第二列由右而左（使用者
+ * 定案），(2) 設計稿的 19 個槽位會落在 4 欄 × 5 列的哪一格 —— 那個「缺一格」的位置就是
+ * 判斷蛇形方向的唯一證據，(3) 走線是**一條**連續折線，帶著設計稿的 32 圓角與向下箭頭。
+ * Three things are pinned: (1) the walk is **row-major (an S shape)** — row 1 left to right,
+ * row 2 right to left (the user's decision), (2) which of the 4×5 grid cells the mock's 19
+ * slots occupy — the single gap is the only evidence for the walking direction — and (3) the
+ * track is **one** continuous polyline carrying the mock's 32-radius fillets and a downward
+ * arrow.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -17,14 +18,19 @@ import {
   cellOrigin,
   columnCentre,
   computeRosterLayout,
+  rowCentre,
   slotAt,
+  trackLanes,
 } from '../src/ui/serpentine';
 import { MELTING } from '../src/core/design';
 
 /** 設計稿的格網：4 欄 × 5 列。 */
 const { cols: COLS, rows: ROWS, cellWidth: CW, cellHeight: CH } = MELTING;
-const { topLane, bottomLane, exitX, cornerRadius, strokeWidth, arrowLength, arrowHalfWidth } =
+const { leftLane, laneInset, exitInset, cornerRadius, strokeWidth, arrowLength, arrowHalfWidth } =
   MELTING.track;
+
+/** 4 欄格網的右走道（格網右緣 337 內縮 14）。 */
+const RIGHT_LANE_4 = COLS * CW - laneInset;
 
 /** 把 SVG `d` 拆成 `[指令, ...數字]`，讓斷言可以按語意寫而不是比字串。 */
 function parsePath(d: string): { cmd: string; args: number[] }[] {
@@ -45,36 +51,36 @@ function parsePath(d: string): { cmd: string; args: number[] }[] {
   return out;
 }
 
-describe('slotAt — 直行蛇形 / column-major walk', () => {
-  it('walks the first column top to bottom', () => {
-    expect(slotAt(0, 5)).toEqual({ col: 0, row: 0 });
-    expect(slotAt(2, 5)).toEqual({ col: 0, row: 2 });
-    expect(slotAt(4, 5)).toEqual({ col: 0, row: 4 });
+describe('slotAt — 橫向蛇形 / row-major S walk', () => {
+  it('walks the first row left to right', () => {
+    expect(slotAt(0, 4)).toEqual({ col: 0, row: 0 });
+    expect(slotAt(2, 4)).toEqual({ col: 2, row: 0 });
+    expect(slotAt(3, 4)).toEqual({ col: 3, row: 0 });
   });
 
-  it('turns around and walks the second column bottom to top', () => {
-    expect(slotAt(5, 5)).toEqual({ col: 1, row: 4 });
-    expect(slotAt(7, 5)).toEqual({ col: 1, row: 2 });
-    expect(slotAt(9, 5)).toEqual({ col: 1, row: 0 });
+  it('turns around and walks the second row right to left', () => {
+    expect(slotAt(4, 4)).toEqual({ col: 3, row: 1 });
+    expect(slotAt(5, 4)).toEqual({ col: 2, row: 1 });
+    expect(slotAt(7, 4)).toEqual({ col: 0, row: 1 });
   });
 
-  it('resumes top to bottom on the third column', () => {
-    expect(slotAt(10, 5)).toEqual({ col: 2, row: 0 });
-    expect(slotAt(14, 5)).toEqual({ col: 2, row: 4 });
+  it('resumes left to right on the third row', () => {
+    expect(slotAt(8, 4)).toEqual({ col: 0, row: 2 });
+    expect(slotAt(11, 4)).toEqual({ col: 3, row: 2 });
   });
 
-  it('advances one column every `rows` slots, never skipping one', () => {
+  it('advances one row every `cols` slots, never skipping one', () => {
     for (let index = 0; index < 60; index += 1) {
-      expect(slotAt(index, 5).col).toBe(Math.floor(index / 5));
+      expect(slotAt(index, 4).row).toBe(Math.floor(index / 4));
     }
   });
 
-  it('respects a non-default row count', () => {
-    /* 3 列一欄：偶數欄由上而下，奇數欄由下而上。 */
+  it('respects a non-default column count', () => {
+    /* 3 欄一列：偶數列由左而右，奇數列由右而左。 */
     expect(slotAt(0, 3)).toEqual({ col: 0, row: 0 });
-    expect(slotAt(2, 3)).toEqual({ col: 0, row: 2 });
-    expect(slotAt(3, 3)).toEqual({ col: 1, row: 2 });
-    expect(slotAt(5, 3)).toEqual({ col: 1, row: 0 });
+    expect(slotAt(2, 3)).toEqual({ col: 2, row: 0 });
+    expect(slotAt(3, 3)).toEqual({ col: 2, row: 1 });
+    expect(slotAt(5, 3)).toEqual({ col: 0, row: 1 });
   });
 });
 
@@ -88,10 +94,19 @@ describe('格網幾何 / grid geometry', () => {
     expect(cellCentre(1, 2)).toEqual({ x: CW + CW / 2, y: 2 * CH + CH / 2 });
   });
 
-  it('puts the column centre exactly on the cell centre', () => {
+  it('puts the column and row centres exactly on the cell centres', () => {
     for (let col = 0; col < COLS; col += 1) {
       expect(columnCentre(col)).toBe(cellCentre(col, 0).x);
     }
+    for (let row = 0; row < ROWS; row += 1) {
+      expect(rowCentre(row)).toBe(cellCentre(0, row).y);
+    }
+  });
+
+  it('derives the lanes: left from the first column centre, right from the grid edge', () => {
+    expect(trackLanes(COLS)).toEqual({ leftLane, rightLane: RIGHT_LANE_4 });
+    /* 欄數改變時右走道跟著格網右緣走。 */
+    expect(trackLanes(2).rightLane).toBe(2 * CW - laneInset);
   });
 });
 
@@ -104,25 +119,25 @@ describe('computeRosterLayout — 設計稿的 19 格 / the mock’s 19 slots', 
     expect(layout.slots).toHaveLength(19);
   });
 
-  it('leaves its single gap in column 4, row 1 — the signature of a column-major walk', () => {
+  it('leaves its single gap in the last row, column 4 — the signature of a row-major walk', () => {
     const layout = computeRosterLayout({ count: 19 });
 
     const perRow = [0, 1, 2, 3, 4].map(
       (row) => layout.slots.filter((slot) => slot.row === row).length,
     );
 
-    /* 第 1 列只有 3 格、其餘各 4 格。橫向蛇形會把空位留在**最後一列**，與此不符。 */
-    expect(perRow).toEqual([3, 4, 4, 4, 4]);
-    expect(layout.slots.some((slot) => slot.col === 3 && slot.row === 0)).toBe(false);
+    /* 前 4 列各 4 格、第 5 列 3 格。直行蛇形會把空位留在**第 1 列**，與此不符。 */
+    expect(perRow).toEqual([4, 4, 4, 4, 3]);
+    expect(layout.slots.some((slot) => slot.col === 3 && slot.row === 4)).toBe(false);
   });
 
   it('fills the grid completely once the chain reaches 20', () => {
     const layout = computeRosterLayout({ count: 20 });
 
     expect(layout.slots).toHaveLength(20);
-    expect(layout.slots.some((slot) => slot.col === 3 && slot.row === 0)).toBe(true);
-    /* 第 4 欄是奇數欄，由下而上，所以第 20 顆停在第 4 欄的最上面。 */
-    expect(layout.slots.at(-1)).toMatchObject({ col: 3, row: 0 });
+    expect(layout.slots.some((slot) => slot.col === 3 && slot.row === 4)).toBe(true);
+    /* 第 5 列是偶數列，由左而右，所以第 20 顆停在第 5 列的最右邊。 */
+    expect(layout.slots.at(-1)).toMatchObject({ col: 3, row: 4 });
   });
 
   it('numbers the slots from zero, in chain order, with no duplicate cells', () => {
@@ -141,19 +156,16 @@ describe('走線 / the track', () => {
     expect(computeRosterLayout({ count: 0 }).track).toBeNull();
   });
 
-  it('spans exactly the columns the chain uses', () => {
-    expect(computeRosterLayout({ count: 3 }).track?.columns).toEqual([columnCentre(0)]);
-    expect(computeRosterLayout({ count: 6 }).track?.columns).toEqual([
-      columnCentre(0),
-      columnCentre(1),
-    ]);
-    expect(computeRosterLayout({ count: 19 }).track?.columns).toHaveLength(4);
+  it('passes through every row centre of the grid', () => {
+    const centres = computeRosterLayout({ count: 19 }).track?.rowCentres;
+
+    expect(centres).toEqual([0, 1, 2, 3, 4].map(rowCentre));
   });
 
-  it('starts in the top lane of the first column', () => {
+  it('starts on the left lane of the first row', () => {
     const [first] = parsePath(computeRosterLayout({ count: 19 }).track?.path ?? '');
 
-    expect(first).toEqual({ cmd: 'M', args: [columnCentre(0), topLane] });
+    expect(first).toEqual({ cmd: 'M', args: [leftLane, rowCentre(0)] });
   });
 
   it('is one continuous polyline: a single M, then only L and A', () => {
@@ -166,12 +178,12 @@ describe('走線 / the track', () => {
     }
   });
 
-  it('emits two fillets per column transition, at the mock’s 32 radius', () => {
+  it('emits two fillets per row transition, at the mock’s 32 radius', () => {
     const arcs = parsePath(computeRosterLayout({ count: 19 }).track?.path ?? '').filter(
       (command) => command.cmd === 'A',
     );
 
-    expect(arcs).toHaveLength(2 * (4 - 1));
+    expect(arcs).toHaveLength(2 * (ROWS - 1));
     for (const arc of arcs) {
       expect(arc.args[0]).toBe(cornerRadius);
       expect(arc.args[1]).toBe(cornerRadius);
@@ -181,30 +193,29 @@ describe('走線 / the track', () => {
     }
   });
 
-  it('sweeps downward turns one way and upward turns the other, never mixed', () => {
+  it('sweeps rightward turns one way and leftward turns the other, never mixed', () => {
     const arcs = parsePath(computeRosterLayout({ count: 19 }).track?.path ?? '').filter(
       (command) => command.cmd === 'A',
     );
     const sweeps = arcs.map((arc) => arc.args[4]);
 
-    /* 第 1 欄往下（sweep 0）→ 2 個；第 2 欄往上（sweep 1）→ 2 個；第 3 欄往下 → 2 個。 */
-    expect(sweeps).toEqual([0, 0, 1, 1, 0, 0]);
+    /* 第 1 列往右（sweep 1）→ 2 個；第 2 列往左（sweep 0）→ 2 個；如此類推。 */
+    expect(sweeps).toEqual([1, 1, 0, 0, 1, 1, 0, 0]);
   });
 
-  it('keeps every x on the grid: a column centre, a fillet end, or the exit lane', () => {
+  it('keeps every x on the grid: a lane, or a lane inset by one fillet radius', () => {
     /*
-     * 這條守住「走線不會飄出格網」：每一個水平座標都必須是欄中心、欄中心加減一個圓角
-     * 半徑（＝走道那一段的端點），或者出欄線本身。
-     * Guards against the track drifting off-grid: every x must be a column centre, a centre
-     * plus or minus one fillet radius (the lane run's endpoints), or the exit line itself.
+     * 這條守住「走線不會飄出格網」：每一個水平座標都必須是左／右走道，或走道內縮一個
+     * 圓角半徑（＝列上那一段的端點）。
+     * Guards against the track drifting off-grid: every x must be a lane, or a lane inset
+     * by one fillet radius (the row run's endpoints).
      */
     const commands = parsePath(computeRosterLayout({ count: 19 }).track?.path ?? '');
-    const centres = [0, 1, 2, 3].map(columnCentre);
     const allowed = new Set([
-      ...centres,
-      ...centres.map((centre) => centre - cornerRadius),
-      ...centres.map((centre) => centre + cornerRadius),
-      exitX,
+      leftLane,
+      RIGHT_LANE_4,
+      leftLane + cornerRadius,
+      RIGHT_LANE_4 - cornerRadius,
     ]);
 
     for (const command of commands) {
@@ -214,60 +225,68 @@ describe('走線 / the track', () => {
     }
   });
 
-  it('exits right and descends the lane, ending on the bottom lane', () => {
+  it('descends the right lane to the exit line, ending just inside the grid bottom', () => {
     const commands = parsePath(computeRosterLayout({ count: 19 }).track?.path ?? '');
     const last = commands.at(-1);
+    const exitY = ROWS * CH - exitInset;
 
-    expect(last).toEqual({ cmd: 'L', args: [exitX, bottomLane] });
-    /* 倒數第二個指令是「向右出欄」，同一條上走道。 */
-    expect(commands.at(-2)).toEqual({ cmd: 'L', args: [exitX, topLane] });
+    expect(last).toEqual({ cmd: 'L', args: [RIGHT_LANE_4, exitY] });
+    /* 倒數第二個指令是最後一列的橫走，同一條右走道 —— 出欄是純垂直下降。 */
+    expect(commands.at(-2)).toEqual({ cmd: 'L', args: [RIGHT_LANE_4, rowCentre(4)] });
   });
 
-  it('locks the whole 4-column route to the mock’s decoded geometry', () => {
+  it('locks the whole 4-column route to the mirrored geometry', () => {
     /*
-     * 這條是「設計稿合約」：把整條 `d` 寫死。它來自 `Arrow 1`（`1408:2184`）解出的
-     * stroke geometry，任何改動都應該是有意識的，而不是順手漂移。
-     * The design contract: the entire `d`, frozen. It comes from the stroke geometry decoded
-     * out of the mock's `Arrow 1`, so any change here must be deliberate.
+     * 這條是「幾何合約」：把整條 `d` 寫死。它由設計稿 `Arrow 1`（`1408:2184`）的內縮關係
+     * 沿對角鏡射而來（見 `core/design.ts` 的 `MELTING.track`），任何改動都應該是有意識的，
+     * 而不是順手漂移。
+     * The geometry contract: the entire `d`, frozen. It mirrors the inset relations of the
+     * mock's `Arrow 1` (`1408:2184`) onto the row-major walk (see `MELTING.track` in
+     * `core/design.ts`), so any change here must be deliberate.
      */
     expect(computeRosterLayout({ count: 19 }).track?.path).toBe(
       [
-        'M 42.125 35',
-        'L 42.125 426',
-        'A 32 32 0 0 0 74.125 458',
-        'L 94.375 458',
-        'A 32 32 0 0 0 126.375 426',
-        'L 126.375 67',
-        'A 32 32 0 0 1 158.375 35',
-        'L 178.625 35',
-        'A 32 32 0 0 1 210.625 67',
-        'L 210.625 426',
-        'A 32 32 0 0 0 242.625 458',
-        'L 262.875 458',
-        'A 32 32 0 0 0 294.875 426',
-        'L 294.875 35',
-        'L 364 35',
-        'L 364 458',
+        'M 29.925 47.2',
+        'L 291 47.2',
+        'A 32 32 0 0 1 323 79.2',
+        'L 323 109.6',
+        'A 32 32 0 0 1 291 141.6',
+        'L 61.925 141.6',
+        'A 32 32 0 0 0 29.925 173.6',
+        'L 29.925 204',
+        'A 32 32 0 0 0 61.925 236',
+        'L 291 236',
+        'A 32 32 0 0 1 323 268',
+        'L 323 298.4',
+        'A 32 32 0 0 1 291 330.4',
+        'L 61.925 330.4',
+        'A 32 32 0 0 0 29.925 362.4',
+        'L 29.925 392.8',
+        'A 32 32 0 0 0 61.925 424.8',
+        'L 323 424.8',
+        'L 323 469',
       ].join(' '),
     );
   });
 
-  it('draws a single-column chain without any turn', () => {
-    const track = computeRosterLayout({ count: 4 }).track;
+  it('draws a single-row chain without any turn', () => {
+    const track = computeRosterLayout({ count: 4, cols: 4, rows: 1 }).track;
+    const exitY = 1 * CH - exitInset;
 
     expect(parsePath(track?.path ?? '').filter((c) => c.cmd === 'A')).toHaveLength(0);
     expect(track?.path).toBe(
-      ['M 42.125 35', 'L 42.125 458', 'L 364 458'].join(' '),
+      [`M ${String(leftLane)} 47.2`, `L ${String(RIGHT_LANE_4)} 47.2`, `L ${String(RIGHT_LANE_4)} ${String(exitY)}`].join(' '),
     );
   });
 
   it('places the arrowhead with its tip on the end of the route', () => {
+    const exitY = ROWS * CH - exitInset;
     const commands = parsePath(computeRosterLayout({ count: 19 }).track?.arrow ?? '');
 
     expect(commands).toEqual([
-      { cmd: 'M', args: [exitX - arrowHalfWidth, bottomLane - arrowLength] },
-      { cmd: 'L', args: [exitX, bottomLane] },
-      { cmd: 'L', args: [exitX + arrowHalfWidth, bottomLane - arrowLength] },
+      { cmd: 'M', args: [RIGHT_LANE_4 - arrowHalfWidth, exitY - arrowLength] },
+      { cmd: 'L', args: [RIGHT_LANE_4, exitY] },
+      { cmd: 'L', args: [RIGHT_LANE_4 + arrowHalfWidth, exitY - arrowLength] },
     ]);
   });
 
@@ -280,12 +299,11 @@ describe('走線 / the track', () => {
     expect(middle.args[0]).toBe(last.args[0] - arrowHalfWidth);
   });
 
-  it('keeps the arrow inside the panel even though it overshoots the content box', () => {
-    /* 尖端右翼會超出內容區 367，但仍在面板 435 之內 —— 設計稿也是如此。 */
-    const right = exitX + arrowHalfWidth;
+  it('keeps the arrow inside the content box', () => {
+    /* 走線貼著格網右緣走，整支箭頭（含兩翼）都留在內容區 367 之內。 */
+    const right = RIGHT_LANE_4 + arrowHalfWidth;
 
-    expect(right).toBeGreaterThan(MELTING.content.width);
-    expect(right).toBeLessThan(MELTING.content.width + MELTING.laneWidth);
+    expect(right).toBeLessThan(MELTING.content.width);
   });
 
   it('uses the mock’s stroke weight of 5', () => {
@@ -310,7 +328,7 @@ describe('computeRosterLayout — 已解鎖前綴 / unlocked prefix', () => {
 
 describe('computeRosterLayout — 欄數 / columns', () => {
   it('only walks as many columns as the chain needs', () => {
-    /* 3 顆填不滿第一欄，所以只用到 1 欄，槽位不會掉到畫面外。 */
+    /* 3 顆填不滿第一列，所以只用到 1 欄，槽位不會掉到畫面外。 */
     expect(computeRosterLayout({ count: 3 }).cols).toBe(1);
     expect(computeRosterLayout({ count: 6 }).cols).toBe(2);
     expect(computeRosterLayout({ count: 19 }).cols).toBe(4);
@@ -326,8 +344,9 @@ describe('computeRosterLayout — 欄數 / columns', () => {
 
     expect(layout.cols).toBe(2);
     expect(layout.rows).toBe(5);
-    expect(layout.slots.at(-1)).toMatchObject({ col: 1, row: 0 });
-    expect(layout.track?.columns).toEqual([columnCentre(0), columnCentre(1)]);
+    /* 第 5 列是偶數列，由左而右，最後一顆落在第 2 欄。 */
+    expect(layout.slots.at(-1)).toMatchObject({ col: 1, row: 4 });
+    expect(layout.track?.rowCentres).toEqual([0, 1, 2, 3, 4].map(rowCentre));
   });
 });
 

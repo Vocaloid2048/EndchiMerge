@@ -12,13 +12,18 @@
  *
  * 三個設計約束 / Three design constraints:
  *
- * 1. **未解鎖顯示 `???`**（design.md D5），解鎖後永久保留。這一支不解鎖任何東西 ——
- *    它只是把 `game/progress.ts` 的結果畫出來。
- *    Locked cells show `???` and stay unlocked forever once revealed. This module unlocks
- *    nothing; it only draws what `game/progress.ts` reports.
+ * 1. **未解鎖顯示灰格 ＋ 中央的 `?`**（design.md D5 ＋ 使用者定案），解鎖後永久保留。
+ *    這一支不解鎖任何東西 —— 它只是把 `game/progress.ts` 的結果畫出來。
+ *    Locked cells show a grey tile with a centred `?` (design.md D5 + the user's decision),
+ *    and stay unlocked forever once revealed. This module unlocks nothing; it only draws what
+ *    `game/progress.ts` reports.
  * 2. **素材等比放入、不拉伸**（D26）。素材已在導出時正規化過（512×512、body 304、
  *    body 中心 (256, 328)），所以所有角色共用同一個縮放就會對齊。
- * 3. **連接線由演算法給**，這裡只負責畫；走位規則不重算。
+ * 3. **素材上覆一層透明護層**（使用者定案）：長按／右鍵落在護層上而不是 `<img>` 上，
+ *    瀏覽器的「儲存圖片」就不會被觸發。
+ *    A transparent shield sits over the art (the user's decision): long-presses and
+ *    right-clicks land on the shield instead of the `<img>`, so the browser's "save image"
+ *    is never offered.
  */
 
 import type { LevelDef } from '../core/types';
@@ -97,7 +102,14 @@ export function createMeltingList(options: MeltingListOptions): MeltingList {
      */
     if (!unlocked.has(level.id)) {
       node.classList.add('roster-cell--locked');
-      node.textContent = '???';
+      /*
+       * `?` 是獨立一層（使用者定案：灰方格**中央**一個問號），而不是把 `???` 塞進格子 ——
+       * 獨立元素才能保證永遠置中、也永遠蓋在灰格之上。
+       * The `?` is its own layer (the user's decision: a single question mark **centred** on
+       * the grey tile), rather than text stuffed into the cell — a dedicated element stays
+       * centred above the tile no matter what.
+       */
+      node.append(el('span', 'roster-cell__mark', '?'));
       node.setAttribute('aria-label', `${level.name}，尚未解鎖`);
       return node;
     }
@@ -110,6 +122,8 @@ export function createMeltingList(options: MeltingListOptions): MeltingList {
       /* `sprite-outline` 沿 alpha 剪影描白邊（design.md §3.2）。 */
       image.className = 'roster-cell__img sprite-outline';
       image.decoding = 'async';
+      /* 拖曳素材同樣能繞過護層觸發儲存，直接關掉。 */
+      image.draggable = false;
       /* 素材載入後才失敗（例如快取被清）時退回佔位色塊。 */
       image.addEventListener('error', (): void => art.replaceChildren(buildFallback(level)), {
         once: true,
@@ -123,6 +137,19 @@ export function createMeltingList(options: MeltingListOptions): MeltingList {
 
     node.title = level.name;
     node.append(art);
+
+    /*
+     * 透明護層（使用者定案）：整格罩一層透明的、會接住指標事件的元素，長按／右鍵落在
+     * 護層上而不是 `<img>` 上，瀏覽器就不會提供「儲存圖片」。放在最後 append，永遠蓋在
+     * 素材之上；外觀是全透明的，畫面看不出它存在。
+     * The transparent shield (the user's decision): a transparent, pointer-catching element
+     * covers the whole cell, so long-presses and right-clicks land on it instead of the
+     * `<img>` and the browser never offers "save image". Appended last, it always sits above
+     * the art; being fully transparent it is invisible on screen.
+     */
+    const shield = el('span', 'roster-cell__shield');
+    shield.setAttribute('aria-hidden', 'true');
+    node.append(shield);
     return node;
   }
 

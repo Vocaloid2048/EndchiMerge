@@ -2,20 +2,19 @@
  * MELTING LIST 的蛇形佈局。
  * Serpentine layout for the MELTING LIST.
  *
- * 設計稿（`1408:2234` `Group 451`）的 19 個槽位推導出：內容區 367×472、**4 欄 × 5 列**、
- * 欄距 84.25、列距 94.4，而且行進方向是**直行**（column-major）而不是橫向：
- * 先由上而下走完第 1 欄，再由下而上走第 2 欄，如此類推。
- * The mock's 19 slots imply a 367×472 content box, **4 columns × 5 rows**, pitched 84.25 by
- * 94.4, walked **down columns** rather than across rows: down column 1, up column 2, and so
- * on.
+ * **走法已由使用者定案改為橫向蛇形（S 形）**：第一列由左而右、第二列由右而左，如此類推。
+ * 設計稿原本推導的是**直行**蛇形（先走完第 1 欄再走第 2 欄），但使用者要求改成讀起來像
+ * 英文字母 S 的橫向走法 —— 那也是一般圖鑑「第一行從左邊開始到右邊」的直覺。
+ * **The walk is row-major (an S shape), per the user's decision**: row 1 runs left to right,
+ * row 2 right to left, and so on. The mock originally implied a **column-major** walk (down
+ * column 1, up column 2), but the user asked for the S-shaped, reading-order walk — which is
+ * also how a roster "first row from left to right" reads naturally.
  *
- * 判斷依據是那個「缺一格」的位置：19 格填進 4×5 的格網時，直行蛇形會在第 1 列留下唯一
- * 的空位（＝第 4 欄的第 1 列），橫向蛇形則會把空位留在最後一列。設計稿的第 1 列正好只有
- * 3 格、其餘 4 格 —— 與直行蛇形完全吻合。
- * The tell is where the single gap falls: with 19 slots in a 4×5 grid, a column-major walk
- * leaves the gap in row 1 (column 4, row 1), while a row-major walk leaves it in the last
- * row. The mock's first row holds three slots and the rest hold four, exactly matching a
- * column-major walk.
+ * 走線的兩個內縮關係仍鏡像設計稿（見 `core/design.ts` 的 `MELTING.track`），只是沿對角
+ * 鏡射到橫向：左走道貼著首欄中心內縮、右走道貼著格網右緣內縮、出欄線貼著格網底緣內縮。
+ * The track's inset relations still mirror the mock (see `MELTING.track` in `core/design.ts`),
+ * mapped onto the horizontal walk: the left lane insets from the first column's centre, the
+ * right lane insets from the grid's right edge, and the exit line insets from the grid bottom.
  *
  * 這裡**只有幾何**，不碰 DOM：純函式才能把「N=3 / 5 / 10 / 19 / 20 各長怎樣」全部寫成
  * 單元測試，而不是靠瞇著眼看畫面。座標單位是**設計稿像素**，原點在內容區左上角。
@@ -39,20 +38,18 @@ export interface RosterSlot {
  * 蛇形走線：一筆畫的路徑。
  * The serpentine track: one single path.
  *
- * 設計稿把它畫成**一條**連續折線（`1408:2184` `Arrow 1`），而不是每兩格一段。看起來
- * 一節一節是因為整條線畫在素材之下、只有縫隙露出；轉彎處那四個 32 圓角就是「它其實是連
- * 續的」的證據。詳見 `core/design.ts` 的 `MELTING.track`。
- * The mock draws it as **one** continuous polyline, not one segment per pair. The broken
- * look comes from the path sitting under the art, so only the gaps show through; the four
- * 32-radius fillets at the turns are the evidence that it is continuous.
+ * 整條路徑仍是**一條**連續折線：整條線畫在素材之下、只有縫隙露出來，轉彎處的圓角就是
+ * 「它其實是連續的」的證據。
+ * The route is still **one** continuous polyline: the path sits under the art, so only the
+ * gaps show through; the fillets at the turns are the evidence that it is continuous.
  */
 export interface RosterTrack {
   /** 走線的 SVG `d`（內容區座標）。 */
   path: string;
   /** 箭頭的 SVG `d`：開放 V 形，尖端落在走線終點。 */
   arrow: string;
-  /** 走線經過的欄中心 x；供測試與除錯斷言。 */
-  columns: number[];
+  /** 走線經過的列中心 y；供測試與除錯斷言。 */
+  rowCentres: number[];
 }
 
 export interface RosterLayout {
@@ -63,10 +60,10 @@ export interface RosterLayout {
   /** 走線；鏈長為 0 時是 `null`。 */
   track: RosterTrack | null;
   /**
-   * 已解鎖的前綴長度，夾到 `[0, count]`。渲染端用它決定哪些格子要顯示 `???`，
+   * 已解鎖的前綴長度，夾到 `[0, count]`。渲染端用它決定哪些格子要顯示 `?`，
    * 以及哪一格是「下一個可解鎖的目標」。
    * The unlocked prefix length, clamped. The renderer uses it to decide which cells show
-   * `???` and which one is the next target.
+   * `?` and which one is the next target.
    */
   unlockedCount: number;
 }
@@ -101,18 +98,48 @@ export function columnCentre(col: number): number {
   return col * MELTING.cellWidth + MELTING.cellWidth / 2;
 }
 
+/** 某一列的中心 y。走線經過列中心，與欄中心同一套規則。 */
+export function rowCentre(row: number): number {
+  return row * MELTING.cellHeight + MELTING.cellHeight / 2;
+}
+
 /**
- * 直行蛇形的座標：`index → (col, row)`。
- * The column-major walk: `index → (col, row)`.
+ * 橫向蛇形的座標：`index → (col, row)`。
+ * The row-major walk: `index → (col, row)`.
  *
- * 偶數欄由上而下、奇數欄由下而上。這條式子就是整個名冊的「走位規則」，其他地方不重算。
- * Even columns run top to bottom, odd columns bottom to top. This expression is the roster's
+ * 偶數列由左而右、奇數列由右而左。這條式子就是整個名冊的「走位規則」，其他地方不重算。
+ * Even rows run left to right, odd rows right to left. This expression is the roster's
  * entire walking rule; nothing else re-derives it.
  */
-export function slotAt(index: number, rows: number): { col: number; row: number } {
-  const col = Math.floor(index / rows);
-  const within = index % rows;
-  return { col, row: col % 2 === 0 ? within : rows - 1 - within };
+export function slotAt(index: number, cols: number): { col: number; row: number } {
+  const safeCols = Math.max(1, Math.trunc(cols));
+  const row = Math.floor(index / safeCols);
+  const within = index % safeCols;
+  return { col: row % 2 === 0 ? within : safeCols - 1 - within, row };
+}
+
+/**
+ * 由欄數推導左／右走道的 x。
+ * Derive the left and right lane X from the column count.
+ *
+ * 內縮關係鏡像設計稿的直行版（見 `MELTING.track` 的註解）：左走道 ＝ 首欄中心再往左
+ * 12.2（與首列中心到上走道的 12.2 相同）；右走道 ＝ 格網右緣內縮 14（與直行版下走道
+ * 距格網底緣的 14 相同）。欄數改變時右走道自動跟著貼合格網右緣。
+ * The insets mirror the mock's column-major track (see the `MELTING.track` comment): the
+ * left lane sits 12.2 inside the first column's centre (the same 12.2 as the mock's top lane
+ * to the first row's centre), and the right lane sits 14 inside the grid's right edge (the
+ * same 14 as the mock's bottom lane to the grid bottom). The right lane follows the column
+ * count automatically.
+ *
+ * @param cols 實際使用的欄數 / The columns actually used.
+ * @returns 左、右走道的 x（內容區座標）。
+ */
+export function trackLanes(cols: number): { leftLane: number; rightLane: number } {
+  const { leftLane, laneInset } = MELTING.track;
+  const safeCols = Math.max(1, Math.trunc(cols));
+
+  const gridRight = safeCols * MELTING.cellWidth;
+  return { leftLane, rightLane: gridRight - laneInset };
 }
 
 /** 把座標寫成 SVG 用的短字串，順手砍掉浮點尾巴。 */
@@ -121,138 +148,78 @@ function num(value: number): string {
 }
 
 /**
- * 由列數推導上／下走道的 y。
- * Derive the top and bottom lane Y from the row count.
- *
- * 設計稿的 5 列格網給出上走道 35、下走道 458，而 5 列共佔 `5 × 94.4 ≈ 472`。兩個值其實是
- * 「貼著格網邊緣內縮一點」：
- *  - 下走道 ＝ 格網底部內縮 `laneInset` → `458 ≈ 472 − 14`
- *  - 上走道 ＝ 第一列中心往上 `cellHeight / 2 − laneInset` → `35 ≈ 47.2 − 12`
- * 把這兩個關係寫成式子，列數改變時走道自動跟著貼合。
- * The mock's 5-row grid gives lanes at 35 and 458, and 5 rows span `5 × 94.4 ≈ 472`. Both are
- * simply "a little inside the grid's edge":
- *  - bottom lane = grid bottom inset by `laneInset` → `458 ≈ 472 − 14`
- *  - top lane = first row's centre raised by `cellHeight / 2 − laneInset` → `35 ≈ 47.2 − 12`
- * Expressing those relations keeps the lanes tight to the grid at any row count.
- *
- * @param rows 實際使用的列數 / The rows actually used.
- * @returns 上走道與下走道的 y（內容區座標）。
- */
-export function trackLanes(rows: number): { topLane: number; bottomLane: number } {
-  const { topLane, bottomLane } = MELTING.track;
-  const safeRows = Math.max(1, Math.trunc(rows));
-
-  /* 從設計稿的 5 列值反推「內縮量」，其餘列數沿用同一個內縮。 */
-  const referenceBottom = MELTING.rows * MELTING.cellHeight;
-  const laneInset = referenceBottom - bottomLane;
-
-  const gridBottom = safeRows * MELTING.cellHeight;
-  const derivedBottom = gridBottom - laneInset;
-
-  /*
-   * 上走道：設計稿把它放在第一列中心再往上約 12（`cellHeight/2 − laneInset`）。
-   * Top lane: the mock places it about 12 above the first row's centre.
-   */
-  const referenceTopOffset = topLane - MELTING.cellHeight / 2;
-  const derivedTop = MELTING.cellHeight / 2 + referenceTopOffset;
-
-  return { topLane: derivedTop, bottomLane: derivedBottom };
-}
-
-/**
  * 組出走線。
  * Build the track.
  *
- * 走法就是蛇形本身：第 0 欄由上而下、第 1 欄由下而上，如此類推，走線一律通過**欄中心**，
- * 所以線在縫隙裡剛好落在兩格之間。轉彎不是 90° 尖角，而是兩個 32 圓角的 U-turn；最後一欄
- * 走完之後向右出欄，沿右側走道落到下走道，以向下箭頭收尾。
- * The route is the serpentine itself: down column 0, up column 1, and so on, always through
- * the **column centres**, so the line falls exactly in the gaps. Turns are two 32-radius
- * fillets rather than 90° corners; after the final column the path exits right and descends
- * the right-hand lane, ending in a downward arrow.
+ * 走法就是橫向蛇形本身：第 0 列由左而右、第 1 列由右而左，如此類推，走線一律通過**列
+ * 中心**，所以線在縫隙裡剛好落在兩格之間。轉彎不是 90° 尖角，而是兩個 32 圓角的 U-turn；
+ * 最後一列走完之後沿走道落到格網底緣附近的出欄線，以向下箭頭收尾。
+ * The route is the serpentine itself: along row 0 left to right, back along row 1 right to
+ * left, and so on, always through the **row centres**, so the line falls exactly in the gaps.
+ * Turns are two 32-radius fillets rather than 90° corners; after the final row the path
+ * descends its lane to the exit line just above the grid bottom and finishes in a downward
+ * arrow.
  *
- * **走道的 y 由 `rows` 推導**，不是寫死的。設計稿的 35 / 458 是 5 列格網的值；列數變少時若
- * 沿用，線會拖到格子下方一大截（蛇形看起來「多走了一段」）。推導式讓任何列數都貼著格網。
- * **The lane Y values are derived from `rows`**, not hardcoded. The mock's 35 / 458 belong to a
- * 5-row grid; keeping them for fewer rows would drag the line far below the last row, making the
- * serpentine look like it walks extra steps. Deriving keeps any row count tight to the grid.
- *
- * SVG 的 `sweep-flag` 只有兩個值，這裡用「往下走就是 0、往上走就是 1」的通則決定 ——
- * 直行蛇形裡同一個 U-turn 的兩個圓角一定同向，所以一個旗標就夠。
- * The SVG sweep flag has only two values; the rule here is "downward = 0, upward = 1".
- * Both fillets of one U-turn always share a direction, so a single flag suffices.
+ * SVG 的 `sweep-flag` 通則：「往右走就是 1、往左走就是 0」。同一個 U-turn 的兩個圓角
+ * 一定同向，所以一個旗標就夠。
+ * The SVG sweep rule: "rightward = 1, leftward = 0". Both fillets of one U-turn always share
+ * a direction, so a single flag suffices.
  */
 function buildTrack(cols: number, rows: number): RosterTrack | null {
   if (cols < 1) return null;
 
   const pitch = MELTING.cellWidth;
-  const { cornerRadius, arrowLength, arrowHalfWidth } = MELTING.track;
-  const { topLane, bottomLane } = trackLanes(rows);
+  const { cornerRadius, arrowLength, arrowHalfWidth, exitInset } = MELTING.track;
+  const { leftLane, rightLane } = trackLanes(cols);
 
-  /*
-   * 出欄的 x：**預設用設計稿的 364**，但只要最後一欄的右緣超過它（欄數多時），就改貼在最後
-   * 一欄外側。設計稿的 364 是 4 欄全用滿時的值；欄數少時它會離最後一欄很遠，出欄線橫拉一大段
-   * 再垂直落下 —— 使用者看到的「一條直線」正是這個。
-   * The exit X **defaults to the mock's 364**, but moves out to hug the last column whenever that
-   * column's right edge passes it. The mock's 364 assumes all 4 columns; with fewer, it sits far
-   * from the last column, so the exit stretches across a long run before dropping — the "straight
-   * line" the user saw.
-   *
-   * 這樣「用滿 4 欄」時逐字等於設計稿（既有測試釘住的值不變），欄數少時則自動收窄。
-   * This keeps the all-4-column case byte-identical to the mock (the value the existing tests pin),
-   * while narrowing automatically for fewer columns.
-   */
-  const lastColRight = cols * pitch;
-  const derivedExit = Math.max(lastColRight + 6, Math.min(MELTING.track.exitX, MELTING.content.width - 3));
+  /* 出欄線 y：格網底緣內縮（設計稿直行版出欄線 364 ＝ 內容區右緣 367 − 3 的鏡像）。 */
+  const exitY = rows * MELTING.cellHeight - exitInset;
 
   /* 圓角半徑不能吃掉整個欄距，否則同一組 U-turn 的兩個圓角會互相穿過。 */
   const radius = Math.min(cornerRadius, pitch / 2 - 1);
 
-  const parts: string[] = [`M ${num(columnCentre(0))} ${num(topLane)}`];
+  const parts: string[] = [`M ${num(leftLane)} ${num(rowCentre(0))}`];
 
-  for (let col = 0; col < cols; col += 1) {
-    const x = columnCentre(col);
-    const down = col % 2 === 0;
-    const lane = down ? bottomLane : topLane;
+  for (let row = 0; row < rows; row += 1) {
+    const y = rowCentre(row);
+    const rightward = row % 2 === 0;
+    const lane = rightward ? rightLane : leftLane;
 
-    /* 最後一欄走完就直接出欄，不必再留圓角的空間。 */
-    if (col === cols - 1) {
-      parts.push(`L ${num(x)} ${num(lane)}`);
+    /* 最後一列走完就直接出欄，不必再留圓角的空間。 */
+    if (row === rows - 1) {
+      parts.push(`L ${num(lane)} ${num(y)}`);
       break;
     }
 
-    const next = columnCentre(col + 1);
-    const sweep = down ? 0 : 1;
+    const nextY = rowCentre(row + 1);
+    const sweep = rightward ? 1 : 0;
     const arc = `A ${num(radius)} ${num(radius)} 0 0 ${String(sweep)}`;
 
-    /* 垂直段收在圓角起點，再沿走道橫過一欄、轉上去。 */
-    parts.push(`L ${num(x)} ${num(down ? lane - radius : lane + radius)}`);
-    parts.push(`${arc} ${num(x + radius)} ${num(lane)}`);
-    parts.push(`L ${num(next - radius)} ${num(lane)}`);
-    parts.push(`${arc} ${num(next)} ${num(down ? lane - radius : lane + radius)}`);
+    /* 水平段收在圓角起點，再沿走道落到下一列、轉回頭。 */
+    parts.push(`L ${num(rightward ? lane - radius : lane + radius)} ${num(y)}`);
+    parts.push(`${arc} ${num(lane)} ${num(y + radius)}`);
+    parts.push(`L ${num(lane)} ${num(nextY - radius)}`);
+    parts.push(`${arc} ${num(rightward ? lane - radius : lane + radius)} ${num(nextY)}`);
   }
 
   /*
-   * 出欄。最後一欄若是由下而上走完，人就在上走道，所以要先向右再到下走道；若是由上而下
-   * 走完，人已經在下走道，向右之後就直接收箭頭。
-   * Exit. If the last column was walked upward the path is on the top lane, so it steps
-   * right and then descends; if it was walked downward it is already on the bottom lane and
-   * only needs to step right before the arrow.
+   * 出欄。最後一列走完時人就在左或右走道上，沿走道直落出欄線即可 —— 箭頭朝下。
+   * Exit. The walk ends on the left or right lane, so the path simply descends that lane to
+   * the exit line — the arrow points down.
    */
-  const endLane = (cols - 1) % 2 === 0 ? bottomLane : topLane;
-  parts.push(`L ${num(derivedExit)} ${num(endLane)}`);
-  if (endLane !== bottomLane) parts.push(`L ${num(derivedExit)} ${num(bottomLane)}`);
+  const endLane = (rows - 1) % 2 === 0 ? rightLane : leftLane;
+  parts.push(`L ${num(endLane)} ${num(exitY)}`);
 
   const arrow = [
-    `M ${num(derivedExit - arrowHalfWidth)} ${num(bottomLane - arrowLength)}`,
-    `L ${num(derivedExit)} ${num(bottomLane)}`,
-    `L ${num(derivedExit + arrowHalfWidth)} ${num(bottomLane - arrowLength)}`,
+    `M ${num(endLane - arrowHalfWidth)} ${num(exitY - arrowLength)}`,
+    `L ${num(endLane)} ${num(exitY)}`,
+    `L ${num(endLane + arrowHalfWidth)} ${num(exitY - arrowLength)}`,
   ].join(' ');
 
   return {
     path: parts.join(' '),
     arrow,
-    columns: Array.from({ length: cols }, (_, col) => columnCentre(col)),
+    rowCentres: Array.from({ length: rows }, (_, row) => rowCentre(row)),
   };
 }
 
@@ -275,7 +242,7 @@ export function computeRosterLayout(options: RosterOptions): RosterLayout {
 
   const slots: RosterSlot[] = [];
   for (let index = 0; index < total; index += 1) {
-    const { col, row } = slotAt(index, rows);
+    const { col, row } = slotAt(index, usedCols);
     slots.push({ index, col, row });
   }
 
@@ -286,19 +253,19 @@ export function computeRosterLayout(options: RosterOptions): RosterLayout {
  * 由合成鏈長度挑出**填得滿寬度**的列數。
  * Pick the row count that **fills the width** for a given chain length.
  *
- * 設計稿的 4×5 是從**19 格**反推的；實際的合成鏈只有 10 級時，沿用 5 列會讓走線只用到 2 欄，
- * 蛇形退化成「走完兩欄後從最右邊垂直下來」的一條直線 —— 那既不像蛇形、也浪費了整個面板的
- * 寬度。使用者回報的正是這個：10 個之後就變成 90° 一條直線。
+ * 設計稿的 4×5 是從**19 格**反推的；實際的合成鏈只有 10 級時，沿用 5 列會讓走線只用到
+ * 2 欄，蛇形退化成「走完兩欄後從最右邊垂直下來」的一條直線 —— 那既不像蛇形、也浪費了
+ * 整個面板的寬度。使用者回報的正是這個：10 個之後就變成 90° 一條直線。
  * The mock's 4×5 was reverse-engineered from **19 slots**; with an actual 10-level chain, keeping
  * 5 rows makes the walk use only 2 columns and the serpentine degenerates into "two columns, then
  * drop straight down the far right" — not serpentine, and it wastes the panel's width. That is
  * exactly what the user reported: a 90° straight line after the tenth cell.
  *
  * 選法：`rows = ceil(total / cols)`，讓每一欄分到差不多數量的格子，欄數自然填滿面板寬度。
- * 例：10 級、4 欄 → `ceil(10/4) = 3`，得到 3+3+3+1 的四欄分佈（比 5+5 的 2 欄高塔好得多）。
+ * 例：10 級、4 欄 → `ceil(10/4) = 3`，得到 4+4+2 的三列分佈（比 5+5 的 2 欄高塔好得多）。
  * The rule is `rows = ceil(total / cols)`: each column gets a comparable share and the columns
- * fill the panel width. For 10 levels at 4 columns that is `ceil(10/4) = 3`, giving a 3+3+3+1
- * four-column spread — far better than a 5+5 two-column tower.
+ * fill the panel width. For 10 levels at 4 columns that is `ceil(10/4) = 3`, giving a 4+4+2
+ * three-row spread — far better than a 5+5 two-column tower.
  *
  * @param total 合成鏈長度 / The chain length.
  * @param cols 可用的欄數上限 / The column budget.
