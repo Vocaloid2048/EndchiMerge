@@ -4,15 +4,13 @@
     "note": "技力經濟依 2026-10-06 使用者定案：每投放 +0.05、每次合成 +0.05；上限預設 3、只接受 1–10 的正整數（載入時鉗制），並支援技能臨時增減上限的 API。技能消耗由 JSON 定義（當棄即棄=1／協議：浮動=2／搖晃！=3）；命運互換為免費技能，改以「累計消耗滿 6 點技力」解鎖、用後累計歸零。shake 的 axisTiltDeg（擺動軸傾角 15 度）與 upwardFactor（持續向上力 0.1）為使用者定案；其餘技能參數（liftFactor／revolutions／radiusFactor／disturbance）仍是暫定值，待試玩調整。",
     "skillOrder": "先按消耗技力遞增；免費／特殊條件技能（unlock.kind 不是 sp）一律殿後；可用 sortOrder 覆寫。技能欄每行 3 格，第 4 個技能排在第二行第一格。"
   },
-
   "sp": {
     "max": 3,
-    "initial": 0.0,
+    "initial": 0,
     "gainPerDrop": 0.05,
     "gainPerCombo": 0.05,
     "overflowAllowed": false
   },
-
   "skills": [
     {
       "id": "discard",
@@ -20,7 +18,9 @@
       "cost": 1,
       "targeting": "user_pick",
       "pickCount": 1,
-      "unlock": { "kind": "sp" },
+      "unlock": {
+        "kind": "sp"
+      },
       "params": {}
     },
     {
@@ -29,10 +29,13 @@
       "cost": 2,
       "targeting": "immediate",
       "pickCount": 0,
-      "unlock": { "kind": "sp" },
+      "unlock": {
+        "kind": "sp"
+      },
       "params": {
         "durationMs": 1500,
-        "liftFactor": 1.6
+        "liftFactor": 2.5,
+        "catchupFactor": 2
       }
     },
     {
@@ -41,7 +44,9 @@
       "cost": 3,
       "targeting": "immediate",
       "pickCount": 0,
-      "unlock": { "kind": "sp" },
+      "unlock": {
+        "kind": "sp"
+      },
       "params": {
         "durationMs": 2000,
         "revolutions": 5,
@@ -56,7 +61,10 @@
       "cost": 0,
       "targeting": "user_pick",
       "pickCount": 2,
-      "unlock": { "kind": "cumulativeSpent", "threshold": 6 },
+      "unlock": {
+        "kind": "cumulativeSpent",
+        "threshold": 6
+      },
       "params": {
         "disturbance": 6
       }

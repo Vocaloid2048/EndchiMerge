@@ -19,9 +19,10 @@
 import type { BoardTarget, SkillBoard } from './board';
 import { Skill } from './Skill';
 
-/** 未提供參數時的預設：1.5 秒、向上加速度 1.6 倍重力。 */
+/** 未提供參數時的預設：1.5 秒、向上加速度 1.6 倍重力、追趕力 2 倍重力。 */
 const DEFAULT_DURATION_MS = 1500;
 const DEFAULT_LIFT_FACTOR = 1.6;
+const DEFAULT_CATCHUP_FACTOR = 2;
 
 export class FloatSkill extends Skill {
   /** 浮動的作用時間；未設定時用預設值。 */
@@ -33,6 +34,16 @@ export class FloatSkill extends Skill {
     board.floatAll({
       durationMs: this.durationMs,
       liftFactor: this.params.liftFactor ?? DEFAULT_LIFT_FACTOR,
+      /*
+       * 追趕力：翻轉重力只能「推」整堆向上，輪廓多邊形（帶耳朵的不規則形狀）偶爾會有一顆
+       * 卡在角落遲遲不動。追趕力對仍落在天花板帶下方的顆粒每步再加一把向上的力，保證
+       * 「整堆都升上去」——這是使用者對這個技能的硬性要求。
+       * Catch-up force: flipping gravity only *pushes* the pile; with outline polygons (irregular
+       * shapes with ears) the occasional body wedges in a corner and lags. The catch-up adds an
+       * extra upward force to any body still below the ceiling band, guaranteeing the whole pile
+       * arrives — the user's hard requirement for this skill.
+       */
+      catchupFactor: this.params.catchupFactor ?? DEFAULT_CATCHUP_FACTOR,
     });
   }
 }

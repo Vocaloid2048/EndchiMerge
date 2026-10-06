@@ -163,6 +163,20 @@ export interface SkillParams {
    */
   liftFactor?: number;
   /**
+   * 浮動的**追趕倍率**：浮動期間上緣仍落在天花板帶下方的顆粒，每步額外獲得此倍率重力的
+   * 向上力，直到抵達天花板帶為止。省略時由 `FloatSkill` 給預設。
+   * The float's **catch-up factor**: while afloat, a body whose top edge is still below the
+   * ceiling band earns an extra upward force of this many gravities per step until it reaches
+   * the band. `FloatSkill` supplies a default when omitted.
+   *
+   * 追趕力繞過接觸鏈直接推動遲到的顆粒，讓「整堆都升上去」由機制保證 —— 輪廓多邊形偶爾
+   * 有一顆在角落被卡住，光靠翻轉重力拉不完。
+   * The catch-up bypasses the contact chain to push laggards directly, guaranteeing "the whole
+   * pile rises" by mechanism — outline polygons occasionally wedge one body in a corner that
+   * gravity-flip alone cannot finish.
+   */
+  catchupFactor?: number;
+  /**
    * 搖晃時容器往復擺動的圈數（使用者定案：2 秒約 5 圈）。
    * Cycles the container oscillates through during a shake (the user's decision: about 5 in 2 s).
    */

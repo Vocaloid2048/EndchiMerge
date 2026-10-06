@@ -53,7 +53,7 @@ const SKILLS: readonly SkillDef[] = [
     targeting: 'immediate',
     pickCount: 0,
     unlock: { kind: 'sp' },
-    params: { durationMs: 1500, liftFactor: 1.6 },
+    params: { durationMs: 1500, liftFactor: 2.5, catchupFactor: 2 },
   },
   {
     id: 'shake',
@@ -499,5 +499,111 @@ describe('命運互換 —— 累計消耗的解鎖資訊要傳到卡片 / the g
     const after = session.skillCards.find((card) => card.id === 'fate_swap');
     expect(after?.cumulativeSpent).toBeCloseTo(3, 6);
     expect(after?.unlocked).toBe(false);
+  });
+});
+
+/**
+ * 浮動強度回歸：一整堆要真的升到天花板的下半部以上，而不是只有頂部幾顆上去、底部的
+ * 方團團還卡在下半部。早一版 `liftFactor = 1.6`（向上淨加速度只有 0.6g）在 1.5 秒內拉不動
+ * 一整堆，最底部的頂緣仍遠低於容器半高線；調強後整堆壓在天花板下。
+ * Float-strength regression: a whole pile must actually reach the upper half, not just let the
+ * top few rise while the bottom stays low. An earlier `liftFactor = 1.6` (only 0.6g net upward)
+ * could not lift a full pile within 1.5 s, leaving the bottom's top edge far below the container's
+ * mid-height; the stronger lift pins the whole pile under the ceiling.
+ */
+/**
+ * 浮動強度回歸：一整堆要真的升到容器上半部，而不是只有頂部幾顆上去、底部的方團團還卡在下半部。
+ * 早一版 `liftFactor = 1.6`（向上淨加速度只有 0.6g）在 1.5 秒內拉不動一整堆，最底部的頂緣仍遠
+ * 低於容器半高線；調強到 2.5（淨向上 1.5g）後整堆壓在天花板下。
+ * 這裡用「不會合成」的單一等級，讓堆疊維持高大（合成會把堆疊吃掉，觀察不到弱浮動拉不動整堆的問題）。
+ * Float-strength regression: a whole pile must actually reach the upper half, not just let the top
+ * few rise while the bottom stays low. An earlier `liftFactor = 1.6` (only 0.6g net upward) could not
+ * lift a full pile within 1.5 s; the stronger 2.5 (1.5g net) pins the whole pile under the ceiling.
+ * A single non-merging level keeps the pile tall (merging would eat the stack and hide the weak lift).
+ */
+describe('協議：浮動 —— 整堆都要升進上半部 / float lifts the whole pile', () => {
+  /** 不會合成的單一等級 + 窄容器，強制疊成高塔，最能逼出弱浮動拉不動整堆的極限。 */
+  function makeFloatConfig(liftFactor: number, catchupFactor: number): AllConfig {
+    const nonMerge: LevelDef = {
+      id: 1, name: 'Lv1', sprite: 'character/lv1.webp', radius: 22,
+      density: 0.001, restitution: 0.15, friction: 0.3, frictionAir: 0.005, score: 0,
+      spawnWeight: 10, droppable: true, mergeResult: null,
+    };
+    return {
+      levels: {
+        settings: {
+          maxBodies: 80, gravityY: 1, lockRotation: false, spawnBlockEnabled: false,
+          overflowPenalty: false, mergeCooldownMs: 100, overflowGraceMs: 3000, dropCooldownMs: 1000,
+        },
+        levels: [nonMerge],
+      },
+      skills: {
+        sp: { max: 3, initial: 0, gainPerDrop: 10, gainPerCombo: 10, overflowAllowed: false },
+        skills: CONFIG.skills.skills.map((s) =>
+          s.id === 'protocol_float'
+            ? { ...s, params: { ...s.params, durationMs: 1500, liftFactor, catchupFactor } }
+            : s,
+        ),
+      },
+      container: { ...CONFIG.container },
+      branding: CONFIG.branding,
+    };
+  }
+
+  /** 在窄容器裡投放 `n` 顆，每顆間隔拉滿投放冷卻，確保每顆都真的落下、疊成高塔。 */
+  function dropPile(session: GameSession, n: number): void {
+    const frame = session.containerGeometry.frame;
+    const lo = frame.x + 20;
+    const hi = frame.x + frame.width - 20;
+    const span = Math.max(1, hi - lo);
+    for (let i = 0; i < n; i += 1) {
+      session.setAim(lo + ((i * 53) % span));
+      session.drop();
+      runFrames(session, 65); // 超過 dropCooldownMs(1000) 才放下一顆
+    }
+  }
+
+  /** 喚醒後施放浮動，並在浮動期間（約第 85 幀）取樣最底部的頂緣與容器半高。 */
+  function floatAndSample(session: GameSession): { topEdge: number; midY: number; rise: number } {
+    const beforeLowestY = Math.max(...session.bodies.map((b) => b.y));
+    expect(session.activateSkill('protocol_float')).toBe(true);
+    runFrames(session, 85); // 浮動期間測量（1500ms ≈ 90 幀，取 85）
+    const frame = session.containerGeometry.frame;
+    const midY = frame.y + frame.height / 2;
+    const lowest = session.bodies.reduce((a, b) => (b.y > a.y ? b : a));
+    return { topEdge: lowest.y - lowest.radius, midY, rise: beforeLowestY - lowest.y };
+  }
+
+  it('生產值 liftFactor=2.5 + catchupFactor=2 把整堆升進上半部', () => {
+    const session = new GameSession({ config: makeFloatConfig(2.5, 2), rng: createRng(20261006), virtualWidth: 260 });
+    dropPile(session, 8);
+    settleToSleep(session);
+    const { topEdge, midY, rise } = floatAndSample(session);
+    expect(topEdge).toBeLessThan(midY);
+    expect(rise).toBeGreaterThan(100);
+  });
+
+  it('弱浮動 liftFactor=1.6（關掉追趕）不會把整堆升進上半部（回歸方向鎖定）', () => {
+    const session = new GameSession({ config: makeFloatConfig(1.6, 0), rng: createRng(20261006), virtualWidth: 260 });
+    dropPile(session, 8);
+    settleToSleep(session);
+    const { topEdge, midY } = floatAndSample(session);
+    expect(topEdge).toBeGreaterThanOrEqual(midY);
+  });
+
+  /*
+   * 追趕機制的專用判別：淨重力調成 0（liftFactor=1）之後，翻轉重力什麼都不做 —— 堆疊要升，
+   * 只能靠追趕力。這條測試在追趕壞掉（力算錯、方向反了、帶判斷反了）時必定失敗。
+   * Dedicated catch-up discriminator: with net gravity zeroed (liftFactor=1) the gravity flip
+   * does nothing at all — the pile can only rise via the catch-up force. This fails the moment
+   * the catch-up breaks (wrong magnitude, wrong direction, or an inverted band test).
+   */
+  it('淨重力為 0 時，單靠追趕力也要把整堆升進上半部', () => {
+    const session = new GameSession({ config: makeFloatConfig(1, 2), rng: createRng(20261006), virtualWidth: 260 });
+    dropPile(session, 8);
+    settleToSleep(session);
+    const { topEdge, midY, rise } = floatAndSample(session);
+    expect(topEdge).toBeLessThan(midY);
+    expect(rise).toBeGreaterThan(100);
   });
 });

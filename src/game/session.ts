@@ -37,6 +37,7 @@ import {
 } from '../core/physics';
 import {
   CEILING_THICKNESS,
+  ENGINE_GRAVITY_SCALE,
   FLOAT_OVERFLOW_BUFFER_MS,
   MERGE_OUTLINE_GAP,
   MERGE_PUSH_FACTOR,
@@ -131,6 +132,16 @@ interface PendingMerge {
  * straying so far that the neighbour gets picked instead.
  */
 const HIT_SLACK = 1.15;
+
+/**
+ * 浮動追趕帶：顆粒的**上緣**仍比技能天花板低這麼多時，每步獲得額外的向上追趕力
+ * （見 `applyFloatCatchup()`）。帶寬取一次身位，讓顆粒在貼住天花板前先失去追趕力，
+ * 不會對平面抖動。
+ * The float catch-up band: a body whose **top edge** is still this far below the skill ceiling
+ * earns an extra upward force each step (see `applyFloatCatchup()`). One body-height of band lets
+ * a body shed the force just before settling on the plane, so it never jitters against it.
+ */
+const FLOAT_CATCHUP_BAND = 40;
 
 /** 技能卡要顯示的狀態（給 `ui/skillBar.ts`）。 */
 export interface SkillCardState {
@@ -227,6 +238,8 @@ export class GameSession implements SkillBoard {
   /** 浮動：開始時刻與時長；`durationMs <= 0` ＝ 不在浮動。 */
   private floatStartedAtMs = 0;
   private floatDurationMs = 0;
+  /** 浮動追趕倍率（`FloatRequest.catchupFactor`），0 ＝ 關閉。 */
+  private floatCatchupFactor = 0;
   private floatLiftFactor = 0;
   /**
    * 浮動天花板那片**隱形靜態平面**；不在浮動時為 `null`。
@@ -1028,6 +1041,7 @@ export class GameSession implements SkillBoard {
     this.floatStartedAtMs = this.elapsedMs;
     this.floatDurationMs = Math.max(0, request.durationMs);
     this.floatLiftFactor = Math.max(0, request.liftFactor);
+    this.floatCatchupFactor = Math.max(0, request.catchupFactor ?? 0);
 
     /*
      * 浮動期間（以及結束後的緩衝）完全不計算溢位：浮起來本來就會逼近警戒線，若照常計時，
@@ -1240,6 +1254,47 @@ export class GameSession implements SkillBoard {
     if (desired === this.appliedGravityY) return;
     this.physics.setGravity(desired);
     this.appliedGravityY = desired;
+  }
+
+  /**
+   * 浮動追趕：仍落在天花板帶下方的顆粒，每步再獲得 `catchupFactor` 倍重力的向上力。
+   * Float catch-up: any body still below the ceiling band earns `catchupFactor` gravities of
+   * extra upward force per step.
+   *
+   * 翻轉重力只能「推」整堆向上 —— 力要靠接觸一顆傳一顆。輪廓多邊形（帶耳朵的不規則形狀）
+   * 偶爾會有一顆在角落被卡住，或被鄰居的接觸抵住，1.5 秒走不完全程；畫面上就是「大家都貼住
+   * 天花板了，就它還在下面」。追趕力繞過接觸鏈，對遲到的顆粒直接加力，直到它進帶為止 ——
+   * 「整堆都升上去」由機制保證，而不是靠調強度碰運氣。
+   * Flipping gravity only *pushes* the pile — the force travels body to body through contacts.
+   * With outline polygons (irregular shapes with ears) the occasional body wedges in a corner or
+   * is braced by a neighbour and cannot finish the trip in 1.5 s; on screen that reads as "everyone
+   * is pinned to the ceiling except this one". The catch-up force bypasses the contact chain and
+   * pushes laggards directly until they enter the band — "the whole pile rises" is guaranteed by
+   * mechanism, not by luck with strength tuning.
+   *
+   * 力的大小照 Matter 內部的重力比例（`force = mass × gravity × 0.001`）折算，所以
+   * `catchupFactor = 2` 就恰好是「再多 2 倍重力」；`applyForce` 的作用點取質心，不引入扭矩。
+   * The magnitude follows Matter's own gravity scale (`force = mass × gravity × 0.001`), so
+   * `catchupFactor = 2` is exactly two extra gravities; applying at the centre of mass keeps the
+   * torque at zero.
+   */
+  private applyFloatCatchup(): void {
+    if (!this.isFloating || this.floatCatchupFactor <= 0) return;
+
+    const base = this.config.levels.settings.gravityY;
+    const ceilingY = this.ceilingY;
+    const bandBottom = ceilingY + FLOAT_CATCHUP_BAND;
+
+    for (const entry of this.entries) {
+      const body = entry.body;
+      /* 上緣仍低於帶底 ＝ 還沒抵達天花板，補一把向上的力。 */
+      if (body.position.y - entry.level.radius <= bandBottom) continue;
+
+      Matter.Body.applyForce(body, body.position, {
+        x: 0,
+        y: -body.mass * base * this.floatCatchupFactor * ENGINE_GRAVITY_SCALE,
+      });
+    }
   }
 
   /**
@@ -1713,8 +1768,16 @@ export class GameSession implements SkillBoard {
      * merge). Snapping the body down onto the nearest support avoids the visible stall of hanging
      * there until physics pulls it down. When nothing close enough lies below, leave it to free
      * fall.
+     *
+     * **浮動期間跳過**：重力已翻向上，合體剛體本就會上浮；若仍向下吸附到最近支撐，會把它
+     * 卡在浮動堆疊的最下方（離天花板最遠），看起來就像「最大／剛合併的那隻沒飛起來」。
+     * 浮動時交給上浮的重力處理，讓它隨堆疊一起升上去。
+     * **Skipped while floating**: gravity is already upward, so the merged body would rise on its
+     * own. Snapping it down would pin it to the bottom of the floating pile (farthest from the
+     * ceiling) — the "the largest / just-merged one didn't float" look. Leave it to the upward
+     * gravity so it rises with the rest.
      */
-    this.settleOntoSupport(body, level);
+    if (!this.isFloating) this.settleOntoSupport(body, level);
 
     /*
      * 推開被壓到的鄰居（使用者定案：按重疊深度推開）。
@@ -1977,6 +2040,7 @@ export class GameSession implements SkillBoard {
     this.applyShakeToWalls();
     this.syncCeiling();
     this.applyFloatGravity();
+    this.applyFloatCatchup();
     this.applyShakeImpulse(dt);
 
     /* 清空必須早於 `physics.step()` —— 碰撞回呼在那之中就會填它。 */
@@ -2094,6 +2158,7 @@ export class GameSession implements SkillBoard {
     this.floatStartedAtMs = 0;
     this.floatDurationMs = 0;
     this.floatLiftFactor = 0;
+    this.floatCatchupFactor = 0;
     /*
      * 浮動天花板那片平面是**靜態**剛體，所以 `removeDynamicBodies()` 不會帶走它，必須自己
      * 收掉 —— 否則上一局留下的隱形平面會讓新的一局從一開始就撞到一道看不見的天花板。

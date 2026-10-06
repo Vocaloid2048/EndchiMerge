@@ -134,7 +134,7 @@ describe('協議：浮動 / float', () => {
     skill.apply(board, []);
 
     expect(skill.durationMs).toBe(1500);
-    expect(board.floats).toEqual([{ durationMs: 1500, liftFactor: 1.6 }]);
+    expect(board.floats).toEqual([{ durationMs: 1500, liftFactor: 1.6, catchupFactor: 2 }]);
   });
 
   it('honours explicit parameters', () => {
@@ -145,7 +145,7 @@ describe('協議：浮動 / float', () => {
 
     skill.apply(board, []);
 
-    expect(board.floats).toEqual([{ durationMs: 900, liftFactor: 2 }]);
+    expect(board.floats).toEqual([{ durationMs: 900, liftFactor: 2, catchupFactor: 2 }]);
   });
 });
 

@@ -33,6 +33,13 @@ export interface FloatRequest {
   durationMs: number;
   /** 向上加速度相對重力的倍率。 */
   liftFactor: number;
+  /**
+   * 追趕倍率（可省略，預設由 `FloatSkill` 決定）：浮動期間**仍落在天花板帶下方**的顆粒，
+   * 每步額外獲得此倍率重力的向上力，直到它抵達天花板帶為止。
+   * Catch-up factor (optional): while afloat, any body still **below the ceiling band** gets an
+   * extra upward force of this many gravities each step, until it reaches the band.
+   */
+  catchupFactor?: number;
 }
 
 /** 搖晃的請求參數。 */
