@@ -339,36 +339,40 @@
 }
 
 /*
- * 技能選取提示帶：當棄即棄／命運互換啟動時顯示在容器**下方**。
- * The skill-selection hint strip: shown **below** the container while Discard! or Fate Swap
- * is arming.
+ * 技能選取提示帶：當棄即棄／命運互換啟動時顯示。**使用者定案：掛在 `.layout` 上、
+ * 與 `main.stage` 同層** —— 舞台（畫布）佔 y 140..985，聲明（`.layout__notice`）的
+ * 頂緣約在 y 1028，中間那條 43px 的縫就是提示的家。膠囊壓在 34px 高（18px 字級、
+ * 1 行高、6px 上下內距、2px 框），置中後上距舞台 5px、下距聲明 4px，兩邊都不重疊。
+ * The skill-selection hint strip, shown while Discard! or Fate Swap arms. **The user's
+ * decision: mounted on `.layout`, a sibling of `main.stage`** — the stage (canvas) spans
+ * y 140..985 and the notice's top edge sits at about y 1028, so the 43px gap between them
+ * is the hint's home. The pill is kept 34px tall (18px type, 1 line-height, 6px vertical
+ * padding, 2px border); centred, that leaves 5px to the stage above and 4px to the notice
+ * below — overlapping neither.
  *
- * 容器底部已為此托高（`container.json` 的 `bottomOffset`），畫布底端留出一條不屬於容器的
- * 空帶，提示就坐在那裡 —— 永遠不會蓋住容器本身。`pointer-events: none` 讓點擊穿透到畫布
- * （提示帶上點空白處一樣是「取消選取」）。
- * The container bottom is raised for this (`bottomOffset` in `container.json`), leaving a strip
- * at the canvas bottom that does not belong to the container — the hint sits there and can never
- * cover the container itself. `pointer-events: none` lets clicks fall through to the canvas, so
- * tapping "empty space" on the hint still cancels the selection.
+ * `pointer-events: none`：點擊穿透，提示帶上點「空白處」照樣是取消選取。
+ * `pointer-events: none`: clicks fall through, so tapping "empty space" on the hint still
+ * cancels the selection.
  */
-.stage__hint {
+.skill-hint {
   position: absolute;
-  bottom: 10px;
+  bottom: 56px;
   left: 50%;
   transform: translateX(-50%);
   margin: 0;
-  padding: 12px 26px;
+  padding: 6px 22px;
   border-radius: 999px;
   background: rgba(20, 21, 26, 0.82);
   border: 2px solid var(--color-border);
   color: var(--color-fg);
-  font-size: 24px;
+  font-size: 18px;
+  line-height: 1;
   letter-spacing: 0.04em;
   white-space: nowrap;
   pointer-events: none;
 }
 
-.stage__hint[hidden] {
+.skill-hint[hidden] {
   display: none;
 }
 

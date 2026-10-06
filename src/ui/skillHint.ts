@@ -4,13 +4,20 @@
  *
  * 當棄即棄與命運互換都是「點選方團團」的技能（design.md §5.5 的 user_pick），畫面只把
  * 選中的目標圈起來，玩家不一定看得出現在該做什麼。使用者定案：這類技能啟動時，在容器
- * 下方展示一條相應的提示（做什麼、已選幾顆、怎麼取消）；容器底部也為此托高
- * （`container.json` 的 `bottomOffset`），提示帶永遠不會蓋住容器。
+ * 下方展示一條相應的提示（做什麼、已選幾顆、怎麼取消）。
  * Discard! and Fate Swap are both "pick a dumpling" skills (user_pick in design.md §5.5), and
  * the canvas only rings the picked targets — a player cannot always tell what is expected.
  * The user's decision: while such a skill is arming, show a matching hint below the container
- * (what to do, how many picked, how to cancel); the container bottom is raised for it
- * (`bottomOffset` in `container.json`), so the strip never covers the container.
+ * (what to do, how many picked, how to cancel).
+ *
+ * **位置在使用者第二次定案後改到畫布外**：提示掛在 `.layout` 上、與 `main.stage` 同層，
+ * 坐在舞台下緣與聲明（`.layout__notice`）之間的縫隙裡 —— 不在畫布內，所以永遠不會蓋住
+ * 容器或畫布；膠囊壓到 34px 高，上不碰舞台、下不碰聲明（見 `layout.css` 的 `.skill-hint`）。
+ * **The position moved outside the canvas in the user's second decision**: the hint mounts on
+ * `.layout`, a sibling of `main.stage`, sitting in the gap between the stage's bottom edge and
+ * the notice (`.layout__notice`) — never inside the canvas, so it can never cover the container
+ * or the canvas; the pill is kept 34px tall so it touches neither (see `.skill-hint` in
+ * `layout.css`).
  *
  * 即時技能（協議：浮動、搖晃！）不需要提示 —— 按下去就生效，沒有懸而未決的狀態。
  * Immediate skills (Protocol: Float, Shake!) need no hint — they fire at once, nothing is
@@ -36,7 +43,11 @@ const HINTS: Readonly<Record<string, string>> = {
 const GENERIC_HINT = '點選方團團';
 
 export interface SkillHintOptions {
-  /** 提示的宿主，通常是容器區域（`.stage`）。 */
+  /**
+   * 提示的宿主：版面根節點（`.layout`），提示是 `main.stage` 的**兄弟**而不是子元素。
+   * The hint's host: the layout root (`.layout`); the hint is a **sibling** of `main.stage`,
+   * not its child.
+   */
   host: HTMLElement;
 }
 
@@ -48,7 +59,7 @@ export interface SkillHint {
 export function createSkillHint(options: SkillHintOptions): SkillHint {
   const { host } = options;
 
-  const node = el('p', 'stage__hint');
+  const node = el('p', 'skill-hint');
   node.hidden = true;
   host.append(node);
 

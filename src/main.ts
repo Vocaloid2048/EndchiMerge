@@ -137,11 +137,16 @@ async function bootstrap(): Promise<void> {
   skillBar.update(session.skillCards);
 
   /*
-   * 技能選取提示帶：當棄即棄／命運互換啟動時顯示在容器下方（容器底部已為它托高）。
-   * The skill-selection hint strip: shown below the container while Discard! or Fate Swap
-   * arms (the container bottom is raised to make room for it).
+   * 技能選取提示帶：當棄即棄／命運互換啟動時顯示。使用者定案：提示掛在 `.layout` 上、
+   * 與 `main.stage` **同層**（畫布外、舞台下緣與聲明之間），不在畫布內 —— 所以它永遠
+   * 不會蓋住容器，也不會與畫布或聲明重疊（容器底部留白相應減少，見 `container.json`）。
+   * The skill-selection hint strip, shown while Discard! or Fate Swap arms. The user's
+   * decision: the hint mounts on `.layout`, a **sibling** of `main.stage` (outside the
+   * canvas, in the gap between the stage's bottom edge and the notice) — so it never covers
+   * the container and never overlaps the canvas or the notice (the canvas's reserved bottom
+   * band shrinks accordingly, see `container.json`).
    */
-  const skillHint = createSkillHint({ host: layout.regions.container });
+  const skillHint = createSkillHint({ host: layout.root });
   skillHint.update(session.skillCards);
 
   const updateHud = (): void => {
