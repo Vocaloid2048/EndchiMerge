@@ -15,6 +15,7 @@ import { createLayout, type Layout } from './ui/layout';
 import { createMeltingList, type MeltingList } from './ui/meltingList';
 import { createNotice } from './ui/notice';
 import { attachStageScale } from './ui/scale';
+import { createSkillBar, type SkillBar } from './ui/skillBar';
 import { createSpMeter, type SpMeter } from './ui/spMeter';
 
 /**
@@ -36,6 +37,7 @@ export interface AppContext {
   progress: ProgressStore;
   meltingList: MeltingList;
   spMeter: SpMeter;
+  skillBar: SkillBar;
   session: GameSession;
   hud: Hud;
   loop: FrameLoop;
@@ -103,6 +105,24 @@ async function bootstrap(): Promise<void> {
   const session = new GameSession({ config, unlocks: progress, silhouettes });
   const hud = new Hud({ layout, sprites, levels: config.levels.levels });
 
+  /*
+   * 技能欄。可不可以按完全由 `GameSession` 決定（它才看得到技力與累計消耗），所以這裡
+   * 只需要在按下時把 id 交回去 —— 連「再按一次取消」也是 session 的規則。
+   * The skill bar. Whether a card is pressable is entirely `GameSession`'s call (it is the only
+   * thing that can see SP and cumulative spend), so this only hands the id back on press — even
+   * "press again to cancel" is a session rule.
+   */
+  const skillBar = createSkillBar({
+    host: hook<HTMLElement>(layout.regions.skill, 'skill-grid'),
+    onActivate: (id): void => {
+      session.activateSkill(id);
+      /* 立刻反映一次，不必等下一個 frame —— 按下與畫面變化之間不該有一格延遲。 */
+      skillBar.update(session.skillCards);
+      spMeter.update({ value: session.spValue, max: session.spMax });
+    },
+  });
+  skillBar.update(session.skillCards);
+
   const updateHud = (): void => {
     hud.update({
       nextLevelId: session.upcomingLevelId,
@@ -114,6 +134,16 @@ async function bootstrap(): Promise<void> {
       comboMultiplier: session.comboMultiplier,
       bestTry: progress.highScore,
     });
+  };
+
+  /**
+   * 技力條與技能欄每幀同步。兩個元件都只在值真的變了才動 DOM，所以這樣做是便宜的。
+   * The meter and the bar sync every frame; both only touch the DOM on a real change, so this
+   * stays cheap.
+   */
+  const updateSkills = (): void => {
+    spMeter.update({ value: session.spValue, max: session.spMax });
+    skillBar.update(session.skillCards);
   };
 
   /*
@@ -129,6 +159,7 @@ async function bootstrap(): Promise<void> {
       session.reset();
       shownGameOver = false;
       updateHud();
+      updateSkills();
     },
   });
 
@@ -144,6 +175,7 @@ async function bootstrap(): Promise<void> {
     debug: debugOverlay,
     onAfterFrame: (current): void => {
       updateHud();
+      updateSkills();
 
       if (current.isOver && !shownGameOver) {
         shownGameOver = true;
@@ -175,9 +207,18 @@ async function bootstrap(): Promise<void> {
     target: canvas,
     viewport,
     onAim: (x): void => session.setAim(x),
-    onDrop: (): void => {
-      session.drop();
+    /*
+     * 同一顆按鈕在技能選取模式下改為「選球」：分岔在 `GameSession`，這裡只把虛擬座標交過去。
+     * 鍵盤沒有座標，`null` ＝ 照目前瞄準點投放。
+     * The same press becomes "pick a dumpling" while a skill is selecting; the fork lives in
+     * `GameSession` and this only forwards the virtual coordinates. The keyboard has none, so
+     * `null` means "drop at the current aim".
+     */
+    onDrop: (point): void => {
+      if (point === null) session.drop();
+      else session.canvasPointerAction(point.x, point.y);
     },
+    onCancel: (): void => session.cancelSkill(),
     initialAim: session.aimXValue,
   });
 
@@ -210,6 +251,7 @@ async function bootstrap(): Promise<void> {
     progress,
     meltingList,
     spMeter,
+    skillBar,
     session,
     hud,
     loop,

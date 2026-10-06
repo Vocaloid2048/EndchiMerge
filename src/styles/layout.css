@@ -397,9 +397,137 @@
   grid-template-columns: repeat(3, 120px);
   gap: 13px 16px;
   align-content: start;
+  /*
+   * **只准垂直捲動**（使用者定案）。三欄 120 加欄距 16 剛好 392，而內容區寬 393 —— 一旦
+   * 瀏覽器為垂直捲軸留出寬度，橫向就會溢出，於是「不能橫向捲動」立刻變成「有一條橫向
+   * 捲軸」。`overflow-x: hidden` 直接把這條路封死，`scrollbar-gutter: stable` 則先預留
+   * 捲軸寬度，讓卡片格網不會因為捲軸出現／消失而左右跳動。
+   * **Vertical scrolling only** (the user's decision). Three 120px columns with 16px gutters come
+   * to 392 against a 393px content box — the moment the browser reserves width for a vertical
+   * scrollbar, the grid overflows horizontally and "no horizontal scrolling" turns into "there is
+   * a horizontal scrollbar". `overflow-x: hidden` closes that door, and `scrollbar-gutter: stable`
+   * reserves the gutter up front so the grid never shifts left and right as the scrollbar appears
+   * and disappears.
+   */
+  overflow-x: hidden;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   overscroll-behavior: contain;
 }
+
+/* ── 技能卡（`1408:2333` 等，120×150）────────────────────────────────── */
+
+/*
+ * 技能卡：圖示 ＋ 名稱 ＋ 右上角消耗徽章；未解鎖時整張被一層灰遮罩蓋住。
+ * A skill card: icon, name and a cost badge in the top-right; while locked the whole card is
+ * covered by a grey mask.
+ *
+ * 底色取設計稿的技能卡色 `#D2AEAE`（tokens 的 `--color-skill-card`）。
+ * The fill is the mock's card colour `#D2AEAE` (`--color-skill-card`).
+ */
+.skill-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 120px;
+  height: 150px;
+  padding: 10px;
+  border: 0;
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--color-skill-card);
+  color: var(--color-accent-ink);
+  font: inherit;
+  cursor: pointer;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.skill-card:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.35);
+}
+
+.skill-card:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* 選取中（或作用中）的技能卡：琥珀金外圈，與畫面上的「」標示同色。 */
+.skill-card--active {
+  box-shadow: 0 0 0 3px var(--color-accent), 0 0 18px var(--color-accent-soft);
+}
+
+.skill-card__name {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: center;
+}
+
+/*
+ * 消耗徽章＝該技能所需的技力值（design.md D14），依消耗分級配色（§5.4）。
+ * The cost badge is the skill's SP cost (D14), coloured by cost tier (§5.4).
+ */
+.skill-card__badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--color-badge-1);
+  color: var(--color-accent-ink);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.skill-card[data-cost='2'] .skill-card__badge {
+  background: var(--color-badge-2);
+}
+
+.skill-card[data-cost='3'] .skill-card__badge,
+.skill-card[data-cost='4'] .skill-card__badge {
+  background: var(--color-badge-3);
+}
+
+/*
+ * 未解鎖的遮罩：整張卡覆蓋（使用者定案），中間顯示解鎖進度。
+ * The locked mask covers the whole card (the user's decision) and shows unlock progress.
+ *
+ * 用不透明的深色而不是 `opacity`：卡片底是可見的粉紅，只調透明度會讓下面的圖示仍看得見，
+ * 「未解鎖」與「已解鎖」就會長得很像。解鎖後整層 `display: none`，不佔位也不擋點擊。
+ * An opaque dark layer rather than `opacity`: the card fill is a visible dusty pink, so merely
+ * fading would leave the icon readable and "locked" would look like "unlocked". Once unlocked the
+ * layer is `display: none`, so it neither occupies space nor eats clicks.
+ */
+.skill-card__mask {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(20, 21, 26, 0.82);
+  color: var(--color-fg-muted);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.skill-card:not(.skill-card--locked) .skill-card__mask {
+  display: none;
+}
+
+/* 免費技能的解鎖進度用文字表示（沒有消耗值可以當作分母視覺化）。 */
+.skill-card__progress {
+  display: block;
+}
+
 
 /* ── ⑦ MELTING LIST 面板（`1408:2235`，435×644）──────────────────────── */
 

@@ -14,7 +14,19 @@
  * note = music toggle (standalone, does not navigate).
  */
 
-export const ICON_NAMES = ['home', 'trophy', 'workshop', 'help', 'settings', 'music'] as const;
+export const ICON_NAMES = [
+  'home',
+  'trophy',
+  'workshop',
+  'help',
+  'settings',
+  'music',
+  /* 技能圖示（M5）——語意對應 `skills.json → id`。 */
+  'discard',
+  'float',
+  'shake',
+  'fateSwap',
+] as const;
 export type IconName = (typeof ICON_NAMES)[number];
 
 /**
@@ -31,6 +43,19 @@ const ICON_PATHS: Record<IconName, string> = {
   settings:
     '<circle cx="12" cy="12" r="3"/><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6"/>',
   music: '<circle cx="7" cy="17.5" r="2.5"/><circle cx="18" cy="15.5" r="2.5"/><path d="M9.5 17.5V6l11-2.2v11.7"/>',
+  /* ── 技能（M5）。造型刻意彼此差很遠，小尺寸下也分得出是哪一個。 */
+  /* 當棄即棄！：垃圾桶。 */
+  discard:
+    '<path d="M5 6.5h14"/><path d="M9.5 6.5V4.5h5v2"/><path d="M7.5 6.5l1 13h7l1-13"/>',
+  /* 協議：浮動：向上的雙箭頭。 */
+  float:
+    '<path d="M12 20.5V4"/><path d="M7.5 8.5L12 4l4.5 4.5"/><path d="M6 14.5l6-3.5 6 3.5"/>',
+  /* 搖晃！：左右晃動的弧線。 */
+  shake:
+    '<path d="M8.5 4.5c-2.4 2.2 2.4 5.5 0 7.7s2.4 5.5 0 7.7"/><path d="M15.5 4.5c2.4 2.2-2.4 5.5 0 7.7s-2.4 5.5 0 7.7"/>',
+  /* 命運互換：上下互相對流的箭頭。 */
+  fateSwap:
+    '<path d="M6.5 8.5h11l-3-3"/><path d="M17.5 15.5h-11l3 3"/>',
 };
 
 /** 建立一個 `<svg>` 圖示節點。 */
