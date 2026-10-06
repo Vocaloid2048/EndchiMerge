@@ -51,7 +51,8 @@ Techstack:<br>
 > **3 seconds** to fix it; time out and the run ends with a score summary and a one-tap restart.
 > Every level you merge into existence unlocks that character in the MELTING LIST, and **unlocks
 > and the high score persist locally and survive a new run**. Arrow keys aim and Space/Enter drops.
-> SP and skills (M5) are not implemented yet.
+> **SP and skills (M5) are done**: SP accrues from drops and merges, and four skills fire from
+> the skill bar in the left column.
 
 ### Combo multiplier
 
@@ -91,16 +92,22 @@ Start with the smallest, 萊萬汀, and work your way up to 梨諾:
 > The chain length, character names and every per-level physics value live in JSON. Adding a character or retuning the numbers never requires a rebuild.
 
 ## <span style="color:#569CD6">⚡ SP and skills</span>
-Every successful drop banks **1.0 SP**. The gauge doubles as the unlock gate — and it reads the **current** value, so a skill lights up while the gauge is high enough and locks again the moment you spend.
+Every successful drop banks **0.05 SP**, and every merge banks another **0.05 SP**. The gauge doubles as the unlock gate — and it reads the **current** value, so a skill lights up while the gauge is high enough and locks again the moment you spend.
 
 | Skill | Effect | Cost |
 |:--|:--|:--:|
-| 捨棄 (Discard) | Pick one dumpling in the container and remove it | 1 |
-| 協議：浮動 (Protocol: Float) | Lift **all** dumplings upward for a short while, opening up merge opportunities | 2 |
+| 當棄即棄！ (Discard) | Pick one dumpling in the container and remove it | 1 |
+| 協議：浮動 (Protocol: Float) | Lift **all** dumplings upward for a short while, opening up merge opportunities; capped at the warning line | 2 |
 | 搖晃！ (Shake!) | Shake the container to break up a jammed stack | 3 |
-| 命運互換 (Fate Swap) | Pick **two** dumplings, swap their positions and stir the physics around them | 4 |
+| 命運互換 (Fate Swap) | Pick **two** dumplings, swap their positions and stir the physics around them | free\* |
 
-> The skill table is JSON-defined too. The number of skills is not hard-coded.
+> \* Fate Swap is not bought with SP: it unlocks once you have **spent 6 SP in total this run**,
+> and using it resets that running total, locking it again.
+>
+> The skill table is JSON-defined too; the number of skills is not hard-coded, and the SP cap
+> defaults to 3 (settable to any integer from 1 to 10). A skill is charged only when its effect
+> actually runs — selecting costs nothing and cancelling refunds nothing. **Dropping is blocked
+> while a skill acts**, including while a target is being picked.
 
 ## <span style="color:#569CD6">✨ Features</span>
 - ✅ **Real physics**: driven by Matter.js — gravity, collision and stacking all follow genuine mechanics, with tunable parameters
@@ -112,6 +119,9 @@ Every successful drop banks **1.0 SP**. The gauge doubles as the unlock gate —
 - ✅ **Merging and combos**: same-level contact merges, handled in two phases (the collision callback only collects; the merge runs after the physics step). The combo multiplier is a non-linear curve topping out at ×10.0
 - ✅ **A visible overflow rule**: red dashed line, pale red warning band and a 3-second countdown — and it only measures dumplings that have **joined the pile** (touched another dumpling)
 - ✅ **Unlocks and codex**: merging a level into existence unlocks that character (the MELTING LIST *is* the codex); unlocks and the high score persist across runs
+- ✅ **SP and skills**: SP accrues from drops and merges and gates skills on its **current** value
+  (spending locks them again instantly); each of the four skills is its own class acting through
+  a narrow board interface, with costs and parameters all coming from JSON
 - ✅ **Fallback first**: missing art or config degrades gracefully and never leaves a blank screen
 - ✅ **Tested**: deterministic logic (config loading, layout, geometry, sampling, timestep) has unit coverage
 - ✅ **Free and open source**: MIT licensed. Play it, fork it, change it
@@ -245,7 +255,7 @@ EndchiMerge
 | M2 | Serpentine roster (auto layout) + silhouette outline | ✅ Done |
 | M3 | Container rendering (flat U-shape frame), drop input, NEXT queue | ✅ Done |
 | M4 | Merge core, cooldown, combo, pop animation, overflow and game over | ✅ Done |
-| M5 | SP and skills (incl. click-to-select) | ⏭️ Skipped on request |
+| M5 | SP and skills (incl. click-to-select and the 「」marker) | ✅ Done |
 | M6 | Unlock system, `???`, codex (= the MELTING LIST) | ✅ Done |
 | M7–M9 | Save data and backend sync, leaderboards, analytics and anti-cheat | ⏳ Pending |
 | M10 | Deployment, audio, accessibility | ⏳ Pending |
@@ -254,9 +264,9 @@ EndchiMerge
 > the radii and physics numbers in `levels.json` are all provisional and will be recomputed
 > once that prototype lands. A knock-on effect: with Lv1 at r=20 against a 730×784 play area,
 > it currently takes roughly 130 near-continuous drops (one per 100 ms) to actually stack up to
-> the overflow line. M6 does not depend on M5, so skipping M5 leaves the codex and unlocks
-> unaffected. Full details in [`docs/CHANGELOG.md`](docs/CHANGELOG.md); the rules themselves in
-> [`docs/gameplay.md`](docs/gameplay.md).
+> the overflow line. M6 does not depend on M5, so the order they landed in does not affect the
+> codex or unlocks. Full details in [`docs/CHANGELOG.md`](docs/CHANGELOG.md); the rules themselves
+> in [`docs/gameplay.md`](docs/gameplay.md).
 
 > **v1.8 — outline colliders and pile detection**: dumpling colliders changed from **circles** to
 > **polygons traced from the sprite's alpha channel** (Moore-neighbour tracing + RDP

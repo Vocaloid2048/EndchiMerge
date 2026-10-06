@@ -7,10 +7,157 @@
 
 ---
 
+## 未發佈 — `feat-skill-feature`（M5 技力與技能）
+
+分支關係：`dev` → `feat-skill-feature`。技能欄、技力計與四項技能全部落地，**M5 至此完成**。
+本節同時**取代**前一節的兩處已知缺口：`skills.json` 的 `fate_swap` 死鎖（見下）與「SKILL LIST 為空」。
+
+### 變更 — 技力經濟重定義（使用者定案）
+
+舊草案（`plan.md` v4.0）寫「每次放入球 +1.0、上限 3.0、每個技能固定消耗 1.0、3 個技能」，
+與 `design.md` v1.1 ＋ `skills.json` ＋ README 的「消耗由 JSON 定義、4 個技能」互相矛盾。
+使用者於 2026-10-06 定案，以**後者**為準，數值如下：
+
+```
+投放  +sp.gainPerDrop（0.05）      合成  +sp.gainPerCombo（0.05）
+上限  sp.max：預設 3，只接受 1–10 的正整數（硬上限 SP_MAX_CEILING = 10）
+解鎖  依「當前值 ≥ 技能需要的技力」動態判斷；花掉立刻上鎖
+消耗  由 skills.json 定義（當棄即棄！=1／協議：浮動=2／搖晃！=3／命運互換=0）
+扣費  效果**成功執行**時才扣；選取中不扣、取消不退
+```
+
+- `src/core/constants.ts`：`SP_MAX_CEILING` 由 **5 改為 10**；新增 `SP_MIN = 1`、
+  `SP_DEFAULT_MAX = 3`，以及技能的兩個護欄 `SHAKE_RADIUS_FACTOR_MAX`（1/3）與
+  `FLOAT_OVERFLOW_BUFFER_MS`（500）、`SHAKE_MAX_BODY_SPEED`（12）；並把 Matter 的重力縮放
+  提為 `ENGINE_GRAVITY_SCALE`（**浮動要把重力翻成負值，必須能一致地改寫它**）。
+- `src/core/types.ts`：`SpSettings` 新增 `gainPerCombo`；新增
+  `SkillUnlock = { kind: 'sp' } | { kind: 'cumulativeSpent'; threshold }`；
+  `SkillParams` 由 `forceY` / `impulse` 改為 `liftFactor` / `revolutions` / `radiusFactor`。
+- `public/config/skills.json`：全面重寫為 `sp` ＋ `skills[]` 結構（見下方「技能」）。
+
+### 新增 — `SpResource`：技力計數器
+
+`src/game/sp.ts`。**只是一個有上限、會累加、上限可臨時覆寫的計數器**，不含任何玩法規則
+（它不知道有哪些技能）。供應 `gainForDrop()` / `gainForCombo()` / `canAfford()` /
+`spend()` / `setMaxOverride()` / `resetSpent()` / `reset()`。
+
+- **`spend()` 先問再扣**：付不起就**完全不動狀態**並回 `false`，呼叫端因此不會留下半扣的狀態。
+  成功時同步累加**累計消耗**（供「命運互換」解鎖）。
+- **`setMaxOverride(value | null)`**：技能滿足條件時可臨時加減上限。指定值鉗制在
+  `[0, SP_MAX_CEILING]`；上限被調低時目前值也跟著夾下來，否則畫面會出現「第 4 條滿的、
+  但上限只有 3」的矛盾。
+
+### 新增 — 技能：`Skill` 抽象基底 ＋ 4 個子類別 ＋ registry
+
+使用者定案要把技能拆成**各自一個 class 檔、繼承同一個抽象基底、放同一個資料夾**
+（`src/game/skills/`）：
+
+- `Skill.ts`：抽象基底。持有 `SkillDef`，對外暴露 `id / name / cost / targeting / unlock /
+  pickCount / params / requiresTargets / durationMs`，並宣告 `apply(board, targets)`。
+- `DiscardSkill.ts`（當棄即棄！）：`board.removeTarget(targets[0].id)`；目標已消失則 no-op。
+- `FloatSkill.ts`（協議：浮動）：`board.floatAll({ durationMs, liftFactor })`。
+- `ShakeSkill.ts`（搖晃！）：把半徑比例**鉗到 `SHAKE_RADIUS_FACTOR_MAX`**、圈數至少 1，
+  再 `board.shakeContainer(...)`。
+- `FateSwapSkill.ts`（命運互換）：要求**兩個相異目標**，否則不作用；成功才
+  `board.swapTargets(a, b, disturbance)`。
+- `index.ts`：`SKILL_CLASSES` 對照表 ＋ `hasSkillImplementation()` / `createSkill()` /
+  `createSkills()`。`skills.json` 的 id 對不上任何 class 時**略過並警告**，不是丟例外。
+- `board.ts`：**`SkillBoard` 窄介面** —— `targets` / `removeTarget` / `swapTargets` /
+  `floatAll` / `shakeContainer` / `overflowLineY` / `containerWidth`。技能只透過它作用於棋盤，
+  **不得**直接碰 Matter.js 或 `GameSession` 的其他方法；`GameSession` 是唯一實作者。
+
+### 變更 — 技能順序與解鎖的配置驗證
+
+`src/core/configLoader.ts`：
+
+- `sanitizeSp()` 把 `sp.max` **四捨五入並鉗進 `[SP_MIN, SP_MAX_CEILING]`**，任何修正都發警告；
+  `Math.round(3.5) → 4`。
+- `sanitizeUnlock()` 解析新的解鎖欄位；缺欄位時預設 `{ kind: 'sp' }`。
+- `sortSkills()`：**先按消耗遞增；`unlock.kind !== 'sp'` 的技能一律殿後**（可用 `sortOrder` 覆寫）。
+  所以欄位順序穩定為 當棄即棄 → 協議：浮動 → 搖晃！ → 命運互換。
+- `checkSkillUnlockability()` 只對 `kind === 'sp'` 的技能檢查「消耗 > 硬上限」；
+  `checkFreeSkillCost()` 對**免費（cost 0）卻同時以技力解鎖**的技能發警告 —— 那會是
+  永遠按不下去的死格。
+
+### 新增 — 命運互換：以「累計消耗」解鎖的免費技能
+
+原先 `fate_swap` 消耗 4 技力、`sp.max` 只有 3，**永遠無法解鎖**（前一節已知缺口）。
+使用者定案改為：
+
+- **免費**（`cost: 0`），改以 `unlock: { kind: 'cumulativeSpent', threshold: 6 }` 解鎖 ——
+  本局累計消耗滿 6 點技力後才可用。
+- **用完累計歸零、重新上鎖**（`sp.resetSpent()`）。`resetSpent()` 只清累計，**不動**目前值與
+  臨時上限，否則會把玩家剩下的技力一起抹掉。
+
+### 新增 — 技力與技能接上 `GameSession`
+
+`src/game/session.ts` 改動最大（`implements SkillBoard`）：
+
+- **投放**與**合成**兩條路徑分別呼叫 `sp.gainForDrop()` / `sp.gainForCombo()`。
+- `activateSkill(id)` / `cancelSkill()` / `canvasPointerAction()` / `pickTargetAt()`：
+  需要選目標的技能進入**選取模式**，即時技能立刻生效。
+  - **再按同一格 ＝ 取消**：這個判斷必須排在「技能忙碌就拒絕」**之前**，否則選取模式一開，
+    同一個鍵就再也按不動，玩家只能靠 Esc 或點空白處退出（`design.md` §5.5）。
+  - **點空白處或再點同一顆**也取消；點到第 `pickCount` 顆立刻作用。
+  - 場上沒有方團團時**一律不受理**任何技能，免得白白扣技力。
+- **技能作用期間禁止投放**：`canDrop` 增加 `!isSkillBusy`（＝選取中、浮動中或搖晃中）。
+  規則只在這**一處**成立，滑鼠／鍵盤／觸控都無法繞過。
+- **浮動**：把重力翻成向上的淨加速度（`gravityY × (1 − liftFactor)`），並每步把任何
+  上緣越過溢位線的顆粒**壓回線下並抵銷向上的速度** —— 使用者要的「像杯口被壓住」。
+- **浮動期間不判溢位**：`updateOverflow()` 直接跳過（連計時器都不推進，**凍結而非歸零**），
+  結束後再等 `FLOAT_OVERFLOW_BUFFER_MS`（0.5s）才恢復。照常計時會讓這個技能一用就自殺。
+- **搖晃**：容器沿圓周晃動（`sin(πt)` 包絡，起訖皆為 0，不會在開始／結束瞬間「跳」一下），
+  位移疊在 `containerGeometry` 上（連帶溢位線、警戒區、裁切範圍一起走），並以
+  `Body.translate` 的**差量**搬動靜態牆壁 —— 所以畫面上是「容器在動、球被晃到」，
+  而不是「整張圖平移」。
+  - 使用者給的幅度（2 秒 5 圈、半徑最多 1/3 容器寬）**照字面跑會把整箱甩飛、甚至穿透薄牆**，
+    因此有 `SHAKE_MAX_BODY_SPEED`（12）作為穩定性護欄：最壞情況是「被搖得很厲害」而不是「炸開」。
+- `reset()`：清空技力、選取、浮動／搖晃狀態並**還原重力**（上一局可能在浮動中結束，
+  不還原會讓新的一局一開始就反重力）。
+
+### 新增 — 技能卡 UI 與畫布選取標示
+
+- `src/ui/skillBar.ts`：技能欄（每行 3 格；第 4 個技能因此落在第二行第一格）。
+  卡片＝**圖示 ＋ 名稱 ＋ 消耗徽章**；未解鎖時**整張卡**被一層不透明灰遮罩蓋住，
+  遮罩中間顯示解鎖進度百分比。可不可以按**完全由 `GameSession` 決定**（只有它看得到技力與
+  累計消耗），這個模組只負責畫與回報 id。以**簽名比對**決定要不要動 DOM（每幀呼叫）。
+- `src/ui/icons.ts`：新增 `discard` / `float` / `shake` / `fateSwap` 四個圖示；
+  造型刻意彼此差很遠，小尺寸下也分得出來。
+- `src/render/stage.ts`：`SELECTION_STYLE` ＋ `drawSelectionBracket()` 畫「」角括號 ＋
+  加粗外框，**第 1 顆白色、第 2 顆琥珀金**（`--color-accent`，與技力條同色）。
+  標示的幾何完全由半徑推導，**不得位移剛體**；脈動只改透明度。畫在**遊戲區裁切之外**，
+  貼邊的那一顆才不會被切掉半個括號。
+- `src/game/loop.ts`：`selectionPulse = 0.5 + 0.5 × sin(nowMs / 450)`（週期約 900ms），
+  由時鐘推導，渲染器不存狀態。
+- `src/core/input.ts`：`onDrop` 改為 `(point: VirtualPoint | null) => void`（`null` ＝ 鍵盤，
+  照目前瞄準點投放），新增 `onCancel`（`Esc`）取消選取。
+- `src/styles/layout.css`：`.skill-card` 系列；`.skill-grid` 加 `overflow-x: hidden` ＋
+  `scrollbar-gutter: stable` —— 三欄 120 ＋ 欄距 16 剛好 392 對上 393 的內容區，
+  一旦瀏覽器為垂直捲軸留寬就會冒出橫向捲軸（使用者定案：**只准垂直捲動**）。
+
+### 修正 — `reset()` 之後容器會歪掉
+
+`reset()` 把 `shakeOffset` 歸零，卻留下 `appliedShake`（「已經套到牆上的位移」）。
+上一局若在搖晃中結束，下一步就會拿「0 − 舊位移」當差量**再把牆推一次**，
+容器從此歪掉、再也回不去。修法是歸零後呼叫 `applyShakeToWalls()`，把差量補回來。
+
+### 新增 — 測試
+
+- `tests/sp.test.ts`（12 條）：累積、上限鉗制、`setMaxOverride`、`canAfford` / `spend`
+  的邊界（付不起時不得改動任何狀態）、累計消耗與 `resetSpent()`。
+- `tests/skills.test.ts`（12 條）：以 `FakeBoard` 驗證四個子類別的契約
+  （移除目標、翻重力參數、半徑鉗制、需兩個相異目標）。
+- `tests/configLoader.test.ts`：新增 5 條（鉗到 10 並警告、7 靜默接受、3.5 → 4 並警告、
+  `cumulativeSpent` 解析與排序、免費技能又收費時警告），取代原本的「鉗到 5」。
+- 全套 357 條通過；`npm run build` 無錯誤。
+
+---
+
 ## 未發佈 — `feat-drop-feature`（M4 合成核心 ＋ M6 解鎖與圖鑑 ＋ 輪廓碰撞）
 
-分支關係：`feat-ui-init` → `dev` → `feat-drop-feature`。M5（技力與技能）依使用者指示**跳過**，
-不在本節範圍；M6 不依賴 M5。`feat-drop-feature` 額外收錄兩項玩法修正：
+分支關係：`feat-ui-init` → `dev` → `feat-drop-feature`。M5（技力與技能）在**本分支**依使用者指示
+**跳過**，不在本節範圍（M5 已於後續的 `feat-skill-feature` 補上，見上一節）；M6 不依賴 M5。
+`feat-drop-feature` 額外收錄兩項玩法修正：
 **溢位入堆改以接觸判定**、**碰撞框由圓形改為光柵化輪廓（凸分解）**。
 
 ### 新增 — 合成核心、冷卻與計分
@@ -166,8 +313,10 @@ comboMultiplier(n) = min( e^(0.075 × n) / 10, 9 ) + 1
 
 ### 已知缺口（本節仍未涵蓋）
 
-- **M5（技力與技能）依使用者指示跳過**：SKILL LIST 仍為空；`skills.json` 的 `fate_swap`
-  消耗 4 技力但 `sp.max` 只有 3，該技能永遠無法解鎖。
+- ~~**M5（技力與技能）依使用者指示跳過**：SKILL LIST 仍為空；`skills.json` 的 `fate_swap`
+  消耗 4 技力但 `sp.max` 只有 3，該技能永遠無法解鎖。~~
+  **已由 `feat-skill-feature` 解決**（見上一節）：技能欄與四項技能全部落地；
+  `fate_swap` 改為免費、以累計消耗 6 點解鎖。
 - **容器容量與半徑的平衡尚未校準**：以 Lv1（r=20）對 730×784 的可用區，實測要連續投放
   約 130 顆（每 100ms 一顆、模擬約 13 秒）才會真的堆到溢位線。半徑與物理參數全是暫定值
   （`levels.json → _meta.provisional`），待 M0 的半徑校準原型定案後整表重算。
@@ -370,8 +519,10 @@ NEXT 卡改為顯示**放下手上這顆之後**才上場的那顆，而不是�
   為了讓「N 變動時自動重排」有唯一解。
 - **M0 的「描邊快取」與「半徑校準原型」仍缺**。`levels.json` 的 `_meta.provisional`
   已註明半徑與物理參數全是暫定值，待校準原型定案後整表重算。
-- **`skills.json` 的 `fate_swap` 消耗 4 技力，但 `sp.max` 只有 3**，該技能永遠無法解鎖。
-  載入時會發出警告，屬內容設定問題，待 M5 一併處理。
+- ~~**`skills.json` 的 `fate_swap` 消耗 4 技力，但 `sp.max` 只有 3**，該技能永遠無法解鎖。
+  載入時會發出警告，屬內容設定問題，待 M5 一併處理。~~
+  **已由 M5 解決**（`feat-skill-feature`）：`fate_swap` 改為免費技能，
+  以「累計消耗滿 6 點技力」解鎖、用後累計歸零。
 - ~~**溢出規則**（`maxBodies`、`overflowPenalty`、溢出時長）依 `design.md` §10 尚未定案。~~
   **已由 M4 定案**（見上一節）：溢位線相對容器頂緣 30、寬限 3000ms、只看「已進槽」的顆粒。
   原本連帶的現象是：把方團團投進已經擠滿的落點時，重疊解析的力量可能把它彈出容器上方
@@ -394,13 +545,13 @@ NEXT 卡改為顯示**放下手上這顆之後**才上場的那顆，而不是�
 
 | 階段 | 範圍 | 狀態 |
 |:--|:--|:--|
-| M4 | 合成核心、冷卻、Combo、彈跳動畫 | ✅ 已完成（見上一節） |
-| M5 | 技力與技能（含點選選取、「」括號） | ⏭️ **依使用者指示跳過** |
-| M6 | 解鎖系統、`???`、圖鑑 | ✅ 已完成（見上一節） |
+| M4 | 合成核心、冷卻、Combo、彈跳動畫 | ✅ 已完成（見 `feat-drop-feature` 一節） |
+| M5 | 技力與技能（含點選選取、「」括號） | ✅ 已完成（見第一節，`feat-skill-feature`） |
+| M6 | 解鎖系統、`???`、圖鑑 | ✅ 已完成（見 `feat-drop-feature` 一節） |
 | M7 | 本地存檔與後端同步 | ⏳ 待辦 |
 | M8 | 排行榜（全時／每日／每週）與用戶名驗證 | ⏳ 待辦 |
 | M9 | 分析事件、反作弊檢查 | ⏳ 待辦 |
 | M10 | 部署、音效、無障礙 | ⏳ 待辦 |
 
-> M6 不依賴 M5，所以跳過 M5 不影響圖鑑與解鎖。M7 會接手目前由 `game/progress.ts`
+> M6 不依賴 M5，所以 M5 的完成順序不影響圖鑑與解鎖。M7 會接手目前由 `game/progress.ts`
 > 獨力承擔的本地存檔（`endchimerge:unlocks` / `endchimerge:high-score`）。

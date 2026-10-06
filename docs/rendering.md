@@ -26,15 +26,22 @@ main.ts（組裝）
 | 3 | 投放輔助虛線 | `render/stage.ts` → `drawAimGuide()` |
 | 4 | 全部方團團（依物理角度旋轉、依彈跳倍率縮放） | `render/stage.ts` → `drawBody()` |
 | 5 | U 形線框（在方團團**之上**） | `render/container.ts` → `drawContainerFront()` |
-| 6 | 溢位紅虛線（**最上層**，門檻必須隨時看得見） | `render/stage.ts` → `drawOverflowLine()` |
-| 7 | 投放預覽（壓在線框與紅線之上） | `render/stage.ts` → `drawBody()`（`globalAlpha = 0.85`） |
-| 8 | 除錯輔助線（僅 `?debug=1`） | `render/stage.ts` → `drawDebugOverlay()` |
+| 6 | 技能選取標示「」角括號 ＋ 外框（**不受遊戲區裁切**） | `render/stage.ts` → `drawSelectionBracket()` |
+| 7 | 溢位紅虛線（**最上層**，門檻必須隨時看得見） | `render/stage.ts` → `drawOverflowLine()` |
+| 8 | 投放預覽（壓在線框與紅線之上） | `render/stage.ts` → `drawBody()`（`globalAlpha = 0.85`） |
+| 9 | 除錯輔助線（僅 `?debug=1`） | `render/stage.ts` → `drawDebugOverlay()` |
 
-> **第 2 步在方團團之下、第 6 步在方團團之上**是刻意的：警戒區是背景提示（不該遮住角色），
+> **第 2 步在方團團之下、第 7 步在方團團之上**是刻意的：警戒區是背景提示（不該遮住角色），
 > 紅線是門檻（不該被角色遮住）。
 
 > **第 5 步是關鍵**：少了它，方團團看起來是貼在槽前面，而不是裝在槽裡面。
-> **第 7 步在第 5、6 步之後**是刻意的：預覽還沒進到槽裡，所以它應該壓在線框與紅線之上。
+> **第 6 步畫在遊戲區裁切之外**（`clipToPlayField()` 只涵蓋方團團）：它是**互動**提示，
+> 任何時候都要讀得到，貼邊的那一顆才不會被切掉半個括號。
+> **第 8 步在第 5、6、7 步之後**是刻意的：預覽還沒進到槽裡，所以它應該壓在線框與紅線之上。
+>
+> 第 6 步的樣式集中在 `SELECTION_STYLE`（線寬、留白、括號長度、圓角與兩種顏色）；
+> 脈動相位由 `game/loop.ts` 以時鐘推導（週期約 900ms），渲染器不存狀態。標示的幾何**完全由
+> 半徑推導**，所以它永遠跟著方團團，卻不會反過來影響物理。
 
 ---
 
@@ -79,6 +86,8 @@ main.ts（組裝）
 | **溢位警戒區的填色與脈動幅度** | `stage.ts → OVERFLOW_STYLE.zoneColor / zoneAlphaMax / zoneAlphaMin` | `226, 100, 95` / `0.28` / `0.1` |
 | 警戒區脈動週期 | `src/game/loop.ts → overflowFrame()` 的 `Math.sin(this.nowMs / 260)` | 週期 520ms（除數減半＝加倍快） |
 | **合成彈跳的時長與峰值** | `src/core/constants.ts → POP_ANIMATION_MS / POP_PEAK_SCALE` | `180ms / 1.3` |
+| **技能選取標示的線寬／留白／括號／顏色** | `stage.ts → SELECTION_STYLE` | 見該常數（第 1 顆白、第 2 顆琥珀金） |
+| 技能選取標示的脈動週期 | `src/game/loop.ts` 的 `Math.sin(this.nowMs / 450)` | 週期約 900ms（除數減半＝加倍快） |
 | 除錯輔助線顏色 | `stage.ts → DEBUG_STYLE` | 洋紅／青／黃 |
 | 牆壁厚度 | `src/core/constants.ts → WALL_THICKNESS` | `16` |
 | 牆壁在頂緣以上的延伸 | `src/game/containerBox.ts → DEFAULT_WALL_OVERHANG` | `240` |

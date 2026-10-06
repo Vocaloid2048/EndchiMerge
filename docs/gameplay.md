@@ -18,11 +18,16 @@
 | `src/game/overflow.ts` | `OverflowMonitor`：連續溢位計時與判定 |
 | `src/game/progress.ts` | `ProgressStore`：解鎖集合 ＋ 最高分，寫入 localStorage |
 | `src/game/spawnQueue.ts` | 掉落佇列：加權抽樣，並依解鎖集合過濾 |
-| `src/game/session.ts` | 把上面幾個接起來，並投影成畫面資料 |
+| `src/game/sp.ts` | `SpResource`：技力計數器（累積、上限鉗制、扣費、累計消耗），**不含玩法規則** |
+| `src/game/skills/*` | `Skill` 抽象基底 ＋ 四項技能子類別 ＋ registry；只透過 `SkillBoard` 窄介面作用 |
+| `src/game/session.ts` | 把上面幾個接起來（含 `SkillBoard` 的實作），並投影成畫面資料 |
+| `src/ui/skillBar.ts` | 技能欄（可不可以按由 session 決定，這裡只畫與回報 id） |
+| `src/ui/spMeter.ts` | 技力條（一點一條，段數由 `sp.max` 決定） |
 | `src/ui/gameOver.ts` | 結算覆蓋層（只呈現，不算分） |
 
-**依賴方向**：`session.ts` 是唯一的整合點。`merge` / `combo` / `overflow` 都不認識 Matter.js，
-也不認識 DOM，所以三者的邊界條件都能在單元測試裡釘住，不必猜畫面。
+**依賴方向**：`session.ts` 是唯一的整合點。`merge` / `combo` / `overflow` / `sp` 都不認識
+Matter.js，也不認識 DOM，所以它們的邊界條件都能在單元測試裡釘住，不必猜畫面。
+技能同樣被隔離：它們只認得 `SkillBoard`（見 §6.6），所以可以在 `FakeBoard` 上單獨測。
 
 ---
 
@@ -328,7 +333,89 @@ spawnY        = frame.y - dropAboveRim          // container.json，預設 40（
 
 ---
 
-## 6. 調參速查
+## 6. 技力與技能
+
+完整規格見 [`../plan.md`](../plan.md) §3.3 與 `../design.md` §5；這裡只記「規則為什麼長這樣」。
+
+### 6.1 技力（SP）的累積與上限
+
+| 事件 | 增減 |
+|---|---|
+| 成功投放一顆 | `+sp.gainPerDrop`（`0.05`） |
+| 每合成一次 | `+sp.gainPerCombo`（`0.05`） |
+| 使用技能 | `−該技能的 cost`（由 JSON 定義，見 6.3） |
+
+累積掛在**兩條不同的路徑**上，這是刻意的：只看投放會讓「一直投但都沒合成」也能存到滿，
+只看合成又會懲罰剛開局。兩者都給，技力才同時反映「動作」與「成果」。
+
+- **上限** `sp.max` 是「**正整數 1–10**」，因為技力計**一點一條**，上限同時就是段數。
+  載入器會四捨五入並鉗進這個範圍，任何修正都發警告（寫 3.5 會變 4，寫 11 會變 10）。
+- 硬上限 `SP_MAX_CEILING = 10` 是**安全閥**而不是玩法參數：超過它技力條會畫出面板之外。
+- `setMaxOverride(value | null)` 供技能在條件成立時臨時加減上限（UI 保留 API，現行技能未使用）。
+
+### 6.2 解鎖：看的是**當前值**，用掉即時上鎖
+
+| `unlock.kind` | 條件 | 用於 |
+|---|---|---|
+| `sp` | 當前技力 ≥ 該技能的 `cost` | 當棄即棄！／協議：浮動／搖晃！ |
+| `cumulativeSpent` | **本局累計消耗** ≥ `threshold` | 命運互換（免費，門檻 6） |
+
+「當前值」而不是「歷史最高值」是使用者定案：技力計本身就是解鎖器，花掉就上鎖。
+未解鎖的技能卡被一層灰遮罩蓋住，遮罩上顯示**還差多少**（收費技能＝當前值佔比，
+累計消耗型＝累計消耗佔比）。
+
+`cumulativeSpent` 型的技能**用完之後累計歸零**（`SpResource.resetSpent()`），所以它會重新上鎖，
+下一次要再存滿 6 點才能用。`resetSpent()` 只清累計，**不動**當前值與臨時上限。
+
+### 6.3 扣費時機：效果成功執行才扣
+
+選取目標的期間**不扣**、取消**不退**、付不起則**完全不動任何狀態**（`SpResource.spend()`
+先問再扣）。所以玩家不會遇到「按了、取消、技力白花」這種事。
+
+### 6.4 技能作用期間禁止投放
+
+`GameSession.canDrop` 在「選取中、浮動中、搖晃中」一律為假。規則只在這**一處**成立，
+滑鼠、鍵盤、觸控都不可能繞過 —— 否則「技能施放期間禁止投放」會變成看哪個輸入管道而定的軟規則。
+
+### 6.5 各技能的規則細節
+
+**當棄即棄！**（`discard`，cost 1，點選 1 顆）
+移除該顆剛體；其餘方團團自然塌落、重新堆疊 —— 那是物理的結果，不是額外規則。
+
+**協議：浮動**（`protocol_float`，cost 2，即時）
+把重力翻成向上的淨加速度（`gravityY × (1 − liftFactor)`），並**每步把任何上緣越過溢位線的顆粒
+壓回線下、抵銷向上的速度**。使用者要的是「像杯口被壓住」，所以沒有一顆能浮離容器。
+
+> **浮動期間不判溢位**（`updateOverflow()` 直接跳過，計時器**凍結而非歸零**），
+> 結束後再等 `FLOAT_OVERFLOW_BUFFER_MS`（0.5s）才恢復。浮起本來就會逼近警戒線，
+> 照常計時會讓這個技能一用就自殺。
+
+**搖晃！**（`shake`，cost 3，即時）
+容器沿圓周晃動，位移疊在 `containerGeometry` 上，並以 `Body.translate` 的**差量**搬動靜態牆壁。
+所以畫面上是「容器在動、球被晃到」，而不是「整張圖平移」。`sin(πt)` 包絡讓幅度從 0 起、回到 0，
+容器不會在開始或結束的瞬間跳一下。
+
+> **穩定性護欄**：使用者給的幅度（2 秒 5 圈、半徑最多 1/3 容器寬）換算成牆壁線速度是每步數十
+> 世界單位，照字面跑會把整箱甩飛、甚至穿透薄牆。`SHAKE_MAX_BODY_SPEED`（12）把最壞情況壓回
+> 「被搖得很厲害」，而不是「炸開」。這是護欄，不是玩法參數。
+
+**命運互換**（`fate_swap`，免費，點選 2 顆）
+兩顆的**位置與速度一起**交換（只換位置會讓兩顆立刻沿舊慣性跑回去，看起來像沒換成功），
+再對壓在新位置上的鄰居施加擾動。需要**兩個相異目標**，否則不作用。
+
+### 6.6 架構：技能透過窄介面作用於棋盤
+
+`src/game/skills/` 是 `Skill` 抽象基底 ＋ 四個子類別 ＋ `SKILL_CLASSES` registry；
+技能只透過 **`SkillBoard` 窄介面**（`targets` / `removeTarget` / `swapTargets` / `floatAll` /
+`shakeContainer` / `overflowLineY` / `containerWidth`）作用，`GameSession` 是唯一實作者。
+
+好處是「新增技能 = 新增一個 class ＋ 登記 ＋ 一筆 JSON」，**核心迴圈與 Matter.js 都不用碰**；
+技能也無法偷偷改到棋盤的其他狀態。`skills.json` 的 id 對不上任何 class 時**略過並警告**，
+不是丟例外 —— 一份寫錯的設定不該讓整個遊戲起不來。
+
+---
+
+## 7. 調參速查
 
 | 想改什麼 | 去哪改 | 現值 |
 |---|---|---|
@@ -342,6 +429,17 @@ spawnY        = frame.y - dropAboveRim          // container.json，預設 40（
 | 合成後找支撐的吸附上限 | `src/core/constants.ts → MERGE_SETTLE_MAX_DROP` | `80` |
 | 連擊曲線 | `src/game/combo.ts → COMBO_CURVE` | `coefficient 0.075 / cap 9 / base 1` |
 | 彈跳動畫時長與峰值 | `src/core/constants.ts → POP_ANIMATION_MS / POP_PEAK_SCALE` | `180ms / 1.3` |
+| 每次投放／合成的技力 | `skills.json → sp.gainPerDrop / sp.gainPerCombo` | `0.05 / 0.05` |
+| 技力上限 | `skills.json → sp.max` | `3`（可設 1–10 正整數；硬上限常數 `SP_MAX_CEILING`） |
+| 各技能的消耗 | `skills.json → skills[].cost` | `1 / 2 / 3 / 0` |
+| 命運互換的解鎖門檻 | `skills.json → skills[].unlock.threshold` | `6`（累計消耗） |
+| 浮動的時長與抬升倍率 | `skills.json → skills[].params.durationMs / liftFactor` | `1500 / 1.6` |
+| 搖晃的時長／圈數／半徑比例 | `skills.json → skills[].params.durationMs / revolutions / radiusFactor` | `2000 / 5 / 0.12` |
+| 搖晃半徑的硬上限 | `src/core/constants.ts → SHAKE_RADIUS_FACTOR_MAX` | `1/3` |
+| 搖晃的速度護欄 | `src/core/constants.ts → SHAKE_MAX_BODY_SPEED` | `12` |
+| 浮動結束後的溢位緩衝 | `src/core/constants.ts → FLOAT_OVERFLOW_BUFFER_MS` | `500` |
+| 命運互換的周邊擾動 | `skills.json → skills[].params.disturbance` | `6` |
 | 溢位紅線與警戒區樣式 | `src/render/stage.ts → OVERFLOW_STYLE` | 見 `rendering.md` |
+| 技能選取標示的樣式 | `src/render/stage.ts → SELECTION_STYLE` | 見 `rendering.md` |
 | 哪一級可被生成 | `levels.json → levels[].droppable / spawnWeight` | 全 `true` / `10` |
 | 各級分數 | `levels.json → levels[].score` | `0, 1, 2, 4, … 256` |
