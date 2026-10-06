@@ -143,40 +143,44 @@ export const MELTING = {
    * 蛇形走線的參數。
    * The serpentine track parameters.
    *
-   * **走法已由使用者改為橫向蛇形（S 形）**：第一列由左而右、第二列由右而左，如此類推 ——
-   * 不再是設計稿的直行蛇形。走線幾何仍然鏡像設計稿 `Arrow 1`（`1408:2184`）的內縮關係，
-   * 把直行版的數值沿對角鏡射到橫向：
-   * **The walk is now row-major (an S shape), per the user's decision**: row 1 runs left to
-   * right, row 2 right to left, and so on — no longer the mock's column-major walk. The track
-   * geometry still mirrors the inset relations of the mock's decoded `Arrow 1`
-   * (`1408:2184`), mapping the column-major numbers onto the row-major track:
+   * **走法是橫向蛇形（S 形）**（使用者定案）：第一列由左而右、第二列由右而左，如此類推。
+   * **幾何在使用者第二次定案後改為「格網置中＋走道外拓」**：實際用到的欄數在內容區裡
+   * 左右置中（`gridOffsetX()`，見 `ui/serpentine.ts`），左右走道則貼著格網左右緣再各向
+   * 外伸 `laneOverhang` —— 整個 S 比格網更寬、且永遠左右對稱，不再沿用設計稿直行版
+   * 「走道藏在首／末欄中心內側」的內縮（那個內縮是給直行版用的，鏡射到橫向後左 29.925、
+   * 右 44 並不對稱，使用者看到的正是這個歪的 S）。
+   * **The walk is row-major (an S shape), per the user's decision**: row 1 runs left to right,
+   * row 2 right to left, and so on. **The geometry was recentered and widened in the user's
+   * second decision**: the columns actually used are centred in the content box
+   * (`gridOffsetX()`, see `ui/serpentine.ts`), and the two lanes reach `laneOverhang` beyond
+   * the used grid's left/right edges — the whole S is wider than the grid and always
+   * symmetric. This drops the mock's column-major inset (lanes hidden inside the outer
+   * columns), which mirrored onto the row-major track as an asymmetric 29.925/44 pair — the
+   * lopsided S the user reported.
    *
-   * - 直行版上走道 35 ＝ 首列中心 47.2 再往上 12.2 → 橫向版的**左走道** ＝ 首欄中心 42.125
-   *   再往左 12.2 ＝ 29.925。
-   *   The mock's top lane 35 = first row's centre 47.2 raised by 12.2 → the row-major
-   *   **left lane** = first column's centre 42.125 inset by 12.2 = 29.925.
-   * - 直行版下走道 458 ＝ 格網底緣 472 內縮 14 → 橫向版的**右走道** ＝ 格網右緣內縮 14
-   *   （欄數改變時跟著走，見 `ui/serpentine.ts` 的 `trackLanes()`）。
-   *   The mock's bottom lane 458 = grid bottom 472 inset by 14 → the row-major **right lane**
-   *   = grid right edge inset by 14 (it follows the column count — see `trackLanes()` in
-   *   `ui/serpentine.ts`).
- * - 直行版出欄線 364 ＝ 內容區右緣 367 內縮 3 → 橫向版的**出欄線** ＝ 格網底緣內縮 3。
- *   The mock's exit line 364 = content right edge 367 inset by 3 → the row-major **exit
- *   line** = grid bottom inset by 3.
- *
- * **為何不是「每格一段短線」**：表面上看到的是一節一節的短線，但那是因為整條線畫在
- * 素材**之下**，只有格與格之間的縫隙露得出來。所以正確的做法是一條連續線，不是十幾
- * 條獨立線段 —— 兩者在縫隙裡看起來一樣，但連續線在轉彎處才有那四個圓角。
- * **Why not one short tick per pair**: the broken line is an illusion — the path is drawn
- * **under** the art, so only the gaps between cells show through. One continuous path is
- * therefore the right model, not a dozen independent segments; they look the same inside
- * the gaps, but only the continuous path carries the four fillets.
- */
+   * - 出欄線沿用設計稿：直行版出欄線 364 ＝ 內容區右緣 367 內縮 3 → 橫向版的**出欄線**
+   *   ＝ 格網底緣內縮 3。
+   *   The exit line keeps the mock's relation: the mock's exit line 364 = content right edge
+   *   367 inset by 3 → the row-major **exit line** = grid bottom inset by 3.
+   *
+   * **虛線段**（使用者定案）：最後一隻方團團之後的走線以虛線呈現（見 `buildTrack()` 的
+   * `dash`）—— 「路還沒修到那裡」，與未解鎖的灰格同一種語意。
+   * **The dashed tail** (the user's decision): the track past the last dumpling is dashed
+   * (see `dash` in `buildTrack()`) — "the road is not built that far yet", the same semantics
+   * as a locked grey tile.
+   *
+   * **為何不是「每格一段短線」**：表面上看到的是一節一節的短線，但那是因為整條線畫在
+   * 素材**之下**，只有格與格之間的縫隙露得出來。所以正確的做法是一條連續線，不是十幾
+   * 條獨立線段 —— 兩者在縫隙裡看起來一樣，但連續線在轉彎處才有那四個圓角。
+   * **Why not one short tick per pair**: the broken line is an illusion — the path is drawn
+   * **under** the art, so only the gaps between cells show through. One continuous path is
+   * therefore the right model, not a dozen independent segments; they look the same inside
+   * the gaps, but only the continuous path carries the four fillets.
+   */
   track: {
-    /** 左走道的 x（內容區座標）：橫向蛇形在左側的 U 轉位置。 */
-    leftLane: 29.925,
-    /** 走道與出欄線距格網遠緣的內縮。 */
-    laneInset: 14,
+    /** 左右走道超出格網左右緣的長度（內容區座標）；S 形因此比格網寬。 */
+    laneOverhang: 8,
+    /** 出欄線距格網底緣的內縮。 */
     exitInset: 3,
     /** 轉彎圓角；沿用設計稿 `vectorData.styleOverrideTable` 的 `cornerRadius`。 */
     cornerRadius: 32,

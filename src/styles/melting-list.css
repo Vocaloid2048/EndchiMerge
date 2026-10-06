@@ -48,6 +48,7 @@
 }
 
 .roster-track__route,
+.roster-track__dash,
 .roster-track__arrow {
   fill: none;
   stroke: var(--color-track);
@@ -57,6 +58,20 @@
 .roster-track__route {
   stroke-linejoin: miter;
   stroke-linecap: butt;
+}
+
+/*
+ * 虛線段（使用者定案）：最後一隻方團團之後的走線 —— 「路還沒修到那裡」，與未解鎖灰格
+ * 同一種語意。同一支筆、同一個顏色，只把線切成段並略為調暗，讀起來是「尚未啟用」。
+ * The dashed tail (the user's decision): the track past the last dumpling — "the road is not
+ * built that far yet", the same semantics as a locked grey tile. Same pen, same colour; the
+ * line is merely broken and dimmed a touch so it reads as "not yet active".
+ */
+.roster-track__dash {
+  stroke-linejoin: miter;
+  stroke-linecap: butt;
+  stroke-dasharray: 12 10;
+  opacity: 0.72;
 }
 
 /* 箭頭是開放 V 形，端點與尖端收圓比較乾淨。 */

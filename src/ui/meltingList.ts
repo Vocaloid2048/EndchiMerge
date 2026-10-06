@@ -84,9 +84,9 @@ export function createMeltingList(options: MeltingListOptions): MeltingList {
     return fallback;
   }
 
-  function buildCell(slot: RosterSlot): HTMLElement {
+  function buildCell(slot: RosterSlot, offsetX: number): HTMLElement {
     const level = levels[slot.index];
-    const origin = cellOrigin(slot.col, slot.row);
+    const origin = cellOrigin(slot.col, slot.row, offsetX);
 
     const node = el('div', 'roster-cell');
     node.style.left = `${String(origin.x)}px`;
@@ -186,12 +186,22 @@ function buildTrack(track: RosterTrack, gridHeight: number): SVGSVGElement {
   path.setAttribute('d', track.path);
   path.setAttribute('stroke-width', String(strokeWidth));
 
+  /*
+   * 虛線段（使用者定案）：最後一隻方團團之後的走線 —— 「路還沒修到那裡」。
+   * The dashed tail (the user's decision): the track past the last dumpling — "the road is
+   * not built that far yet".
+   */
+  const tail = document.createElementNS(SVG_NS, 'path');
+  tail.classList.add('roster-track__dash');
+  tail.setAttribute('d', track.dash);
+  tail.setAttribute('stroke-width', String(strokeWidth));
+
   const head = document.createElementNS(SVG_NS, 'path');
   head.classList.add('roster-track__arrow');
   head.setAttribute('d', track.arrow);
   head.setAttribute('stroke-width', String(strokeWidth));
 
-  svg.append(path, head);
+  svg.append(path, tail, head);
   return svg;
 }
 
@@ -226,7 +236,7 @@ function buildTrack(track: RosterTrack, gridHeight: number): SVGSVGElement {
     if (layout.track !== null) grid.append(buildTrack(layout.track, gridHeight));
 
     for (const slot of layout.slots) {
-      grid.append(buildCell(slot));
+      grid.append(buildCell(slot, layout.offsetX));
     }
 
     grid.setAttribute(

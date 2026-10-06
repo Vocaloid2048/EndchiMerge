@@ -18,6 +18,7 @@ import {
   cellOrigin,
   columnCentre,
   computeRosterLayout,
+  gridOffsetX,
   rowCentre,
   slotAt,
   trackLanes,
@@ -26,11 +27,15 @@ import { MELTING } from '../src/core/design';
 
 /** 設計稿的格網：4 欄 × 5 列。 */
 const { cols: COLS, rows: ROWS, cellWidth: CW, cellHeight: CH } = MELTING;
-const { leftLane, laneInset, exitInset, cornerRadius, strokeWidth, arrowLength, arrowHalfWidth } =
+const { laneOverhang, exitInset, cornerRadius, strokeWidth, arrowLength, arrowHalfWidth } =
   MELTING.track;
 
-/** 4 欄格網的右走道（格網右緣 337 內縮 14）。 */
-const RIGHT_LANE_4 = COLS * CW - laneInset;
+/** 4 欄格網在內容區裡的置中偏移（使用者定案：S 形左右置中）。 */
+const OFFSET_4 = gridOffsetX(COLS);
+
+/** 左右走道：置中後的格網左右緣再各向外伸 `laneOverhang`。 */
+const LEFT_LANE_4 = OFFSET_4 - laneOverhang;
+const RIGHT_LANE_4 = OFFSET_4 + COLS * CW + laneOverhang;
 
 /** 把 SVG `d` 拆成 `[指令, ...數字]`，讓斷言可以按語意寫而不是比字串。 */
 function parsePath(d: string): { cmd: string; args: number[] }[] {
@@ -85,13 +90,24 @@ describe('slotAt — 橫向蛇形 / row-major S walk', () => {
 });
 
 describe('格網幾何 / grid geometry', () => {
-  it('places a cell at col×pitch, row×pitch', () => {
+  it('places a cell at col×pitch, row×pitch (offset defaults to 0)', () => {
     expect(cellOrigin(2, 3)).toEqual({ x: 2 * CW, y: 3 * CH });
+  });
+
+  it('shifts a cell right by the centring offset when one is given', () => {
+    expect(cellOrigin(2, 3, OFFSET_4)).toEqual({ x: OFFSET_4 + 2 * CW, y: 3 * CH });
   });
 
   it('centres a cell half a cell inside its origin', () => {
     expect(cellCentre(0, 0)).toEqual({ x: CW / 2, y: CH / 2 });
     expect(cellCentre(1, 2)).toEqual({ x: CW + CW / 2, y: 2 * CH + CH / 2 });
+  });
+
+  it('centres the used grid in the content box', () => {
+    /* 4 欄佔 337、內容區 367 → 左右各留 15。 */
+    expect(OFFSET_4).toBe((MELTING.content.width - COLS * CW) / 2);
+    /* 1 欄（84.25）置中在 367 裡。 */
+    expect(gridOffsetX(1)).toBe((MELTING.content.width - CW) / 2);
   });
 
   it('puts the column and row centres exactly on the cell centres', () => {
@@ -103,10 +119,15 @@ describe('格網幾何 / grid geometry', () => {
     }
   });
 
-  it('derives the lanes: left from the first column centre, right from the grid edge', () => {
-    expect(trackLanes(COLS)).toEqual({ leftLane, rightLane: RIGHT_LANE_4 });
-    /* 欄數改變時右走道跟著格網右緣走。 */
-    expect(trackLanes(2).rightLane).toBe(2 * CW - laneInset);
+  it('derives the lanes: the centred grid edges widened by one overhang each side', () => {
+    expect(trackLanes(COLS)).toEqual({ leftLane: LEFT_LANE_4, rightLane: RIGHT_LANE_4 });
+    /* 左右對稱：兩條走道到內容區左右緣的距離相等。 */
+    expect(trackLanes(COLS).leftLane).toBe(
+      MELTING.content.width - trackLanes(COLS).rightLane,
+    );
+    /* 欄數改變時走道跟著（置中後的）格網走。 */
+    expect(trackLanes(2).leftLane).toBe(gridOffsetX(2) - laneOverhang);
+    expect(trackLanes(2).rightLane).toBe(gridOffsetX(2) + 2 * CW + laneOverhang);
   });
 });
 
@@ -165,7 +186,7 @@ describe('走線 / the track', () => {
   it('starts on the left lane of the first row', () => {
     const [first] = parsePath(computeRosterLayout({ count: 19 }).track?.path ?? '');
 
-    expect(first).toEqual({ cmd: 'M', args: [leftLane, rowCentre(0)] });
+    expect(first).toEqual({ cmd: 'M', args: [LEFT_LANE_4, rowCentre(0)] });
   });
 
   it('is one continuous polyline: a single M, then only L and A', () => {
@@ -203,19 +224,23 @@ describe('走線 / the track', () => {
     expect(sweeps).toEqual([1, 1, 0, 0, 1, 1, 0, 0]);
   });
 
-  it('keeps every x on the grid: a lane, or a lane inset by one fillet radius', () => {
+  it('keeps every x on the widened grid: a lane, a lane inset by one fillet radius, or the last slot centre', () => {
     /*
-     * 這條守住「走線不會飄出格網」：每一個水平座標都必須是左／右走道，或走道內縮一個
-     * 圓角半徑（＝列上那一段的端點）。
-     * Guards against the track drifting off-grid: every x must be a lane, or a lane inset
-     * by one fillet radius (the row run's endpoints).
+     * 這條守住「走線不會飄走」：實線段的每一個水平座標都必須是左／右走道、走道內縮一個
+     * 圓角半徑（＝列上那一段的端點）、或最後一個槽位的中心（實線／虛線分界）。
+     * Guards against the track drifting: every x of the solid run must be a lane, a lane
+     * inset by one fillet radius (the row run's endpoints), or the last slot's centre (the
+     * solid/dashed boundary).
      */
     const commands = parsePath(computeRosterLayout({ count: 19 }).track?.path ?? '');
+    /* count 19 的最後一格是第 5 列第 3 欄（row-major：index 18 → col 2）。 */
+    const lastSlotX = OFFSET_4 + 2 * CW + CW / 2;
     const allowed = new Set([
-      leftLane,
+      LEFT_LANE_4,
       RIGHT_LANE_4,
-      leftLane + cornerRadius,
+      LEFT_LANE_4 + cornerRadius,
       RIGHT_LANE_4 - cornerRadius,
+      lastSlotX,
     ]);
 
     for (const command of commands) {
@@ -225,46 +250,59 @@ describe('走線 / the track', () => {
     }
   });
 
-  it('descends the right lane to the exit line, ending just inside the grid bottom', () => {
-    const commands = parsePath(computeRosterLayout({ count: 19 }).track?.path ?? '');
-    const last = commands.at(-1);
+  it('stops the solid run at the last slot and hands the rest to the dashed tail', () => {
+    const track = computeRosterLayout({ count: 19 }).track;
+    const lastSlotX = OFFSET_4 + 2 * CW + CW / 2;
     const exitY = ROWS * CH - exitInset;
 
-    expect(last).toEqual({ cmd: 'L', args: [RIGHT_LANE_4, exitY] });
-    /* 倒數第二個指令是最後一列的橫走，同一條右走道 —— 出欄是純垂直下降。 */
-    expect(commands.at(-2)).toEqual({ cmd: 'L', args: [RIGHT_LANE_4, rowCentre(4)] });
+    /* 實線的最後一筆落在最後一格的中心（第 5 列第 3 欄的中心）。 */
+    expect(parsePath(track?.path ?? '').at(-1)).toEqual({ cmd: 'L', args: [lastSlotX, rowCentre(4)] });
+    /* 虛線段：由最後一格中心沿第 5 列走到右走道，直落出欄線。 */
+    expect(track?.dash).toBe(
+      [`M ${String(lastSlotX)} ${String(rowCentre(4))}`, `L ${String(RIGHT_LANE_4)} ${String(rowCentre(4))}`, `L ${String(RIGHT_LANE_4)} ${String(exitY)}`].join(' '),
+    );
   });
 
-  it('locks the whole 4-column route to the mirrored geometry', () => {
+  it('dashes only the descent when the chain fills the grid', () => {
+    const track = computeRosterLayout({ count: 20 }).track;
+    const lastSlotX = OFFSET_4 + 3 * CW + CW / 2;
+    const exitY = ROWS * CH - exitInset;
+
+    expect(parsePath(track?.path ?? '').at(-1)).toEqual({ cmd: 'L', args: [lastSlotX, rowCentre(4)] });
+    expect(track?.dash).toBe(
+      [`M ${String(lastSlotX)} ${String(rowCentre(4))}`, `L ${String(RIGHT_LANE_4)} ${String(rowCentre(4))}`, `L ${String(RIGHT_LANE_4)} ${String(exitY)}`].join(' '),
+    );
+  });
+
+  it('locks the whole 4-column route to the centred, widened geometry', () => {
     /*
-     * 這條是「幾何合約」：把整條 `d` 寫死。它由設計稿 `Arrow 1`（`1408:2184`）的內縮關係
-     * 沿對角鏡射而來（見 `core/design.ts` 的 `MELTING.track`），任何改動都應該是有意識的，
-     * 而不是順手漂移。
-     * The geometry contract: the entire `d`, frozen. It mirrors the inset relations of the
-     * mock's `Arrow 1` (`1408:2184`) onto the row-major walk (see `MELTING.track` in
-     * `core/design.ts`), so any change here must be deliberate.
+     * 這條是「幾何合約」：把整條 `d` 寫死。它來自使用者定案（格網置中＋走道外拓＋
+     * 最後一隻之後虛線，見 `core/design.ts` 的 `MELTING.track`），任何改動都應該是
+     * 有意識的，而不是順手漂移。
+     * The geometry contract: the entire `d`, frozen. It encodes the user's decisions
+     * (centred grid, widened lanes, dashed tail past the last dumpling — see
+     * `MELTING.track` in `core/design.ts`), so any change here must be deliberate.
      */
     expect(computeRosterLayout({ count: 19 }).track?.path).toBe(
       [
-        'M 29.925 47.2',
-        'L 291 47.2',
-        'A 32 32 0 0 1 323 79.2',
-        'L 323 109.6',
-        'A 32 32 0 0 1 291 141.6',
-        'L 61.925 141.6',
-        'A 32 32 0 0 0 29.925 173.6',
-        'L 29.925 204',
-        'A 32 32 0 0 0 61.925 236',
-        'L 291 236',
-        'A 32 32 0 0 1 323 268',
-        'L 323 298.4',
-        'A 32 32 0 0 1 291 330.4',
-        'L 61.925 330.4',
-        'A 32 32 0 0 0 29.925 362.4',
-        'L 29.925 392.8',
-        'A 32 32 0 0 0 61.925 424.8',
-        'L 323 424.8',
-        'L 323 469',
+        'M 7 47.2',
+        'L 328 47.2',
+        'A 32 32 0 0 1 360 79.2',
+        'L 360 109.6',
+        'A 32 32 0 0 1 328 141.6',
+        'L 39 141.6',
+        'A 32 32 0 0 0 7 173.6',
+        'L 7 204',
+        'A 32 32 0 0 0 39 236',
+        'L 328 236',
+        'A 32 32 0 0 1 360 268',
+        'L 360 298.4',
+        'A 32 32 0 0 1 328 330.4',
+        'L 39 330.4',
+        'A 32 32 0 0 0 7 362.4',
+        'L 7 392.8',
+        'A 32 32 0 0 0 39 424.8',
+        'L 225.625 424.8',
       ].join(' '),
     );
   });
@@ -272,14 +310,18 @@ describe('走線 / the track', () => {
   it('draws a single-row chain without any turn', () => {
     const track = computeRosterLayout({ count: 4, cols: 4, rows: 1 }).track;
     const exitY = 1 * CH - exitInset;
+    const lastSlotX = OFFSET_4 + 3 * CW + CW / 2;
 
     expect(parsePath(track?.path ?? '').filter((c) => c.cmd === 'A')).toHaveLength(0);
     expect(track?.path).toBe(
-      [`M ${String(leftLane)} 47.2`, `L ${String(RIGHT_LANE_4)} 47.2`, `L ${String(RIGHT_LANE_4)} ${String(exitY)}`].join(' '),
+      [`M ${String(LEFT_LANE_4)} 47.2`, `L ${String(lastSlotX)} 47.2`].join(' '),
+    );
+    expect(track?.dash).toBe(
+      [`M ${String(lastSlotX)} 47.2`, `L ${String(RIGHT_LANE_4)} 47.2`, `L ${String(RIGHT_LANE_4)} ${String(exitY)}`].join(' '),
     );
   });
 
-  it('places the arrowhead with its tip on the end of the route', () => {
+  it('places the arrowhead with its tip on the end of the dashed tail', () => {
     const exitY = ROWS * CH - exitInset;
     const commands = parsePath(computeRosterLayout({ count: 19 }).track?.arrow ?? '');
 
@@ -299,11 +341,18 @@ describe('走線 / the track', () => {
     expect(middle.args[0]).toBe(last.args[0] - arrowHalfWidth);
   });
 
-  it('keeps the arrow inside the content box', () => {
-    /* 走線貼著格網右緣走，整支箭頭（含兩翼）都留在內容區 367 之內。 */
+  it('lets the arrow overshoot the content edge like the mock, still inside the panel', () => {
+    /*
+     * 走道外拓之後，箭頭的兩翼伸過內容區右緣 —— 與設計稿一致（`overflow: visible`）。
+     * 但整支箭頭仍在 MELTING LIST 面板（435 寬、內容區左緣 21）之內。
+     * With the widened lanes the arrowhead's wings overshoot the content box's right edge —
+     * like the mock (`overflow: visible`). The whole arrow still sits inside the MELTING LIST
+     * panel (435 wide, content box 21 from the panel's left edge).
+     */
     const right = RIGHT_LANE_4 + arrowHalfWidth;
 
-    expect(right).toBeLessThan(MELTING.content.width);
+    expect(right).toBeGreaterThan(MELTING.content.width);
+    expect(right + MELTING.content.x).toBeLessThan(435);
   });
 
   it('uses the mock’s stroke weight of 5', () => {
