@@ -461,9 +461,20 @@
   outline-offset: 2px;
 }
 
-/* 選取中（或作用中）的技能卡：琥珀金外圈，與畫面上的「」標示同色。 */
+/*
+ * 選取中（或作用中）的技能卡：琥珀金外圈，與畫面上的「」標示同色。
+ * The selected (or acting) skill card: an amber ring in the same colour as the on-canvas marker.
+ *
+ * 圈必須畫在**卡片內側**（`inset`）：技能格網是捲動容器（見 `.skill-grid` 的註解），捲動框
+ * 會把超出內容盒的東西裁掉 —— 畫在外側的 3px 圈在左列／頂行正好壓線，左、上兩邊會被切掉。
+ * 內側圈貼著卡片的 32px 圓角走，永遠不會被裁。
+ * The ring must be drawn **inside** the card (`inset`): the skill grid is a scroll container (see
+ * the `.skill-grid` comment), and a scroll box clips anything past its content box — an outer 3px
+ * ring sits exactly on that edge for the left column and top row, so its left and top sides get
+ * cut off. An inset ring follows the card's 32px radius and can never be clipped.
+ */
 .skill-card--active {
-  box-shadow: 0 0 0 3px var(--color-accent), 0 0 18px var(--color-accent-soft);
+  box-shadow: inset 0 0 0 3px var(--color-accent), 0 0 18px var(--color-accent-soft);
 }
 
 /*
@@ -514,25 +525,31 @@
 
 /*
  * 消耗徽章＝該技能所需的技力值（design.md D14），依消耗分級配色（§5.4）。
- * 形狀是**貼齊卡片右緣的長方形**、數字加大、文字靠右（使用者定案）；左側兩角留 32 圓角，
- * 右側兩角交給卡片自己的圓角裁切，看起來像從邊緣長出來的標籤。
+ * 形狀是**貼齊卡片右緣的長方形**、數字加大、文字靠右（使用者定案）；寬度隨文字內容收放
+ * （不再寫死 54px），左側兩角留 32 圓角，右側兩角交給卡片自己的圓角裁切，看起來像從邊緣
+ * 長出來的標籤。徽章置於卡片圓角頂部（top:0、right:0），由 `overflow:hidden` 的 32px 圓角裁出。
  * The cost badge is the skill's SP cost (D14), coloured by cost tier (§5.4). Its shape is a
  * **rectangle flush with the card's right edge** with a larger number and right-aligned text (the
- * user's decision); the left corners keep the 32 radius while the right ones are clipped by the
- * card's own rounding, so it reads as a tab growing out of the edge.
+ * user's decision); the width fits its text (no fixed 54px), the left corners keep the 32 radius
+ * while the right ones are clipped by the card's own rounding, so it reads as a tab growing out of
+ * the edge. The badge sits at the card's rounded top corner (top:0, right:0), clipped by the 32px
+ * radius of `overflow:hidden`.
  *
- * 累計消耗型技能（免費）顯示的是 `n/m` 進度而不是消耗，由 `skillBar.ts` 決定文字。
- * A cumulative-spend (free) skill shows `n/m` progress instead of a cost; `skillBar.ts` picks the
- * text.
+ * 累計消耗型技能（免費，命運互換）顯示的是 `n/m` 進度而不是消耗，由 `skillBar.ts` 決定文字；
+ * 共用同一個 `.skill-card__badge` 類別，所以上面「貼合文字寬度、置於圓角頂部」的調整對它同樣生效。
+ * A cumulative-spend (free, fate_swap) skill shows `n/m` progress instead of a cost; `skillBar.ts`
+ * picks the text and it shares the same `.skill-card__badge` class, so the fit-to-text / top-corner
+ * adjustments apply to it too.
  */
 .skill-card__badge {
   position: absolute;
-  top: 10px;
+  top: 0;
   right: 0;
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  min-width: 54px;
+  width: fit-content;
+  min-width: 0;
   height: 38px;
   padding: 0 10px 0 14px;
   border-radius: 32px 0 0 32px;
