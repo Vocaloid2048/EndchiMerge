@@ -96,9 +96,9 @@ Every successful drop banks **0.05 SP**, and every merge banks another **0.05 SP
 
 | Skill | Effect | Cost |
 |:--|:--|:--:|
-| 當棄即棄！ (Discard) | Pick one dumpling in the container and remove it | 1 |
-| 協議：浮動 (Protocol: Float) | Lift **all** dumplings upward for a short while, opening up merge opportunities; capped at the warning line | 2 |
-| 搖晃！ (Shake!) | Shake the container to break up a jammed stack | 3 |
+| 當棄即棄！ (Discard) | Pick one dumpling in the container and remove it; whatever was resting on it falls in | 1 |
+| 協議：浮動 (Protocol: Float) | Lift **all** dumplings upward for a short while, opening up merge opportunities; they stop at an invisible plane just below the warning zone | 2 |
+| 搖晃！ (Shake!) | Rattle the whole container side to side like an earthquake to break up a jammed stack | 3 |
 | 命運互換 (Fate Swap) | Pick **two** dumplings, swap their positions and stir the physics around them | free\* |
 
 > \* Fate Swap is not bought with SP: it unlocks once you have **spent 6 SP in total this run**,

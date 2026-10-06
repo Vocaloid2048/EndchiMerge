@@ -382,18 +382,46 @@ spawnY        = frame.y - dropAboveRim          // container.json，預設 40（
 **當棄即棄！**（`discard`，cost 1，點選 1 顆）
 移除該顆剛體；其餘方團團自然塌落、重新堆疊 —— 那是物理的結果，不是額外規則。
 
+> **「自然塌落」有個前提：它們必須是醒着的。** Matter 開了休眠（`ENGINE_ENABLE_SLEEPING`），
+> 而引擎對休眠剛體是**完全跳過**的（`Engine._bodiesApplyGravity`、`Engine._bodiesUpdate` 都
+> `continue`），`Sleeping.afterCollisions` 又只認「被夠快的移動物體撞到」。移除支撐**不產生
+> 任何碰撞事件**，所以那一疊永遠醒不過來、就懸在半空。
+> `GameSession.removeTarget()` 因此在移除後做一次 `wakeAll()`：O(n) 一次、n 是幾十，可忽略。
+
 **協議：浮動**（`protocol_float`，cost 2，即時）
-把重力翻成向上的淨加速度（`gravityY × (1 − liftFactor)`），並**每步把任何上緣越過溢位線的顆粒
-壓回線下、抵銷向上的速度**。使用者要的是「像杯口被壓住」，所以沒有一顆能浮離容器。
+把重力翻成向上的淨加速度（`gravityY × (1 − liftFactor)`），並在容器頂緣**下方**
+`floatCeilingBelowRim`（20）處放一片**隱形靜態平面**當天花板；顆粒升到那裡就被擋住，
+誰都進不了警戒區。
+
+> **為什麼是平面而不是每步傳送**：把越線的顆粒每步壓回線下，等於讓求解器的結果每幀被推翻
+> 一次（會抖），而且「碰到才停」與「被搬回來」在手感上是兩件事。有實體接觸面，顆粒就會自然
+> 疊成「壓在杯蓋下」的形狀。施放的那一刻另外做**一次** `clampFloatCeiling()`，把已經在天花板
+> 之上的顆粒先壓回平面下方 —— 否則它們會卡在平面內部，被求解器從最近的出口（通常是上方）
+> 擠出容器。
+>
+> **浮動期間每步都叫醒全部顆粒**：休眠剛體收不到重力，不叫醒的話只有剛動過的顆粒會浮 ——
+> 這正是「只有局部有浮動」那隻 bug。
 
 > **浮動期間不判溢位**（`updateOverflow()` 直接跳過，計時器**凍結而非歸零**），
-> 結束後再等 `FLOAT_OVERFLOW_BUFFER_MS`（0.5s）才恢復。浮起本來就會逼近警戒線，
-> 照常計時會讓這個技能一用就自殺。
+> 結束後再等 `FLOAT_OVERFLOW_BUFFER_MS`（0.5s）才恢復。天花板本來就在溢位線之下，
+> 所以浮動期間的上緣不可能觸發溢位判定。
+>
+> 平面是**靜態**剛體，所以 `reset()` 的 `removeDynamicBodies()` 帶不走它，必須顯式移除 ——
+> 否則上一局留下的隱形平面會讓新的一局從第一幀就撞到一道看不見的天花板。
 
 **搖晃！**（`shake`，cost 3，即時）
-容器沿圓周晃動，位移疊在 `containerGeometry` 上，並以 `Body.translate` 的**差量**搬動靜態牆壁。
-所以畫面上是「容器在動、球被晃到」，而不是「整張圖平移」。`sin(πt)` 包絡讓幅度從 0 起、回到 0，
-容器不會在開始或結束的瞬間跳一下。
+**地震**：容器沿一條與水平成 `axisTiltDeg`（15°）的斜線往復，位移疊在 `containerGeometry` 上，
+並以 `Body.translate` 的**差量**搬動靜態牆壁；同時**每步對每一顆方團團施加慣性力**
+（`applyShakeImpulse()`），另有 `upwardFactor`（10%）的持續向上托力。`sin(πt)` 包絡讓幅度從 0
+起、回到 0，容器不會在開始或結束的瞬間跳一下。
+
+> **牆只是畫面，顆粒的力是另一回事。** 牆是**靜態**剛體：`Body.translate` 不帶速度，而
+> `Sleeping.afterCollisions` 對「靜態 vs 休眠」直接 `continue` —— 牆掃過去連叫醒都做不到。
+> 所以「容器在動、球沒動」不是錯覺，是原本的實作真的只搬了牆。
+>
+> 慣性力的量值取自容器自己的加速度：站在震動地面上的物體感受到與地面**相同**的加速度，
+> 容器位移是 `A·sin(ωt)`，所以 `Δv = A·ω²·sin(ωt)·Δt²`，再乘 `SHAKE_BODY_ACCEL_COUPLING`
+> （0.3）折算成手感。
 
 > **穩定性護欄**：使用者給的幅度（2 秒 5 圈、半徑最多 1/3 容器寬）換算成牆壁線速度是每步數十
 > 世界單位，照字面跑會把整箱甩飛、甚至穿透薄牆。`SHAKE_MAX_BODY_SPEED`（12）把最壞情況壓回
@@ -434,9 +462,13 @@ spawnY        = frame.y - dropAboveRim          // container.json，預設 40（
 | 各技能的消耗 | `skills.json → skills[].cost` | `1 / 2 / 3 / 0` |
 | 命運互換的解鎖門檻 | `skills.json → skills[].unlock.threshold` | `6`（累計消耗） |
 | 浮動的時長與抬升倍率 | `skills.json → skills[].params.durationMs / liftFactor` | `1500 / 1.6` |
-| 搖晃的時長／圈數／半徑比例 | `skills.json → skills[].params.durationMs / revolutions / radiusFactor` | `2000 / 5 / 0.12` |
+| 浮動天花板在容器頂緣下方多深 | `container.json → floatCeilingBelowRim` | `20` |
+| 浮動天花板那塊隱形平面的厚度 | `src/core/constants.ts → FLOAT_CEILING_THICKNESS` | `40` |
+| 搖晃的時長／圈數／幅度比例 | `skills.json → skills[].params.durationMs / revolutions / radiusFactor` | `2000 / 5 / 0.12` |
+| 搖晃擺動軸的傾角／持續向上力 | `skills.json → skills[].params.axisTiltDeg / upwardFactor` | `15 / 0.1` |
 | 搖晃半徑的硬上限 | `src/core/constants.ts → SHAKE_RADIUS_FACTOR_MAX` | `1/3` |
 | 搖晃的速度護欄 | `src/core/constants.ts → SHAKE_MAX_BODY_SPEED` | `12` |
+| 搖晃施加在顆粒上的加速度耦合 | `src/core/constants.ts → SHAKE_BODY_ACCEL_COUPLING` | `0.3` |
 | 浮動結束後的溢位緩衝 | `src/core/constants.ts → FLOAT_OVERFLOW_BUFFER_MS` | `500` |
 | 命運互換的周邊擾動 | `skills.json → skills[].params.disturbance` | `6` |
 | 溢位紅線與警戒區樣式 | `src/render/stage.ts → OVERFLOW_STYLE` | 見 `rendering.md` |

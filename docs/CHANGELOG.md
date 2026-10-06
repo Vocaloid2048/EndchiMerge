@@ -11,6 +11,8 @@
 
 分支關係：`dev` → `feat-skill-feature`。技能欄、技力計與四項技能全部落地，**M5 至此完成**。
 本節同時**取代**前一節的兩處已知缺口：`skills.json` 的 `fate_swap` 死鎖（見下）與「SKILL LIST 為空」。
+技能上線後使用者試玩回報的三個問題（移除支撐不掉、浮動只有局部、搖晃顆粒不跟）同屬本節，
+見「修正 — 技能看不到物理反應」。
 
 ### 變更 — 技力經濟重定義（使用者定案）
 
@@ -55,9 +57,10 @@
 - `Skill.ts`：抽象基底。持有 `SkillDef`，對外暴露 `id / name / cost / targeting / unlock /
   pickCount / params / requiresTargets / durationMs`，並宣告 `apply(board, targets)`。
 - `DiscardSkill.ts`（當棄即棄！）：`board.removeTarget(targets[0].id)`；目標已消失則 no-op。
+  目標與其餘顆粒的「落下」是物理的事 —— 但前提是它們**醒着**，那由 `GameSession` 負責（見下）。
 - `FloatSkill.ts`（協議：浮動）：`board.floatAll({ durationMs, liftFactor })`。
-- `ShakeSkill.ts`（搖晃！）：把半徑比例**鉗到 `SHAKE_RADIUS_FACTOR_MAX`**、圈數至少 1，
-  再 `board.shakeContainer(...)`。
+- `ShakeSkill.ts`（搖晃！）：把半徑比例**鉗到 `SHAKE_RADIUS_FACTOR_MAX`**、圈數至少 1、
+  擺動軸傾角鉗到 60°、向上力鉗到水平衝量的一半，再 `board.shakeContainer(...)`。
 - `FateSwapSkill.ts`（命運互換）：要求**兩個相異目標**，否則不作用；成功才
   `board.swapTargets(a, b, disturbance)`。
 - `index.ts`：`SKILL_CLASSES` 對照表 ＋ `hasSkillImplementation()` / `createSkill()` /
@@ -102,25 +105,60 @@
   - 場上沒有方團團時**一律不受理**任何技能，免得白白扣技力。
 - **技能作用期間禁止投放**：`canDrop` 增加 `!isSkillBusy`（＝選取中、浮動中或搖晃中）。
   規則只在這**一處**成立，滑鼠／鍵盤／觸控都無法繞過。
-- **浮動**：把重力翻成向上的淨加速度（`gravityY × (1 − liftFactor)`），並每步把任何
-  上緣越過溢位線的顆粒**壓回線下並抵銷向上的速度** —— 使用者要的「像杯口被壓住」。
+- **浮動**：把重力翻成向上的淨加速度（`gravityY × (1 − liftFactor)`），並在容器頂緣**下方**
+  `floatCeilingBelowRim`（20）處放一片**隱形靜態平面**當天花板 —— 使用者要的「像杯口被壓住」。
+  施放時另做**一次** `clampFloatCeiling()`，把已經在平面之上的顆粒先壓回下方（否則它們卡在
+  平面內部，會被求解器從最近的出口擠出容器）。平面是**靜態**剛體，`removeDynamicBodies()`
+  帶不走，所以 `reset()` 必須顯式移除它。
 - **浮動期間不判溢位**：`updateOverflow()` 直接跳過（連計時器都不推進，**凍結而非歸零**），
-  結束後再等 `FLOAT_OVERFLOW_BUFFER_MS`（0.5s）才恢復。照常計時會讓這個技能一用就自殺。
-- **搖晃**：容器沿圓周晃動（`sin(πt)` 包絡，起訖皆為 0，不會在開始／結束瞬間「跳」一下），
-  位移疊在 `containerGeometry` 上（連帶溢位線、警戒區、裁切範圍一起走），並以
-  `Body.translate` 的**差量**搬動靜態牆壁 —— 所以畫面上是「容器在動、球被晃到」，
-  而不是「整張圖平移」。
+  結束後再等 `FLOAT_OVERFLOW_BUFFER_MS`（0.5s）才恢復。天花板本來就在溢位線之下，所以浮動
+  期間的上緣不可能觸發溢位判定。
+- **搖晃＝地震**：容器沿一條與水平成 `axisTiltDeg`（15°）的斜線往復（`sin(πt)` 包絡，起訖皆為
+  0，不會在開始／結束瞬間「跳」一下），位移疊在 `containerGeometry` 上（連帶溢位線、警戒區、
+  裁切範圍一起走），並以 `Body.translate` 的**差量**搬動靜態牆壁。
+  - **牆只是畫面**：牆是靜態剛體，`translate` 不帶速度，而 `Sleeping.afterCollisions` 對
+    「靜態 vs 休眠」直接 `continue` —— 牆掃過去連叫醒都做不到。真正讓顆粒動起來的是
+    `applyShakeImpulse()`：每步對每一顆施加慣性力，量值取自容器自己的加速度
+    （`Δv = A·ω²·sin(ωt)·Δt²`），再乘 `SHAKE_BODY_ACCEL_COUPLING`（0.3）折算成手感，
+    另有 `upwardFactor`（10%）的持續向上托力。
   - 使用者給的幅度（2 秒 5 圈、半徑最多 1/3 容器寬）**照字面跑會把整箱甩飛、甚至穿透薄牆**，
     因此有 `SHAKE_MAX_BODY_SPEED`（12）作為穩定性護欄：最壞情況是「被搖得很厲害」而不是「炸開」。
 - `reset()`：清空技力、選取、浮動／搖晃狀態並**還原重力**（上一局可能在浮動中結束，
   不還原會讓新的一局一開始就反重力）。
 
+### 修正 — 技能看不到物理反應（休眠剛體從未被喚醒）
+
+使用者回報三個症狀，根因是同一個：**Matter 開了休眠，而引擎對休眠剛體是完全跳過的**。
+
+`ENGINE_ENABLE_SLEEPING` 為 `true`，而 `Engine._bodiesApplyGravity` 與 `Engine._bodiesUpdate`
+都是 `if (body.isStatic || body.isSleeping) continue;`；喚醒只發生在
+`Sleeping.afterCollisions`，而它只認「被一顆 `motion` 夠大的**移動**物體撞到」，而且開頭就
+`if (bodyA.isStatic || bodyB.isStatic) continue;`。
+
+| 症狀 | 原因 |
+|---|---|
+| 移除一顆後，本來壓在它上面的方團團**懸空不掉** | 移除支撐**不產生碰撞事件**，那一疊永遠醒不過來 |
+| 浮動**只有局部**浮起 | 重力翻了，但休眠顆粒收不到重力，只有剛動過的會浮 |
+| 搖晃時顆粒**完全不跟** | 牆是**靜態**剛體，上述 `continue` 讓「靜態 vs 休眠」永遠不喚醒 |
+
+修法是 `GameSession.wakeAll()`，在技能真正碰到棋盤時把全部顆粒叫醒：`removeTarget()` 移除後、
+`swapTargets()` 交換後、`shakeContainer()` 開始時，以及浮動／搖晃進行中的每一步。成本是 O(n)
+一次（n 是幾十），可忽略 —— 相對地，「每顆掛一個每幀觸發的 listener」既貴（每幀 O(n) 個回呼
+＋ closure 配置）又**修不好這個問題**，因為物理本來每步就在跑。
+
+同步改掉兩個「指令有下、物理沒跟上」的地方：搖晃不再只搬牆（改為對顆粒施加慣性力），浮動不再
+只靠每步傳送壓回（改為實體天花板平面）。
+
 ### 新增 — 技能卡 UI 與畫布選取標示
 
 - `src/ui/skillBar.ts`：技能欄（每行 3 格；第 4 個技能因此落在第二行第一格）。
-  卡片＝**圖示 ＋ 名稱 ＋ 消耗徽章**；未解鎖時**整張卡**被一層不透明灰遮罩蓋住，
-  遮罩中間顯示解鎖進度百分比。可不可以按**完全由 `GameSession` 決定**（只有它看得到技力與
-  累計消耗），這個模組只負責畫與回報 id。以**簽名比對**決定要不要動 DOM（每幀呼叫）。
+  卡片＝**圓圈框住的圖示 ＋ 名稱 ＋ 貼齊右緣的徽章**（比照使用者提供的參考圖），累計消耗型
+  技能在名稱下方多一行說明；未解鎖時**整張卡**被一層不透明灰遮罩蓋住，遮罩中間顯示解鎖進度
+  百分比。可不可以按**完全由 `GameSession` 決定**（只有它看得到技力與累計消耗），這個模組
+  只負責畫與回報 id。以**簽名比對**決定要不要動 DOM（每幀呼叫）。
+  - **徽章顯示什麼由 `unlockKind` 決定**：收費技能顯示消耗數字（字級加大），累計消耗型技能
+    顯示 `n/m` 進度並在下方標明「累計使用技力」。`SkillCardState` 因此多帶
+    `unlockKind / cumulativeSpent / unlockThreshold`。
 - `src/ui/icons.ts`：新增 `discard` / `float` / `shake` / `fateSwap` 四個圖示；
   造型刻意彼此差很遠，小尺寸下也分得出來。
 - `src/render/stage.ts`：`SELECTION_STYLE` ＋ `drawSelectionBracket()` 畫「」角括號 ＋
@@ -131,9 +169,10 @@
   由時鐘推導，渲染器不存狀態。
 - `src/core/input.ts`：`onDrop` 改為 `(point: VirtualPoint | null) => void`（`null` ＝ 鍵盤，
   照目前瞄準點投放），新增 `onCancel`（`Esc`）取消選取。
-- `src/styles/layout.css`：`.skill-card` 系列；`.skill-grid` 加 `overflow-x: hidden` ＋
-  `scrollbar-gutter: stable` —— 三欄 120 ＋ 欄距 16 剛好 392 對上 393 的內容區，
-  一旦瀏覽器為垂直捲軸留寬就會冒出橫向捲軸（使用者定案：**只准垂直捲動**）。
+- `src/styles/layout.css`：`.skill-card` 系列；卡片圓角 32（使用者定案的「edge round 32dp」），
+  徽章貼右時的外側兩角就是靠這個圓角 ＋ `overflow: hidden` 裁出來的。`.skill-grid` 加
+  `overflow-x: hidden` ＋ `scrollbar-gutter: stable` —— 三欄 120 ＋ 欄距 16 剛好 392 對上
+  393 的內容區，一旦瀏覽器為垂直捲軸留寬就會冒出橫向捲軸（使用者定案：**只准垂直捲動**）。
 
 ### 修正 — `reset()` 之後容器會歪掉
 
@@ -145,8 +184,12 @@
 
 - `tests/sp.test.ts`（12 條）：累積、上限鉗制、`setMaxOverride`、`canAfford` / `spend`
   的邊界（付不起時不得改動任何狀態）、累計消耗與 `resetSpent()`。
-- `tests/skills.test.ts`（12 條）：以 `FakeBoard` 驗證四個子類別的契約
-  （移除目標、翻重力參數、半徑鉗制、需兩個相異目標）。
+- `tests/skills.test.ts`（15 條）：以 `FakeBoard` 驗證四個子類別的契約
+  （移除目標、翻重力參數、半徑鉗制、需兩個相異目標，以及搖晃的傾角／向上力預設與鉗制）。
+- `tests/sessionSkills.test.ts`（6 條）：**整合層**的行為測試，每一條都先讓堆疊**睡着**再施放，
+  所以「沒有喚醒」的實作一定失敗（已驗證：拿掉 `wakeAll()` 會紅 3 條）。涵蓋移除支撐後上層
+  落下、浮動抬升已入睡的顆粒、浮動停在頂緣下方的天花板、`reset()` 不留下那片隱形平面、
+  地震甩動睡着的顆粒，以及累計消耗的解鎖資訊有傳到卡片。
 - `tests/configLoader.test.ts`：新增 5 條（鉗到 10 並警告、7 靜默接受、3.5 → 4 並警告、
   `cumulativeSpent` 解析與排序、免費技能又收費時警告），取代原本的「鉗到 5」。
 - 全套 357 條通過；`npm run build` 無錯誤。
