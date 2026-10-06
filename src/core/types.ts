@@ -102,12 +102,25 @@ export interface LevelsConfig {
 
 /** 技力（SP）經濟參數。 */
 export interface SpSettings {
-  /** 配置上限；載入時會被鉗制到 `SP_MAX_CEILING` 以下。 */
+  /**
+   * 配置上限；載入時鉗制到 `[SP_MIN, SP_MAX_CEILING]`（1–10 的正整數）。
+   * The configured cap, clamped to `[SP_MIN, SP_MAX_CEILING]` (a positive integer 1–10).
+   *
+   * 它同時是**技力條的段數**（一點一條），所以改上限會直接改變 UI 寬度 —— 這也是
+   * 使用者定案「只接受正整數 [1…10]」的理由。
+   * It doubles as the meter's segment count (one pill per point), which is why the user
+   * restricted it to a positive integer in 1–10.
+   */
   max: number;
   /** 開局技力。 */
   initial: number;
   /** 每次成功投放累積的技力。 */
   gainPerDrop: number;
+  /**
+   * 每次**合成**（＝每次 combo）累積的技力（使用者定案）。
+   * SP gained per **merge** (each combo step), per the user's decision.
+   */
+  gainPerCombo: number;
   /** 滿值後是否允許繼續累積。 */
   overflowAllowed: boolean;
 }
@@ -115,16 +128,52 @@ export interface SpSettings {
 /** 技能的選取方式。 */
 export type SkillTargeting = 'user_pick' | 'immediate';
 
+/**
+ * 技能的解鎖條件（使用者定案）。
+ * A skill's unlock condition (the user's decision).
+ *
+ * - `sp`：**當前技力值 ≥ 消耗**就解鎖，扣費後即時上鎖。三個消耗技能都是這一種。
+ * - `cumulativeSpent`：**累計消耗滿 `threshold` 點技力**才解鎖，而且**免費**（消耗 0）；
+ *   用掉之後累計歸零、重新上鎖。命運互換用的是這一種。
+ * - `sp`: unlocked while the **current SP ≥ cost**, locked again the moment it is spent.
+ * - `cumulativeSpent`: unlocked once **`threshold` SP points have been spent in total**, and
+ *   then **free** (cost 0); using it resets the running total, locking it again.
+ */
+export type SkillUnlock = { kind: 'sp' } | { kind: 'cumulativeSpent'; threshold: number };
+
 /** 技能行為參數；不同技能使用的欄位不同，未使用的欄位留空。 */
 export interface SkillParams {
-  /** 浮動持續時間，毫秒。 */
+  /**
+   * 「作用中」的持續時間，毫秒。浮動與搖晃會用到；瞬發技能（當棄即棄／命運互換）為 0。
+   * How long the effect stays active, in ms. Used by float and shake; instant skills
+   * (discard / fate swap) leave it at 0.
+   *
+   * 這段時間內**禁止繼續投放**方團團（使用者定案）。
+   * Dropping is blocked for this whole window (the user's decision).
+   */
   durationMs?: number;
-  /** 浮動的向上力；null 表示待定。 */
-  forceY?: number | null;
-  /** 搖晃的水平衝量上限；null 表示待定。 */
-  impulse?: number | null;
-  /** 命運互換時對鄰居的擾動；null 表示待定。 */
-  disturbance?: number | null;
+  /**
+   * 浮動的向上加速度，以**重力倍率**表示：> 1 才會淨上升（1.6 ≈ 淨 0.6g 向上）。
+   * The float's upward acceleration as a **multiple of gravity**: above 1 gives a net rise
+   * (1.6 ≈ 0.6g net upward).
+   *
+   * 用倍率而非絕對值，是因為它天生與重力同量級，換 `gravityY` 也不用重調。
+   * A ratio rather than an absolute value because it is inherently the same order as gravity,
+   * so retuning `gravityY` needs no follow-up here.
+   */
+  liftFactor?: number;
+  /**
+   * 搖晃時容器沿圓周轉動的圈數（使用者定案：2 秒約 5 圈）。
+   * Revolutions the container orbits during a shake (the user's decision: about 5 in 2 s).
+   */
+  revolutions?: number;
+  /**
+   * 搖晃的位移半徑，以**容器寬度**為比例。硬上限 1/3（使用者定案）。
+   * The shake's orbit radius as a fraction of the **container width**. Hard cap 1/3.
+   */
+  radiusFactor?: number;
+  /** 命運互換時對鄰居的擾動衝量，世界單位／步。 */
+  disturbance?: number;
 }
 
 export interface SkillDef {
@@ -132,12 +181,14 @@ export interface SkillDef {
   id: string;
   /** 顯示名稱。 */
   name: string;
-  /** 消耗技力，也決定技能格徽章的數字。 */
+  /** 消耗技力，也決定技能格徽章的數字；免費技能為 0。 */
   cost: number;
   /** 選取方式。 */
   targeting: SkillTargeting;
   /** `user_pick` 需要依序點選幾顆；`immediate` 為 0。 */
   pickCount: number;
+  /** 解鎖條件。 */
+  unlock: SkillUnlock;
   /** 行為參數。 */
   params: SkillParams;
   /** 覆寫自動排序用的序號；未提供時按消耗技力排序。 */

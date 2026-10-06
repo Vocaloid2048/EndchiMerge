@@ -195,15 +195,68 @@ describe('loadConfig — 欄位層級的降級 / field-level fallback', () => {
     expect(messages.some((message) => message.includes('radius'))).toBe(true);
   });
 
-  it('clamps sp.max to the hard ceiling', async () => {
+  it('clamps sp.max into [1, 10] and warns', async () => {
     const { warn, messages } = collectWarnings();
     const files = allValid({
-      'skills.json': JSON.stringify({ sp: { max: 9 }, skills: [{ id: 'a', name: 'A', cost: 1, params: {} }] }),
+      'skills.json': JSON.stringify({ sp: { max: 42 }, skills: [{ id: 'a', name: 'A', cost: 1, params: {} }] }),
     });
     const config = await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files), onWarn: warn });
 
-    expect(config.skills.sp.max).toBe(5);
-    expect(messages.some((message) => message.includes('hard ceiling'))).toBe(true);
+    expect(config.skills.sp.max).toBe(10);
+    expect(messages.some((message) => message.includes('outside [1, 10]'))).toBe(true);
+  });
+
+  it('accepts any whole number in 1..10 without warning', async () => {
+    const { warn, messages } = collectWarnings();
+    const files = allValid({
+      'skills.json': JSON.stringify({ sp: { max: 7 }, skills: [{ id: 'a', name: 'A', cost: 1, params: {} }] }),
+    });
+    const config = await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files), onWarn: warn });
+
+    expect(config.skills.sp.max).toBe(7);
+    expect(messages).toEqual([]);
+  });
+
+  it('rounds a fractional sp.max and warns', async () => {
+    const { warn, messages } = collectWarnings();
+    const files = allValid({
+      'skills.json': JSON.stringify({ sp: { max: 3.5 }, skills: [{ id: 'a', name: 'A', cost: 1, params: {} }] }),
+    });
+    const config = await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files), onWarn: warn });
+
+    expect(config.skills.sp.max).toBe(4);
+    expect(messages.some((message) => message.includes('whole number'))).toBe(true);
+  });
+
+  it('parses a cumulativeSpent unlock and sorts it after the SP skills', async () => {
+    const { warn } = collectWarnings();
+    const files = allValid({
+      'skills.json': JSON.stringify({
+        sp: { max: 3 },
+        skills: [
+          { id: 'free', name: '免費', cost: 0, targeting: 'immediate', params: {}, unlock: { kind: 'cumulativeSpent', threshold: 6 } },
+          { id: 'paid', name: '收費', cost: 1, targeting: 'immediate', params: {}, unlock: { kind: 'sp' } },
+        ],
+      }),
+    });
+    const config = await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files), onWarn: warn });
+
+    /* 免費技能殿後，即使它的消耗（0）比另一個低。 */
+    expect(config.skills.skills.map((skill) => skill.id)).toEqual(['paid', 'free']);
+    expect(config.skills.skills[1]?.unlock).toEqual({ kind: 'cumulativeSpent', threshold: 6 });
+  });
+
+  it('warns when a cumulativeSpent skill also charges SP', async () => {
+    const { warn, messages } = collectWarnings();
+    const files = allValid({
+      'skills.json': JSON.stringify({
+        sp: { max: 3 },
+        skills: [{ id: 'contradiction', name: '矛盾', cost: 2, params: {}, unlock: { kind: 'cumulativeSpent', threshold: 6 } }],
+      }),
+    });
+    await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files), onWarn: warn });
+
+    expect(messages.some((message) => message.includes('meant to be free'))).toBe(true);
   });
 
   it('drops skill entries without an id and keeps the rest', async () => {

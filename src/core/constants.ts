@@ -63,12 +63,42 @@ export function spriteScaleForRadius(radius: number): number {
  * 技力硬上限（程式常數）。
  * Hard ceiling for SP (a code constant).
  *
- * 這是安全閥，不是玩法參數：`skills.json` 的 `sp.max` 載入時會被鉗制到此值以下。
- * 存在理由是避免配置檔寫出一個爆掉 UI 的數字。
+ * 這是安全閥，不是玩法參數：`skills.json` 的 `sp.max` 載入時會被鉗制到此值以下，
+ * 而且必須是 **1 到 10 之間的正整數**（使用者定案）。存在理由是避免配置檔寫出一個
+ * 爆掉 UI 的數字 —— 技力條「一點一條」，上限同時決定段數。
  * This is a safety valve rather than a gameplay parameter: `sp.max` from
- * `skills.json` is clamped to it on load, so a bad config cannot blow up the UI.
+ * `skills.json` is clamped to it on load and must be a **positive integer between 1 and
+ * 10** (the user's decision), because the SP meter draws one pill per point and the cap
+ * therefore also fixes the segment count.
  */
-export const SP_MAX_CEILING = 5;
+export const SP_MAX_CEILING = 10;
+
+/** 技力上限的下界（正整數，至少 1 點）。 */
+export const SP_MIN = 1;
+
+/**
+ * 技力上限的預設值（`skills.json → sp.max` 的內建替身）。
+ * The default SP cap, mirroring `skills.json → sp.max`.
+ */
+export const SP_DEFAULT_MAX = 3;
+
+/**
+ * 搖晃位移半徑的硬上限（容器寬度的 1/3，使用者定案）。
+ * The hard cap on a shake's orbit radius, as a fraction of the container width.
+ */
+export const SHAKE_RADIUS_FACTOR_MAX = 1 / 3;
+
+/**
+ * 浮動結束後的溢位緩衝，毫秒（使用者定案 0.5 秒）。
+ * The overflow buffer after a float ends, in ms (the user's decision: 0.5 s).
+ *
+ * 浮動期間完全不計算溢位；結束後再等這一段緩衝才恢復計算，讓落回來的堆疊有時間安定，
+ * 不會因為浮動剛結束就立刻被判越線。
+ * Overflow is not evaluated at all while floating, and stays paused for this buffer
+ * afterwards so the falling stack has time to settle instead of tripping the instant the
+ * float ends.
+ */
+export const FLOAT_OVERFLOW_BUFFER_MS = 500;
 
 /** Matter.js 求解器迭代次數。提高位置迭代可減少堆疊穿透，代價是 CPU。 */
 export const ENGINE_POSITION_ITERATIONS = 8;

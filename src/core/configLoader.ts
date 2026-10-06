@@ -29,7 +29,7 @@
  *    unlocked. Such self-contradictory configs warn up front.
  */
 
-import { SP_MAX_CEILING } from './constants';
+import { SP_DEFAULT_MAX, SP_MAX_CEILING, SP_MIN } from './constants';
 import type {
   AllConfig,
   BrandingConfig,
@@ -41,6 +41,7 @@ import type {
   SkillParams,
   SkillsConfig,
   SkillTargeting,
+  SkillUnlock,
   SpSettings,
 } from './types';
 
@@ -80,18 +81,19 @@ const DEFAULT_LEVELS: readonly LevelDef[] = [
 ];
 
 const DEFAULT_SP: SpSettings = {
-  max: 3,
+  max: SP_DEFAULT_MAX,
   initial: 0,
-  gainPerDrop: 1,
+  gainPerDrop: 0.05,
+  gainPerCombo: 0.05,
   overflowAllowed: false,
 };
 
-/** 技能表（design.md D8：數量由 JSON 決定，這裡只是壞檔時的替身）。 */
+/** 技能表（design.md D11：數量由 JSON 決定，這裡只是壞檔時的替身）。 */
 const DEFAULT_SKILLS: readonly SkillDef[] = [
-  { id: 'discard', name: '捨棄', cost: 1, targeting: 'user_pick', pickCount: 1, params: {} },
-  { id: 'protocol_float', name: '協議：浮動', cost: 2, targeting: 'immediate', pickCount: 0, params: { durationMs: 1500, forceY: null } },
-  { id: 'shake', name: '搖晃！', cost: 3, targeting: 'immediate', pickCount: 0, params: { impulse: null, durationMs: 600 } },
-  { id: 'fate_swap', name: '命運互換', cost: 4, targeting: 'user_pick', pickCount: 2, params: { disturbance: null } },
+  { id: 'discard', name: '當棄即棄！', cost: 1, targeting: 'user_pick', pickCount: 1, unlock: { kind: 'sp' }, params: {} },
+  { id: 'protocol_float', name: '協議：浮動', cost: 2, targeting: 'immediate', pickCount: 0, unlock: { kind: 'sp' }, params: { durationMs: 1500, liftFactor: 1.6 } },
+  { id: 'shake', name: '搖晃！', cost: 3, targeting: 'immediate', pickCount: 0, unlock: { kind: 'sp' }, params: { durationMs: 2000, revolutions: 5, radiusFactor: 0.12 } },
+  { id: 'fate_swap', name: '命運互換', cost: 0, targeting: 'user_pick', pickCount: 2, unlock: { kind: 'cumulativeSpent', threshold: 6 }, params: { disturbance: 6 } },
 ];
 
 const DEFAULT_CONTAINER: ContainerConfig = {
@@ -273,13 +275,36 @@ function sanitizeSp(raw: unknown, warn: ConfigWarning): SpSettings {
     return { ...DEFAULT_SP };
   }
   const read = makeReader(warn, 'skills.sp');
-  const requested = read.number(raw, 'max', DEFAULT_SP.max, { min: 0 });
 
-  /* 硬上限是程式常數，JSON 不得超越（design.md D12）。 */
-  if (requested > SP_MAX_CEILING) {
-    warn(`skills.sp.max (${requested}) exceeds the hard ceiling; clamped to ${SP_MAX_CEILING}.`);
+  /*
+   * 上限是**正整數，1 到硬上限之間**（使用者定案）。這裡用「鉗制 ＋ 警告」而不是
+   * 「不合法就整個退回預設」：作者寫 42 通常代表「開到最大」，把它變成預設的 3 反而更
+   * 意外；寫 3.5 則是打錯，四捨五入再提醒一次就夠。兩個方向都吵，因為這個數字同時決定
+   * 技力條段數，錯了畫面會直接少畫或爆版。
+   * The cap must be a **positive integer between 1 and the hard ceiling** (the user's
+   * decision). It is clamped with a warning rather than rejected: an author writing 42 means
+   * "as high as possible", and silently dropping to the default 3 would be more surprising;
+   * 3.5 is a typo that rounding fixes. Both directions warn, because the cap also fixes the
+   * meter's segment count — a wrong value shows up as missing pills or a blown-out panel.
+   */
+  let max = DEFAULT_SP.max;
+  const rawMax = raw['max'];
+  if (rawMax !== undefined) {
+    if (typeof rawMax === 'number' && Number.isFinite(rawMax)) {
+      const rounded = Math.round(rawMax);
+      if (rounded < SP_MIN || rounded > SP_MAX_CEILING) {
+        max = Math.min(Math.max(rounded, SP_MIN), SP_MAX_CEILING);
+        warn(`skills.sp.max (${rawMax}) is outside [${SP_MIN}, ${SP_MAX_CEILING}]; clamped to ${max}.`);
+      } else if (rounded !== rawMax) {
+        max = rounded;
+        warn(`skills.sp.max (${rawMax}) must be a whole number; rounded to ${max}.`);
+      } else {
+        max = rounded;
+      }
+    } else {
+      warn(`skills.sp.max is invalid (${JSON.stringify(rawMax)}); using ${DEFAULT_SP.max}.`);
+    }
   }
-  const max = Math.min(requested, SP_MAX_CEILING);
 
   const initial = read.number(raw, 'initial', DEFAULT_SP.initial, { min: 0 });
   if (initial > max) warn(`skills.sp.initial (${initial}) exceeds sp.max (${max}); it will be clamped at runtime.`);
@@ -288,6 +313,7 @@ function sanitizeSp(raw: unknown, warn: ConfigWarning): SpSettings {
     max,
     initial,
     gainPerDrop: read.number(raw, 'gainPerDrop', DEFAULT_SP.gainPerDrop, { min: 0 }),
+    gainPerCombo: read.number(raw, 'gainPerCombo', DEFAULT_SP.gainPerCombo, { min: 0 }),
     overflowAllowed: read.boolean(raw, 'overflowAllowed', DEFAULT_SP.overflowAllowed),
   };
 }
@@ -298,21 +324,54 @@ function sanitizeParams(raw: unknown, fallback: SkillParams, section: string, wa
     warn(`${section}.params is not an object; using the default.`);
     return { ...fallback };
   }
-  /** 允許 null 的數值欄位：null 代表「待調」，語意上合法。 */
-  const nullable = (key: keyof SkillParams, fallbackValue: number | null | undefined): number | null | undefined => {
+  /**
+   * 選填數值：缺欄位就沿用 fallback（不吵），有欄位但非法就警告後用 fallback。
+   * Optional numbers: a missing key inherits the fallback silently, an invalid one warns.
+   */
+  const optional = (key: keyof SkillParams, fallbackValue: number | undefined): number | undefined => {
     if (!(key in raw)) return fallbackValue;
     const value = raw[key];
-    if (value === null) return null;
     if (typeof value === 'number' && Number.isFinite(value)) return value;
     warn(`${section}.params.${key} is invalid (${JSON.stringify(value)}); using ${String(fallbackValue)}.`);
     return fallbackValue;
   };
   return {
-    durationMs: nullable('durationMs', fallback.durationMs) as number | undefined,
-    forceY: nullable('forceY', fallback.forceY) as number | null | undefined,
-    impulse: nullable('impulse', fallback.impulse) as number | null | undefined,
-    disturbance: nullable('disturbance', fallback.disturbance) as number | null | undefined,
+    durationMs: optional('durationMs', fallback.durationMs),
+    liftFactor: optional('liftFactor', fallback.liftFactor),
+    revolutions: optional('revolutions', fallback.revolutions),
+    radiusFactor: optional('radiusFactor', fallback.radiusFactor),
+    disturbance: optional('disturbance', fallback.disturbance),
   };
+}
+
+/**
+ * 解析解鎖條件。缺欄位時沿用 fallback；無法辨識就退回 `{ kind: 'sp' }`，因為那是
+ * 預設語意（當前技力值 ≥ 消耗），最不容易誤鎖。
+ * Parse the unlock condition. A missing key inherits the fallback; an unrecognised one falls
+ * back to `{ kind: 'sp' }`, the default meaning (current SP ≥ cost), which is the least likely
+ * to lock a skill out by mistake.
+ */
+function sanitizeUnlock(raw: unknown, fallback: SkillUnlock | undefined, section: string, warn: ConfigWarning): SkillUnlock {
+  if (raw === undefined) return fallback ?? { kind: 'sp' };
+  if (!isRecord(raw)) {
+    warn(`${section}.unlock is not an object; using the default unlock.`);
+    return fallback ?? { kind: 'sp' };
+  }
+
+  const kind = raw['kind'];
+  if (kind === 'sp') return { kind: 'sp' };
+
+  if (kind === 'cumulativeSpent') {
+    const threshold = raw['threshold'];
+    if (typeof threshold === 'number' && Number.isFinite(threshold) && threshold > 0) {
+      return { kind: 'cumulativeSpent', threshold };
+    }
+    warn(`${section}.unlock.threshold is invalid (${JSON.stringify(threshold)}); using 1.`);
+    return { kind: 'cumulativeSpent', threshold: 1 };
+  }
+
+  warn(`${section}.unlock.kind is invalid (${JSON.stringify(kind)}); using the default unlock.`);
+  return fallback ?? { kind: 'sp' };
 }
 
 function sanitizeSkill(raw: unknown, index: number, warn: ConfigWarning): SkillDef | null {
@@ -347,6 +406,7 @@ function sanitizeSkill(raw: unknown, index: number, warn: ConfigWarning): SkillD
     cost: read.number(raw, 'cost', fallback?.cost ?? 1, { min: 0 }),
     targeting,
     pickCount: targeting === 'immediate' ? 0 : pickCount,
+    unlock: sanitizeUnlock(raw.unlock, fallback?.unlock, `skills[${index}]`, warn),
     params: sanitizeParams(raw.params, fallback?.params ?? {}, `skills[${index}]`, warn),
   };
 
@@ -360,15 +420,27 @@ function sanitizeSkill(raw: unknown, index: number, warn: ConfigWarning): SkillD
 }
 
 /**
- * 技能排序（design.md D13）：`sortOrder` 覆寫 > 消耗技力遞增 > 即時技能先於需選取技能。
- * Skill ordering (design.md D13): explicit `sortOrder` wins, then ascending cost,
- * then immediate skills before ones that need a target selection.
+ * 技能排序（design.md D13 ＋ 使用者定案）：
+ * `sortOrder` 覆寫 > **免費／特殊條件技能殿後** > 消耗技力遞增 > 即時技能先於需選取技能。
+ * Skill ordering (design.md D13 plus the user's decision): explicit `sortOrder` wins, then
+ * **free / condition-gated skills last**, then ascending cost, then immediate skills before
+ * ones that need a target selection.
+ *
+ * **為什麼特殊技能殿後而不是照消耗排**：命運互換消耗 0（免費），照消耗排會排到第一格 ——
+ * 但它是最晚才解鎖的，放在最前反而最刺眼。使用者定案的技能欄順序是
+ * 「當棄即棄 → 協議：浮動 → 搖晃！ → 命運互換」，所以免費技能固定排在最後。
+ * **Why specials go last rather than by cost**: fate swap costs 0, so cost ordering would put
+ * it first — yet it unlocks last, which makes the flashiest slot the most useless one. The
+ * user's slot order is discard → float → shake → fate swap, so free skills always sort last.
  */
 function sortSkills(skills: SkillDef[]): SkillDef[] {
+  const isSpecial = (skill: SkillDef): number => (skill.unlock.kind === 'sp' ? 0 : 1);
+
   return [...skills].sort((a, b) => {
     const orderA = a.sortOrder ?? Number.POSITIVE_INFINITY;
     const orderB = b.sortOrder ?? Number.POSITIVE_INFINITY;
     if (orderA !== orderB) return orderA - orderB;
+    if (isSpecial(a) !== isSpecial(b)) return isSpecial(a) - isSpecial(b);
     if (a.cost !== b.cost) return a.cost - b.cost;
     return (a.pickCount > 0 ? 1 : 0) - (b.pickCount > 0 ? 1 : 0);
   });
@@ -447,14 +519,40 @@ function sanitizeBranding(raw: unknown, warn: ConfigWarning): BrandingConfig {
 }
 
 /**
- * 載入期語意檢查：技能若比技力上限還貴，就永遠解鎖不了（design.md §5.1）。
+ * 載入期語意檢查：消耗超過技力上限的技能永遠解鎖不了（design.md §5.1）。
  * Semantic check: a skill costing more than `sp.max` can never be unlocked.
+ *
+ * **只檢查「當前值 ≥ 消耗」那一種解鎖**：免費／特殊條件技能（`cumulativeSpent`）不看
+ * `sp.max`，所以它們不會觸發這條警告。沒有這道區分的話，命運互換（消耗 0）也會被誤報。
+ * **Only the `sp` unlock kind is checked**: free / condition-gated skills ignore `sp.max`, so
+ * they must not trip this warning — without the distinction, fate swap (cost 0) would be
+ * reported as well.
  */
 function checkSkillUnlockability(skills: SkillsConfig, warn: ConfigWarning): void {
   for (const skill of skills.skills) {
+    if (skill.unlock.kind !== 'sp') continue;
     if (skill.cost > skills.sp.max) {
       warn(
         `skill "${skill.id}" costs ${skill.cost} SP but sp.max is ${skills.sp.max}; it can never be unlocked.`,
+      );
+    }
+  }
+}
+
+/**
+ * 載入期語意檢查：免費／特殊條件技能不該同時收費。
+ * Semantic check: a condition-gated skill must not also charge SP.
+ *
+ * 兩者同時存在時，`cumulativeSpent` 的累計與扣費會互相打架（用了還要扣，卻又說免費），
+ * 所以這裡把它當成配置錯誤指出來。
+ * With both present, "free" and "charges SP" contradict each other, so the combination is
+ * reported as a config error.
+ */
+function checkFreeSkillCost(skills: SkillsConfig, warn: ConfigWarning): void {
+  for (const skill of skills.skills) {
+    if (skill.unlock.kind === 'cumulativeSpent' && skill.cost > 0) {
+      warn(
+        `skill "${skill.id}" is gated by cumulative spend but still costs ${skill.cost} SP; it is meant to be free.`,
       );
     }
   }
@@ -551,6 +649,7 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<AllCo
   const container = sanitizeContainer(containerRaw, warn);
 
   checkSkillUnlockability(skills, warn);
+  checkFreeSkillCost(skills, warn);
   checkDropClearsOverflow(container, warn);
 
   return {

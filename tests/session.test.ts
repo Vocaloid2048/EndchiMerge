@@ -57,7 +57,7 @@ const CONFIG: AllConfig = {
     levels: [level(1, 13.5, 70), level(2, 17.3, 25), level(3, 22.1, 5), level(4, 28.3, 0, false)],
   },
   skills: {
-    sp: { max: 3, initial: 0, gainPerDrop: 1, overflowAllowed: false },
+    sp: { max: 3, initial: 0, gainPerDrop: 0.05, gainPerCombo: 0.05, overflowAllowed: false },
     skills: [],
   },
   container: {
