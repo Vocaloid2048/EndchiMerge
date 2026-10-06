@@ -191,30 +191,39 @@ async function bootstrap(): Promise<void> {
   const leaderboardSource = createLocalLeaderboard();
 
   /**
-   * 把剛結束的一局送進榜單，**一局只記一次**。
-   * Record the run that just ended, **once per run**.
+   * 這一局的識別碼。一局會在多個時間點被記錄（見 `recordCurrentRun`），靠它 upsert 成同一筆。
+   * The id of the run in progress. A run is recorded at several moments (see `recordCurrentRun`),
+   * and this id turns them all into one upserted row.
+   */
+  let runId = createRunId();
+
+  /**
+   * 把**目前這一局**的成績送進榜單。可以安全地重複呼叫 —— 同一個 `runId` 只會 upsert 同一筆。
+   * Record **the run in progress**. Safe to call repeatedly: the `runId` upserts a single row.
    *
-   * 一局有兩個結束途徑：自然結束（溢位逾時）與玩家按重新開始把它丟掉。兩條都經由這裡記錄，
-   * `runRecorded` 保證不會重複 —— 否則「結束之後再按重新開始」會把同一局記兩次。
-   * A run ends two ways: naturally (overflow timed out) or because the player restarted. Both
-   * record through here, and `runRecorded` keeps it to once — otherwise "end, then restart"
-   * would count the same run twice.
+   * 一局不只在一處結束。自然結束（溢位逾時）、玩家按重新開始把它丟掉、玩家關掉分頁或切到
+   * 背景、以及玩家在排行榜發布列按下儲存的那一刻 —— 這些都是同一局的不同時間點，任何一個都
+   * 可能是「最後一次機會」。以前只在自然結束與重新開始記錄，於是關分頁的一局就永遠消失了；
+   * 現在全部走這一條，`runId` 保證不會變成兩筆。
+   * A run does not end in one place. It can end naturally (overflow timed out), be abandoned with
+   * restart, have its page closed or backgrounded, or be published the moment save is pressed in
+   * the leaderboard — all the same run at different moments, any of which may be the last chance.
+   * Previously only a natural end and a restart recorded it, so a run whose tab was closed simply
+   * vanished. Everything now goes through here, and `runId` keeps it to one row.
    *
    * 完全沒有動靜的一局（0 分、0 次合成）不記：那些是誤按，記進去只會把榜洗掉。
    * A run with no activity at all (0 score, 0 merges) is skipped: a stray tap would otherwise
    * wash out the board.
    */
-  let runRecorded = false;
-  const recordFinishedRun = (): void => {
-    if (runRecorded) return;
+  const recordCurrentRun = (): void => {
     if (session.score <= 0 && session.mergedCount <= 0) return;
 
     leaderboardSource.record({
+      runId,
       score: session.score,
       maxCombo: session.maxCombo,
       merges: session.mergedCount,
     });
-    runRecorded = true;
   };
 
   /**
@@ -225,15 +234,30 @@ async function bootstrap(): Promise<void> {
    */
   const restartRun = (): void => {
     /* 先記錄再重設：`reset()` 會把這一局的成績清掉。 */
-    recordFinishedRun();
+    recordCurrentRun();
     session.reset();
-    runRecorded = false;
+    /* 新的一局用新的 id，舊那筆才不會被這一局的成績覆蓋。 */
+    runId = createRunId();
     shownGameOver = false;
     gameOver?.hide();
     runStartBest = progress.highScore;
     updateHud();
     updateSkills();
   };
+
+  /*
+   * 「這一局還沒結束就要走了」的兩個出口：分頁被關掉／切走。`pagehide` 涵蓋關閉、重新載入
+   * 與前後頁導覽；`visibilitychange → hidden` 涵蓋切到背景（手機切 app、切分頁）。兩個都只
+   * 呼叫 upsert，所以之後玩家回來繼續玩、這一局真的結束時，同一筆會被更新成最終成績。
+   * The two exits for "leaving before the run is over": the page closing or going away.
+   * `pagehide` covers close, reload and navigation; `visibilitychange → hidden` covers being
+   * backgrounded (app switch on mobile, tab switch). Both merely upsert, so if the player comes
+   * back and finishes the run, the same row is updated with the final numbers.
+   */
+  window.addEventListener('pagehide', recordCurrentRun);
+  document.addEventListener('visibilitychange', (): void => {
+    if (document.visibilityState === 'hidden') recordCurrentRun();
+  });
 
   /**
    * 技力條與技能欄每幀同步。兩個元件都只在值真的變了才動 DOM，所以這樣做是便宜的。
@@ -281,7 +305,19 @@ async function bootstrap(): Promise<void> {
    * separate page). It mounts on `layout.root` so it scales with the canvas, and every row and
    * rank comes from `leaderboardSource`.
    */
-  const leaderboard = createLeaderboard({ host: layout.root, source: leaderboardSource });
+  const leaderboard = createLeaderboard({
+    host: layout.root,
+    source: leaderboardSource,
+    /*
+     * 玩家在發布列按下儲存（且同意分享）時，把**正在進行**的這一局也交出去：他的預期是
+     * 「按完就看到自己的紀錄」，而不是「等這一局結束再說」。upsert 保證之後這一局真的結束
+     * 時只是把同一筆更新成最終成績。
+     * Pressing save in the publish bar (with sharing on) also hands over the run **in progress**:
+     * the player expects to see his record right away rather than after the run ends. The upsert
+     * means finishing the run later just updates that same row with the final numbers.
+     */
+    onPublish: recordCurrentRun,
+  });
   const leaderboardButton = layout.regions.toolbar.querySelector<HTMLButtonElement>(
     'button[data-action="leaderboard"]',
   );
@@ -318,8 +354,8 @@ async function bootstrap(): Promise<void> {
 
       if (current.isOver && !shownGameOver) {
         shownGameOver = true;
-        /* 這一局到此為止：先上榜，再彈結算（`runRecorded` 保證只記一次）。 */
-        recordFinishedRun();
+        /* 這一局到此為止：先上榜（upsert 最終成績），再彈結算。 */
+        recordCurrentRun();
         gameOver?.show({
           score: current.score,
           merged: current.mergedCount,
@@ -403,6 +439,22 @@ async function bootstrap(): Promise<void> {
     detachScale,
   };
   exposeForDebugging(context);
+}
+
+/**
+ * 產生一局的識別碼。
+ * Mint a run id.
+ *
+ * 用 `crypto.randomUUID`（安全上下文才有），沒有就退回「時間 ＋ 亂數」。這只是本地去重用的
+ * 標籤，不需要密碼學強度；接上真後端時它會變成那一筆紀錄的 id。
+ * Uses `crypto.randomUUID` where available, otherwise a time-plus-random fallback. It is only a
+ * local de-duplication label, not a security token; with a real backend it becomes the record id.
+ */
+function createRunId(): string {
+  const uuid = globalThis.crypto?.randomUUID;
+  return typeof uuid === 'function'
+    ? uuid.call(globalThis.crypto)
+    : `${String(Date.now())}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 /**

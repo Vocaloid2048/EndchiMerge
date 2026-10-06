@@ -257,6 +257,79 @@ describe('createLocalLeaderboard — 紀錄與排序 / recording and ordering', 
     expect(board.snapshot('score').entries[0]?.name).toBe('阿爺');
   });
 
+  it('upserts one row per run when the same runId is recorded again', () => {
+    /*
+     * 一局會在多處被記錄（自然結束、重新開始、分頁被隱藏、按儲存），全部都帶同一個 `runId`。
+     * 少了 upsert，同一局會變成好幾筆；有了它，後面記的成績只會覆蓋同一筆。
+     * A run is recorded from several places (game over, restart, page hidden, save pressed) and
+     * they all carry the same `runId`. Without the upsert the run turns into several rows; with
+     * it, a later recording just overwrites the same row.
+     */
+    const { board } = makeBoard();
+    board.setSharing(true);
+
+    board.record({ runId: 'run-1', score: 300, maxCombo: 2, merges: 3 });
+    board.record({ runId: 'run-1', score: 900, maxCombo: 5, merges: 7 });
+
+    const entries = board.snapshot('score').entries;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ id: 'run-1', score: 900, maxCombo: 5, merges: 7 });
+  });
+
+  it('keeps different runIds apart', () => {
+    const { board } = makeBoard();
+    board.setSharing(true);
+
+    board.record({ runId: 'run-1', score: 100, maxCombo: 1, merges: 1 });
+    board.record({ runId: 'run-2', score: 200, maxCombo: 2, merges: 2 });
+
+    expect(board.snapshot('score').entries.map((entry) => entry.id)).toEqual(['run-2', 'run-1']);
+  });
+
+  it('claims previously unnamed records when a name is set later', () => {
+    /*
+     * 名稱是在排行榜彈窗裡才問的，所以玩家多半先玩、後命名 —— 那些場次記下時是無名的。
+     * 命名後它們必須歸到他名下，否則他會以為「自己的紀錄不見了」。
+     * The name is only asked for inside the popup, so the player usually plays first and names
+     * himself later — those runs were stored nameless. Naming must claim them, or he concludes
+     * his records are missing.
+     */
+    const { board } = makeBoard();
+    board.setSharing(true);
+
+    board.record({ runId: 'r1', score: 100, maxCombo: 0, merges: 0 });
+    board.record({ runId: 'r2', score: 200, maxCombo: 0, merges: 0 });
+    expect(board.snapshot('score').entries.map((entry) => entry.name)).toEqual(['', '']);
+
+    board.setDisplayName('阿爺');
+
+    expect(board.snapshot('score').entries.map((entry) => entry.name)).toEqual(['阿爺', '阿爺']);
+  });
+
+  it('does not rename records that already carry a name', () => {
+    const { board } = makeBoard();
+    board.setSharing(true);
+
+    board.setDisplayName('阿爺');
+    board.record({ runId: 'r1', score: 100, maxCombo: 0, merges: 0 });
+    board.setDisplayName('阿嬤');
+    board.record({ runId: 'r2', score: 50, maxCombo: 0, merges: 0 });
+
+    expect(board.snapshot('score').entries.map((entry) => entry.name)).toEqual(['阿爺', '阿嬤']);
+  });
+
+  it('persists the claimed names through storage', () => {
+    const storage = new FakeStorage();
+    const keys = { entries: 'e', name: 'n', sharing: 's' };
+    const first = createLocalLeaderboard({ storage, keys, now: () => 5, idFactory: idSequence() });
+    first.setSharing(true);
+    first.record({ score: 77, maxCombo: 1, merges: 1 });
+    first.setDisplayName('阿爺');
+
+    const second = createLocalLeaderboard({ storage, keys, now: () => 5 });
+    expect(second.snapshot('score').entries[0]?.name).toBe('阿爺');
+  });
+
   it('survives a corrupt save instead of throwing', () => {
     const { storage, board } = makeBoard();
     storage.seed('e', '{ not json');

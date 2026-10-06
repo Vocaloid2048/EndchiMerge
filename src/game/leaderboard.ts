@@ -33,6 +33,18 @@
  *    against **the player's own run history** ("beats X% of your own runs") and carried by
  *    `LeaderboardRank.percentile`. When the server lands, that same field just gets the real
  *    cross-player number.
+ * 5. **一局只佔一筆（`runId` upsert）**：一局會在多處被記錄（自然結束、重新開始、分頁被隱藏
+ *    或關閉、玩家在發布列按儲存），這些都是**同一局**的不同時間點，不該各留一筆。帶 `runId`
+ *    時 `record()` 是 upsert，後記的數值覆蓋先記的。
+ *    **One row per run (`runId` upsert).** A run is recorded from several places (natural game
+ *    over, restart, the page being hidden or closed, save pressed in the publish bar) — all the
+ *    same run at different moments, and none should leave its own row. With a `runId`, `record()`
+ *    upserts, so a later recording overwrites an earlier one.
+ * 6. **命名時認領無名紀錄**：名稱是在榜上才問的，先前記下的場次是無名的；`setDisplayName()`
+ *    把那些空名的紀錄歸到新名字下，玩家才看得到「自己的紀錄」。
+ *    **Naming claims the nameless.** The name is only asked for on the board, so earlier runs are
+ *    nameless; `setDisplayName()` moves those to the new name so the player actually sees his own
+ *    records.
  *
  * 只做儲存與排序，不含任何遊戲規則（與 `game/progress.ts` 的分工相同）。
  * Storage and ordering only, no game rules — the same split as `game/progress.ts`.
@@ -74,13 +86,28 @@ export interface LeaderboardEntry {
   at: number;
 }
 
-/** 一局結束時要送進榜單的成績。 */
+/** 一局要送進榜單的成績。 */
 export interface LeaderboardRun {
   score: number;
   maxCombo: number;
   merges: number;
   /** 覆寫時間戳；未提供時用時鐘。測試用。 */
   at?: number;
+  /**
+   * 這一局的穩定識別碼。提供時 `record()` 是 **upsert** —— 同一局再記一次會更新同一筆，
+   * 而不是多出一筆；未提供時每次呼叫都新增一筆（純粹的「一局一筆」）。
+   * A stable id for this run. When given, `record()` **upserts**: recording the same run again
+   * updates that one entry instead of adding another. Without it every call appends a new entry.
+   *
+   * 需要它的理由：一局不只在一處被記錄（自然結束、按重新開始、關分頁／切到背景、以及玩家
+   * 在發布列按下儲存的那一刻），逐處去重很容易漏；有了這個 id，同一局怎麼記都只會是一筆，
+   * 而且每次記都把最新的成績寫進去。
+   * It exists because a run is recorded from several places (a natural game over, a restart, the
+   * page being hidden/closed, and the moment the player presses save in the publish bar), and
+   * de-duplicating at every call site is easy to get wrong. With the id, a run is one row no
+   * matter how often it is recorded, and each recording just writes the latest numbers.
+   */
+  runId?: string;
 }
 
 /** 某一分類下，玩家自己那筆的排名資訊。 */
@@ -122,13 +149,29 @@ export interface LeaderboardSnapshot {
 export interface LeaderboardSource {
   /** 目前的顯示名；未設定為空字串。 */
   readonly displayName: string;
-  /** 設定顯示名（呼叫端已驗證過）。 */
+  /**
+   * 設定顯示名（呼叫端已驗證過）。
+   * Set the display name (already validated by the caller).
+   *
+   * 實作應把先前**沒有名字**的紀錄一併歸到這個名字下：玩家是先玩、後命名（發布列是在排行榜
+   * 彈窗裡才問名稱的），那些在他命名之前記下的場次本來是無名的，命名後他會預期看到「自己的
+   * 紀錄」。已經有名字的紀錄不動 —— 那是他在那個名字下跑出來的成績。
+   * An implementation should claim previously **unnamed** records for this name: the player plays
+   * first and names themselves later (the publish bar lives in the leaderboard popup), so runs
+   * recorded before naming are nameless, and he expects to see "his own records" once he names
+   * himself. Records that already carry a name are left alone.
+   */
   setDisplayName(name: string): void;
   /** 是否同意分享成績上榜（全域開關）。 */
   readonly sharing: boolean;
   /** 切換分享意願。 */
   setSharing(on: boolean): void;
-  /** 記錄一局。每局都記（使用者定案），與是否同意分享無關。 */
+  /**
+   * 記錄一局。每局都記（使用者定案），與是否同意分享無關；帶 `runId` 時是 upsert（同一局
+   * 只會有一筆，重複記錄更新數值）。
+   * Record a run. Every run is recorded (the user's decision) regardless of sharing; with a
+   * `runId` this upserts, so a run stays a single row whose numbers get updated.
+   */
   record(run: LeaderboardRun): void;
   /** 讀取某一分類的前 N 名與自己的名次。 */
   snapshot(category: LeaderboardCategory, limit?: number): LeaderboardSnapshot;
@@ -288,6 +331,24 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
     setDisplayName(name: string): void {
       displayName = name;
       if (storage !== null) writeItem(storage, nameKey, name);
+
+      /*
+       * 認領先前「未命名」的紀錄。
+       * Claim the previously unnamed records.
+       *
+       * 發布列是在排行榜彈窗裡才問名稱的，所以玩家多半先玩了好幾局、之後才命名 —— 那些場次
+       * 記下時 `displayName` 還是空字串。命名之後若不去認領，他會在榜上看到一堆「（未命名）」
+       * 而以為「自己的紀錄不見了」。只認領空名的，有名字的不動。
+       * The publish bar asks for a name inside the leaderboard popup, so the player usually plays
+       * several runs before naming himself — those entries were stored while `displayName` was an
+       * empty string. Without claiming them he would see a board full of "（未命名）" and conclude
+       * his records are missing. Only empty names are claimed; named entries are left untouched.
+       */
+      if (name !== '' && entries.some((entry) => entry.name === '')) {
+        entries = entries.map((entry) => (entry.name === '' ? { ...entry, name } : entry));
+        if (storage !== null) writeItem(storage, entriesKey, JSON.stringify(entries));
+      }
+
       notify();
     },
 
@@ -302,8 +363,14 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
     },
 
     record(run: LeaderboardRun): void {
-      const entry: LeaderboardEntry = {
-        id: idFactory(),
+      /*
+       * 同一局用 `runId` upsert，沒有 id 才新增一筆。數值一律以**這一次**為準 —— 一局可能
+       * 先被記成中途的成績（背景分頁、按儲存），之後再被記成最終成績，後者要蓋掉前者。
+       * With a `runId` the same run upserts; only a run without an id appends. The numbers always
+       * come from *this* call: a run may first be recorded mid-way (tab hidden, save pressed) and
+       * later with its final score, and the later recording must win.
+       */
+      const fields = {
         name: displayName,
         score: toCount(run.score) ?? 0,
         maxCombo: toCount(run.maxCombo) ?? 0,
@@ -311,7 +378,15 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
         at: toCount(run.at) ?? now(),
       };
 
-      entries = capEntries([...entries, entry], limit);
+      const id = run.runId ?? idFactory();
+      const index = run.runId === undefined ? -1 : entries.findIndex((entry) => entry.id === id);
+
+      const updated =
+        index >= 0
+          ? entries.map((entry, at) => (at === index ? { ...entry, ...fields } : entry))
+          : [...entries, { id, ...fields }];
+
+      entries = capEntries(updated, limit);
       if (storage !== null) writeItem(storage, entriesKey, JSON.stringify(entries));
       notify();
     },
