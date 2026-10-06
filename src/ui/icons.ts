@@ -1,48 +1,68 @@
 /**
- * 工具列與面板用的線性圖示。
- * Line icons for the toolbar and panels.
+ * 工具列、面板與技能欄的圖示。
+ * Icons for the toolbar, panels and the skill bar.
  *
- * 全部是手寫的 24×24 線稿，刻意不使用圖示套件：本專案目前零 UI 依賴，而工具列
- * 只有六個圖示，為此拉進一整套 icon library 並不划算。
- * All are hand-written 24×24 stroke icons. No icon package is pulled in: the
- * project currently has zero UI dependencies and six icons do not justify one.
+ * 圖示分兩個來源：
+ * Icons come from two sources:
  *
- * 語意對應 design.md D23 / §2.2：手把＝主頁面、獎盃＝排行榜、鎬＝創意工坊
- * （尚未實作）、問號＝說明、齒輪＝設定、音符＝音樂開關（獨立、不進頁面）。
- * Semantics follow design.md D23: gamepad = home, trophy = leaderboard,
- * pickaxe = workshop (not implemented yet), question = help, gear = settings,
- * note = music toggle (standalone, does not navigate).
+ * 1. **素材圖示**（`public/assets/ui/ic_*.svg`）：工具列、音樂開關與重新開始鍵。
+ *    這些是 Phosphor 風格的**實心** path（`fill="#000000"` 寫死在檔案裡），不能像線稿
+ *    一樣用 `stroke: currentColor` 上色，所以 `createAssetIcon()` 改用 **CSS mask**：
+ *    mask 只取形狀的 alpha，顏色永遠跟著元素的 `currentColor` 走 —— 直接用 `<img>`
+ *    的話，黑色圖示在深色主題裡會整顆隱形。
+ *    **Asset icons** (`public/assets/ui/ic_*.svg`) for the toolbar, the music toggle and
+ *    restart. These are **filled** Phosphor-style paths with `fill="#000000"` baked in,
+ *    so `createAssetIcon()` uses a **CSS mask** instead of a stroke: the mask carries only
+ *    the shape's alpha and the color always follows `currentColor` — an `<img>` would be
+ *    an invisible black glyph on the dark theme.
+ *
+ * 2. **手寫線稿**：技能欄的四個技能圖示（M5）與說明鍵的備援。這些沒有對應素材，
+ *    維持 24×24 線稿 + `stroke: currentColor`（見 `styles/layout.css` 的 `.icon`）。
+ *    **Hand-written stroke icons** for the four skills (M5) and the help fallback. These
+ *    have no asset counterpart and stay 24×24 strokes with `stroke: currentColor`.
  */
 
-export const ICON_NAMES = [
+/** 素材圖示的語意名（對應 `design.md D23` 的工具列語意 + 重新開始）。 */
+export const ASSET_ICON_NAMES = [
   'home',
   'trophy',
   'workshop',
   'help',
   'settings',
   'music',
-  /* 技能圖示（M5）——語意對應 `skills.json → id`。 */
+  'restart',
+] as const;
+export type AssetIconName = (typeof ASSET_ICON_NAMES)[number];
+
+/** 素材圖示 → `public/assets/ui/` 下的檔名（不含副檔名）。 */
+const ASSET_ICON_FILES: Record<AssetIconName, string> = {
+  home: 'ic_game',
+  trophy: 'ic_leaderboard',
+  workshop: 'ic_creation',
+  help: 'ic_question',
+  settings: 'ic_setting',
+  music: 'ic_music',
+  restart: 'ic_restart',
+};
+
+/** 技能圖示（M5）——語意對應 `skills.json → id`。 */
+export const ICON_NAMES = [
   'discard',
   'float',
   'shake',
   'fateSwap',
+  /* 技能欄的備援字形：技能 id 對不上任何圖示時用說明鍵頂上。 */
+  'help',
 ] as const;
 export type IconName = (typeof ICON_NAMES)[number];
 
 /**
- * 每個圖示的內部標記。只作為 `innerHTML` 寫入固定的本機常數，不含任何外部輸入。
- * Inner markup per icon. Written via `innerHTML` from a local constant only;
+ * 每個線稿圖示的內部標記。只作為 `innerHTML` 寫入固定的本機常數，不含任何外部輸入。
+ * Inner markup per stroke icon. Written via `innerHTML` from a local constant only;
  * no external input ever reaches it.
  */
 const ICON_PATHS: Record<IconName, string> = {
-  home: '<rect x="3" y="8" width="18" height="9" rx="4.5"/><circle cx="8" cy="12.5" r="1"/><circle cx="16" cy="12.5" r="1"/>',
-  trophy:
-    '<path d="M8 4h8v4.5a4 4 0 0 1-8 0z"/><path d="M8 5.5H5.5v1.5a3 3 0 0 0 3 3"/><path d="M16 5.5h2.5v1.5a3 3 0 0 1-3 3"/><path d="M12 12.5V16"/><path d="M8.5 20h7l-.8-4h-5.4z"/>',
-  workshop: '<path d="M4 15L15 4l5 5-11 11z"/><path d="M4 15l5 5"/><path d="M13 6l5 5"/>',
   help: '<circle cx="12" cy="12" r="8.5"/><path d="M9.5 9.8a2.5 2.5 0 1 1 3.3 2.4c-.8.3-1.3.9-1.3 1.7v.4"/><circle cx="12" cy="17.2" r="0.9"/>',
-  settings:
-    '<circle cx="12" cy="12" r="3"/><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6"/>',
-  music: '<circle cx="7" cy="17.5" r="2.5"/><circle cx="18" cy="15.5" r="2.5"/><path d="M9.5 17.5V6l11-2.2v11.7"/>',
   /* ── 技能（M5）。造型刻意彼此差很遠，小尺寸下也分得出是哪一個。 */
   /* 當棄即棄！：垃圾桶。 */
   discard:
@@ -58,7 +78,7 @@ const ICON_PATHS: Record<IconName, string> = {
     '<path d="M6.5 8.5h11l-3-3"/><path d="M17.5 15.5h-11l3 3"/>',
 };
 
-/** 建立一個 `<svg>` 圖示節點。 */
+/** 建立一個手寫線稿的 `<svg>` 圖示節點（技能欄用）。 */
 export function createIcon(name: IconName): SVGSVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
@@ -67,4 +87,25 @@ export function createIcon(name: IconName): SVGSVGElement {
   svg.classList.add('icon');
   svg.innerHTML = ICON_PATHS[name];
   return svg;
+}
+
+/**
+ * 建立一個素材圖示節點（工具列／音樂／重新開始用）。
+ * Build an asset-icon node (toolbar / music / restart).
+ *
+ * 回傳 `<span>` 而非 `<svg>`：形狀由 CSS mask 提供（見 `styles/layout.css` 的
+ * `.icon--asset`），顏色由 `background-color: currentColor` 提供。路徑以 `BASE_URL`
+ * 為底，部署在子路徑下也不會斷圖。
+ * Returns a `<span>` rather than an `<svg>`: the shape comes from a CSS mask (see
+ * `.icon--asset` in `styles/layout.css`) and the color from `background-color:
+ * currentColor`. Paths are prefixed with `BASE_URL` so deploys under a sub-path stay intact.
+ */
+export function createAssetIcon(name: AssetIconName): HTMLElement {
+  const glyph = document.createElement('span');
+  glyph.className = 'icon icon--asset';
+  glyph.setAttribute('aria-hidden', 'true');
+  const url = `${import.meta.env.BASE_URL}assets/ui/${ASSET_ICON_FILES[name]}.svg`;
+  glyph.style.setProperty('mask-image', `url("${url}")`);
+  glyph.style.setProperty('-webkit-mask-image', `url("${url}")`);
+  return glyph;
 }

@@ -14,6 +14,7 @@ import { Hud } from './ui/hud';
 import { createLayout, type Layout } from './ui/layout';
 import { createMeltingList, type MeltingList } from './ui/meltingList';
 import { createNotice } from './ui/notice';
+import { attachRestartConfirm } from './ui/restartButton';
 import { attachStageScale } from './ui/scale';
 import { createSkillBar, type SkillBar } from './ui/skillBar';
 import { createSkillHint, type SkillHint } from './ui/skillHint';
@@ -163,6 +164,31 @@ async function bootstrap(): Promise<void> {
   };
 
   /**
+   * 這一局開跑時的歷史最高分。結算覆蓋層用它判斷「NEW BEST」：分數現在**邊玩邊記**
+   * （見下面的 frame callback），到結束那一刻 `progress.highScore` 已經包含本局分數，
+   * 不能再拿它跟自己比。
+   * The high score when this run started. The game-over overlay uses it to decide "NEW
+   * BEST": the score is now recorded *while playing* (see the frame callback below), so at
+   * the end `progress.highScore` already contains this run and cannot be compared to itself.
+   */
+  let runStartBest = progress.highScore;
+
+  /**
+   * 重設進行中的一局。結算覆蓋層的「再玩一次」與工具列的重新開始鍵共用這一條路，
+   * 兩邊的行為（包括 BEST TRY 的基準點）才不會各養一份。
+   * Reset the run in progress. The overlay's "play again" and the toolbar's restart share
+   * this one path so both behaviours (including the BEST TRY baseline) stay identical.
+   */
+  const restartRun = (): void => {
+    session.reset();
+    shownGameOver = false;
+    gameOver?.hide();
+    runStartBest = progress.highScore;
+    updateHud();
+    updateSkills();
+  };
+
+  /**
    * 技力條與技能欄每幀同步。兩個元件都只在值真的變了才動 DOM，所以這樣做是便宜的。
    * The meter and the bar sync every frame; both only touch the DOM on a real change, so this
    * stays cheap.
@@ -182,13 +208,18 @@ async function bootstrap(): Promise<void> {
   let shownGameOver = false;
   gameOver = createGameOver({
     host: layout.root,
-    onRestart: (): void => {
-      session.reset();
-      shownGameOver = false;
-      updateHud();
-      updateSkills();
-    },
+    onRestart: restartRun,
   });
+
+  /*
+   * 重新開始鍵（工具列、設定右邊）：雙重確認通過後走與結算覆蓋層同一條 `restartRun`。
+   * The toolbar restart button (right of settings): once double-confirmed it takes the
+   * same `restartRun` path as the game-over overlay.
+   */
+  const restartButton = layout.regions.toolbar.querySelector<HTMLButtonElement>(
+    'button[data-action="restart"]',
+  );
+  if (restartButton !== null) attachRestartConfirm({ button: restartButton, onRestart: restartRun });
 
   /*
    * 除錯輔助線：開發模式下加上 `?debug=1` 就會疊出容器外框、物理空腔與投放線。
@@ -201,18 +232,30 @@ async function bootstrap(): Promise<void> {
     sprites,
     debug: debugOverlay,
     onAfterFrame: (current): void => {
+      /*
+       * BEST TRY 邊玩邊記（使用者定案）：分數一超過歷史最高就立刻寫入存檔並反映在
+       * HUD 上，不再等到結束。`recordScore()` 在分數沒有超越時直接返回，不會動
+       * localStorage，所以每幀呼叫是便宜的；`updateHud()` 要在它**之後**跑，
+       * HUD 上的 BEST TRY 才會在同一幀更新。
+       * BEST TRY updates live (the user's decision): the moment the score passes the high
+       * score it is persisted and reflected in the HUD, not held back until the run ends.
+       * `recordScore()` returns immediately when the score does not lead, so calling it
+       * every frame is cheap; `updateHud()` must run *after* it so the HUD picks up the
+       * new best within the same frame.
+       */
+      progress.recordScore(current.score);
+
       updateHud();
       updateSkills();
 
       if (current.isOver && !shownGameOver) {
         shownGameOver = true;
-        const previousBest = progress.highScore;
-        const best = progress.recordScore(current.score);
         gameOver?.show({
           score: current.score,
           merged: current.mergedCount,
-          best,
-          isNewBest: current.score > previousBest,
+          /* 到結束這一刻最高分早已被即時記錄，直接讀現值即可。 */
+          best: progress.highScore,
+          isNewBest: current.score > runStartBest,
         });
       }
     },

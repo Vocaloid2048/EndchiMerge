@@ -313,6 +313,44 @@
   height: 56px;
 }
 
+/*
+ * 素材圖示（`public/assets/ui/ic_*.svg`，`ui/icons.ts` 的 `createAssetIcon()`）。
+ * 這些是實心 path、`fill="#000000"` 寫死在檔案裡，`<img>` 會在深色主題下隱形，
+ * 所以用 CSS mask 只取形狀的 alpha，顏色永遠跟著 `currentColor`（＝按鈕的文字色）走。
+ * Asset icons from `public/assets/ui/ic_*.svg` via `createAssetIcon()`. They are filled
+ * paths with `fill="#000000"` baked in — an `<img>` would vanish on the dark theme — so a
+ * CSS mask carries only the shape's alpha and the color follows `currentColor`.
+ */
+.icon--asset {
+  display: block;
+  width: 48px;
+  height: 48px;
+  background-color: currentColor;
+  mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+}
+
+.music .icon--asset {
+  width: 56px;
+  height: 56px;
+}
+
+/*
+ * 重新開始鍵的「已要求確認」狀態（`ui/restartButton.ts`）：第一次按下後整顆轉成警示色，
+ * 提示玩家**再按一次**才會真的重設；確認窗過了就由該模組移除這個 class 退回原樣。
+ * Restart's "confirm requested" state (`ui/restartButton.ts`): the first press turns the
+ * button into the danger color asking for a **second press**; the module removes the class
+ * when the confirm window lapses.
+ */
+.toolbar__button--confirm {
+  background: var(--color-danger);
+  color: #ffffff;
+}
+
 /* ── ⑥ 容器 / Container（`1408:2110`）────────────────────────────────── */
 
 .stage {

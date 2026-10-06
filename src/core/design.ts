@@ -97,8 +97,18 @@ export const LAYOUT_RECTS = {
   combo: { x: 1601, y: 180, width: 255, height: 171 },
   /** ⑦ MELTING LIST 面板（`1408:2235`）。 */
   melting: { x: 1421, y: 372, width: 435, height: 644 },
-  /** ② 工具列的五圖示膠囊（`1408:2064` `hover_function_row`）。 */
-  toolGroup: { x: 1262, y: 64, width: 450, height: 96 },
+  /**
+   * ② 工具列膠囊（`1408:2064` `hover_function_row`）。
+   *
+   * 設計稿畫的是**五**顆 72×72 圓鈕（＝ 450 寬）。後來加入了第六顆「重新開始」
+   * （放在設定右邊），膠囊因此加寬成六鈕版本：6×72 + 5×16 間距 + 2×13 內距 ＝ 538。
+   * 為了維持與音樂鍵原本的 48px 間距（音樂鍵仍在 x 1760），膠囊整體向左移 88px。
+   * The mock draws **five** 72×72 round buttons (= 450 wide). A sixth, restart, was later
+   * added to the right of settings, widening the capsule to six buttons: 6×72 + 5×16 gaps
+   * + 2×13 padding = 538. To keep the original 48px gap to the music toggle (still at
+   * x 1760), the whole capsule shifts 88px left.
+   */
+  toolGroup: { x: 1174, y: 64, width: 538, height: 96 },
   /** ② 音樂開關（`1408:2086`），獨立於膠囊之外。 */
   music: { x: 1760, y: 64, width: 96, height: 96 },
 } as const satisfies Record<string, Rect>;

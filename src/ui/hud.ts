@@ -42,7 +42,7 @@ export interface HudState {
   comboDropScore: number;
   /** 最後一次合成所用的倍率；尚未合成為 1。渲染成 `×1.74`（小數兩位）。 */
   comboMultiplier: number;
-  /** 最高分；M7 接上存檔前固定為 0。 */
+  /** 歷史最高分；由 `ProgressStore` 邊玩邊記，分數超越的當下就會更新。 */
   bestTry?: number;
 }
 
