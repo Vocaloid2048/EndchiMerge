@@ -166,6 +166,37 @@ const FLOAT_CATCHUP_BAND = 40;
  */
 const FLOAT_CATCHUP_RISE_SPEED = 4;
 
+/**
+ * 天花板每步夾回的穿透餘裕，虛擬單位。
+ * The per-step ceiling containment's penetration slack, in virtual units.
+ *
+ * 貼住平面的顆粒允許有少許求解器穿透（這是 Matter 的正常現象，硬夾會抖）；但穿透超過這個
+ * 餘裕——多半是被下面的堆疊像擠西瓜籽一樣往上擠——就立刻被壓回平面下方。餘裕取小於
+ * 溢位測試的 5 單位容忍，寧可早夾。
+ * A body resting on the plane is allowed the solver's normal sliver of penetration (clamping it
+ * hard would jitter); past this slack — usually because the pile below is squeezing it upward
+ * like a watermelon seed — it is pressed straight back under the plane. Smaller than the 5-unit
+ * tolerance the overflow test uses; clamp early rather than late.
+ */
+const CEILING_CONTAIN_SLACK = 4;
+
+/**
+ * 技能結束、天花板收走之後的「落底協助」時長與最低下沉速度。
+ * How long after a skill tears the ceiling down the fall-back assist lasts, and the minimum
+ * sink speed it enforces.
+ *
+ * 浮動／搖晃把整堆壓在平面上，收走平面之後，貼着側牆的小顆粒可能與大顆粒、牆壁之間架起
+ * 摩擦拱——光靠重力鬆不開，畫面上就是「小隻卡在頂部邊界，要靠其他大隻施力才慢慢下來」。
+ * 收走後的短暫窗口內，容器上半的每顆顆粒都被保證一個最低下沉速度，把拱直接拉垮。
+ * Float and shake press the whole pile against the plane; once it is torn down, a small body
+ * near the wall can be bridged into a friction arch between a big neighbour and the wall —
+ * gravity alone cannot open it, which reads as "the small one is stuck at the top boundary and
+ * only comes down when the big ones push it". For a short window after the teardown every body
+ * in the container's upper half is guaranteed a minimum sink speed, collapsing the arch.
+ */
+const CEILING_RELEASE_ASSIST_MS = 600;
+const CEILING_RELEASE_SINK = 2.2;
+
 /** 技能卡要顯示的狀態（給 `ui/skillBar.ts`）。 */
 export interface SkillCardState {
   id: string;
@@ -275,6 +306,11 @@ export class GameSession implements SkillBoard {
    * every step — the former stacks them naturally under a lid, the latter jitters.
    */
   private ceilingBody: Matter.Body | null = null;
+  /**
+   * 天花板收走後「落底協助」的截止時刻；0 ＝ 沒有窗口。
+   * When the post-teardown fall-back assist ends; 0 means no window.
+   */
+  private ceilingReleaseUntilMs = 0;
   /** 搖晃：開始時刻、時長、圈數、幅度（世界單位）、擺動軸傾角（弧度）與持續向上力比例。 */
   private shakeStartedAtMs = 0;
   private shakeDurationMs = 0;
@@ -989,6 +1025,32 @@ export class GameSession implements SkillBoard {
    * Position and velocity are swapped **together**: swapping only positions makes both bodies
    * immediately drift back along their old momentum, which reads as "the swap failed".
    */
+  /**
+   * 把一個目的點夾回空腔內（邊界內縮一個碰撞半徑）。
+   * Clamp a destination point back inside the cavity, inset by one collider radius.
+   *
+   * 互換是 `Body.setPosition` 的瞬間傳送：把大顆粒傳進小顆原本貼牆的位置，大顆的碰撞體會
+   * **深深插進牆裡**，求解器把它往最近的出口擠 —— 就是「對調後穿過邊界」的由來。夾制保證
+   * 傳送落點的整個包絡圓都在空腔內，牆永遠不會被插進去；與鄰居的重疊則交給求解器在腔內
+   * 正常推開（那本來就是互換擾動的一部分）。
+   * A swap is an instant `Body.setPosition` teleport: sending a big body into a small body's
+   * wall-hugging spot buries the big collider **deep inside the wall**, and the solver ejects it
+   * through the nearest face — exactly the "swapped through the boundary" report. The clamp
+   * keeps the whole bounding circle of the landing spot inside the cavity, so a wall can never
+   * be entered in the first place; overlap with neighbours is left to the solver to resolve
+   * inside the cavity (that is part of the swap's disturbance anyway).
+   */
+  private clampIntoCavity(radius: number, position: { x: number; y: number }): {
+    x: number;
+    y: number;
+  } {
+    const r = Math.max(0, radius);
+    return {
+      x: Math.min(Math.max(position.x, this.cavity.x + r), this.cavity.x + this.cavity.width - r),
+      y: Math.min(Math.max(position.y, this.cavity.y + r), this.cavity.y + this.cavity.height - r),
+    };
+  }
+
   swapTargets(a: number, b: number, disturbance: number): void {
     const first = this.byBodyId.get(a);
     const second = this.byBodyId.get(b);
@@ -999,10 +1061,28 @@ export class GameSession implements SkillBoard {
     const firstVelocity = { x: first.body.velocity.x, y: first.body.velocity.y };
     const secondVelocity = { x: second.body.velocity.x, y: second.body.velocity.y };
 
-    Matter.Body.setPosition(first.body, secondPosition);
-    Matter.Body.setPosition(second.body, firstPosition);
+    /* 目的地各自按**抵達那顆**的半徑夾回空腔 —— 半徑不同時大顆不會被塞進貼牆的小位。 */
+    Matter.Body.setPosition(
+      first.body,
+      this.clampIntoCavity(first.level.radius, secondPosition),
+    );
+    Matter.Body.setPosition(
+      second.body,
+      this.clampIntoCavity(second.level.radius, firstPosition),
+    );
     Matter.Body.setVelocity(first.body, secondVelocity);
     Matter.Body.setVelocity(second.body, firstVelocity);
+
+    /*
+     * 被交換的兩顆與被推到的鄰居都必須是醒的：`Body.setPosition`／`setVelocity` 不會改變
+     * `isSleeping`，而引擎跳過休眠剛體，所以不叫醒它們的話，這次互換在畫面上等於沒發生。
+     * **在擾動 early-return 之前叫**：擾動為 0 也是一次真正的互換，一樣要叫醒。
+     * The two swapped bodies and whoever they landed on must all be awake: `setPosition` /
+     * `setVelocity` do not clear `isSleeping`, and the engine skips sleeping bodies, so without
+     * this the swap would be invisible. **Called before the disturbance early-return**: a swap
+     * with zero disturbance is still a real swap and still needs the wake-up.
+     */
+    this.wakeAll();
 
     if (disturbance <= 0) return;
 
@@ -1032,15 +1112,6 @@ export class GameSession implements SkillBoard {
         break;
       }
     }
-
-    /*
-     * 被交換的兩顆與被推到的鄰居都必須是醒的：`Body.setPosition`／`setVelocity` 不會改變
-     * `isSleeping`，而引擎跳過休眠剛體，所以不叫醒它們的話，這次互換在畫面上等於沒發生。
-     * The two swapped bodies and whoever they landed on must all be awake: `setPosition` /
-     * `setVelocity` do not clear `isSleeping`, and the engine skips sleeping bodies, so without
-     * this the swap would be invisible.
-     */
-    this.wakeAll();
   }
 
   /**
@@ -1330,6 +1401,76 @@ export class GameSession implements SkillBoard {
   }
 
   /**
+   * 天花板每步夾回：穿透超過餘裕的顆粒立刻被壓回平面下方。
+   * Per-step ceiling containment: any body that has penetrated past the slack is pressed
+   * straight back under the plane.
+   *
+   * 施放那一刻的 `clampCeiling()` 只跑一次，之後靠靜態平面擋住；但浮動時整堆被追趕速度地板
+   * 從下面頂住平面，最輕的顆粒可能被擠進平面（西瓜籽效應）。這裡每步巡一次，誰的上緣鑽進
+   * 平面超過 `CEILING_CONTAIN_SLACK`，就傳送回「上緣貼住平面」並歸零向上速度 —— 「沒有任何
+   * 顆粒能浮到容器口之外」由機制保證，而不是指望求解器每次都站對邊。
+   * The cast-time `clampCeiling()` runs once; the static plane takes over from there. But during
+   * a float the whole pile is rammed against the plane from below by the catch-up velocity
+   * floor, and the lightest body can be squeezed into it (the watermelon-seed effect). This
+   * sweep runs every step: any body whose top edge has tunnelled more than
+   * `CEILING_CONTAIN_SLACK` into the plane is teleported back to "top edge touching the plane"
+   * with its upward velocity cancelled — "nothing can float outside the container mouth" is
+   * guaranteed by mechanism rather than by trusting the solver to pick the right side every
+   * time.
+   *
+   * 在 `physics.step()` **之後**跑：穿透是求解器在這一步裡造成的，當步就壓回，畫面上不會
+   * 出現「冒出頭」的一幀。
+   * It runs **after** `physics.step()`: the penetration is produced by the solver within that
+   * step, so correcting in the same step keeps an escaping head from ever being drawn.
+   */
+  private containAtCeiling(): void {
+    if (!this.ceilingNeeded) return;
+
+    const ceilingY = this.ceilingY;
+
+    for (const entry of this.entries) {
+      const body = entry.body;
+      /* 上緣仍在餘裕內（或根本在平面下方）＝ 貼住或遠離，不動。 */
+      if (body.position.y - entry.level.radius >= ceilingY - CEILING_CONTAIN_SLACK) continue;
+
+      Matter.Body.setPosition(body, { x: body.position.x, y: ceilingY + entry.level.radius });
+      Matter.Body.setVelocity(body, {
+        x: body.velocity.x,
+        y: Math.max(0, body.velocity.y),
+      });
+    }
+  }
+
+  /**
+   * 落底協助：天花板收走後的短暫窗口內，容器上半的顆粒保證一個最低下沉速度。
+   * The fall-back assist: for a short window after the ceiling is torn down, every body in the
+   * container's upper half is guaranteed a minimum sink speed.
+   *
+   * 見 `CEILING_RELEASE_SINK` 的說明 —— 這是針對「浮動結束後小顆粒卡在頂部邊界，要靠其他
+   * 大顆粒施力才慢慢下來」的解法：摩擦拱撐得住重力，但撐不住一個每步都重新設定的下沉速度。
+   * See `CEILING_RELEASE_SINK` — this answers "after a float, small dumplings hang at the top
+   * boundary and only descend when the big ones push them": a friction arch can balance gravity,
+   * but not a sink speed that is re-forced every step.
+   */
+  private applyCeilingReleaseAssist(): void {
+    if (this.elapsedMs >= this.ceilingReleaseUntilMs) return;
+
+    const midY = this.cavity.y + this.cavity.height / 2;
+
+    for (const entry of this.entries) {
+      const body = entry.body;
+      /* 只協助上半的顆粒 —— 下半本來就在落地路上，不需要幫忙。 */
+      if (body.position.y > midY) continue;
+
+      if (body.isSleeping) Matter.Sleeping.set(body, false);
+
+      if (body.velocity.y < CEILING_RELEASE_SINK) {
+        Matter.Body.setVelocity(body, { x: body.velocity.x, y: CEILING_RELEASE_SINK });
+      }
+    }
+  }
+
+  /**
    * 技能天花板的 Y：容器頂緣**下方** `floatCeilingBelowRim`，虛擬單位。
    * The skill ceiling's Y, `floatCeilingBelowRim` **below** the container's rim.
    *
@@ -1427,6 +1568,14 @@ export class GameSession implements SkillBoard {
 
     this.physics.remove(this.ceilingBody);
     this.ceilingBody = null;
+    /*
+     * 收走平面＝落底協助開窗：貼牆的小顆粒可能與鄰居架起摩擦拱（見 `CEILING_RELEASE_SINK`
+     * 的說明），窗口內保證的最低下沉速度把它拉垮。
+     * Tearing the plane down opens the fall-back assist window: a small body near the wall may
+     * be bridged into a friction arch with its neighbours (see `CEILING_RELEASE_SINK`), and the
+     * window's guaranteed minimum sink speed collapses it.
+     */
+    this.ceilingReleaseUntilMs = this.elapsedMs + CEILING_RELEASE_ASSIST_MS;
     this.wakeAll();
   }
 
@@ -2073,6 +2222,7 @@ export class GameSession implements SkillBoard {
     this.syncCeiling();
     this.applyFloatGravity();
     this.applyFloatCatchup();
+    this.applyCeilingReleaseAssist();
     this.applyShakeImpulse(dt);
 
     /* 清空必須早於 `physics.step()` —— 碰撞回呼在那之中就會填它。 */
@@ -2082,6 +2232,15 @@ export class GameSession implements SkillBoard {
 
     /* 搖晃的速度上限在物理之後夾，畫面上不會出現超速的一幀。 */
     if (this.isShaking) this.clampBodySpeeds(SHAKE_MAX_BODY_SPEED);
+
+    /*
+     * 天花板夾回同樣在物理之後：穿透是這一步的求解器造成的，當步壓回，畫面上不會出現
+     * 「冒出頭」的一幀（見 `containAtCeiling()`）。
+     * Ceiling containment likewise runs after the physics: the penetration was produced by this
+     * step's solver, so correcting in the same step keeps an escaping head from being drawn
+     * (see `containAtCeiling()`).
+     */
+    this.containAtCeiling();
 
     if (!this.over) this.collectProximityMerges(this.stepClaimed, this.elapsedMs);
     this.flushMerges();
@@ -2202,6 +2361,7 @@ export class GameSession implements SkillBoard {
       this.physics.remove(this.ceilingBody);
       this.ceilingBody = null;
     }
+    this.ceilingReleaseUntilMs = 0;
     this.shakeStartedAtMs = 0;
     this.shakeDurationMs = 0;
     this.shakeRevolutions = 0;

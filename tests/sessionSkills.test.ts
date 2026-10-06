@@ -657,4 +657,140 @@ describe('協議：浮動 —— 整堆都要升進上半部 / float lifts the w
     expect(topEdge).toBeLessThan(midY);
     expect(rise).toBeGreaterThan(100);
   });
+
+  /*
+   * 天花板逃逸回歸（使用者回報 2026-10-06）：浮動時整堆被追趕速度地板從下面頂住平面，
+   * 最輕的顆粒可能被擠進平面、甚至整顆冒到容器口之外（西瓜籽效應）。修法有二：
+   * 平面加厚（`CEILING_THICKNESS` 40 → 100）＋ 每步 `containAtCeiling()` 把穿透超過餘裕的
+   * 顆粒壓回平面下方。這條測試逐步取樣全場最高上緣，誰冒頭就失敗。
+   * Ceiling-escape regression (user report, 2026-10-06): during a float the pile is rammed
+   * against the plane from below by the catch-up velocity floor, and the lightest body can be
+   * squeezed into — or clean out of — the plane (the watermelon-seed effect). Two fixes: the
+   * plane is thicker (`CEILING_THICKNESS` 40 → 100) and the per-step `containAtCeiling()`
+   * presses anything past the slack back under. This test samples the whole field's highest top
+   * edge every step; any escapee fails it.
+   */
+  it('浮動期間每一步、每一顆的上緣都不得高於天花板', () => {
+    const session = makeNonMergingSession(600);
+    for (const aimX of [150, 300, 450, 220, 380, 100, 500]) dropAndSettle(session, aimX);
+    settleToSleep(session);
+
+    const ceilingY = session.containerGeometry.frame.y + CONFIG.container.floatCeilingBelowRim;
+
+    expect(session.activateSkill('protocol_float')).toBe(true);
+
+    let highest = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < 90; i += 1) {
+      session.step(FRAME_MS);
+      for (const body of session.bodies) {
+        highest = Math.min(highest, body.y - body.radius);
+      }
+    }
+
+    /* 留 5 單位求解器穿透餘裕，與搖晃那條「不得越過平面」的判準相同。 */
+    expect(highest).toBeGreaterThan(ceilingY - 5);
+  });
+});
+
+/*
+ * 互換穿越邊界回歸（使用者回報 2026-10-06，附截圖）：命運互換是 `Body.setPosition` 的瞬間
+ * 傳送，把大顆傳進小顆貼牆的位置時，大顆的碰撞體會深深插進牆裡，求解器把它往最近的出口
+ * 擠出容器外。修法：交換前把目的地按「抵達那顆」的半徑夾回空腔（見 `session.ts` 的
+ * `clampIntoCavity()`）。
+ * Swap-crossing regression (user report with screenshot, 2026-10-06): Fate Swap is an instant
+ * `Body.setPosition` teleport; landing a big body in a small body's wall-hugging spot buries
+ * the big collider inside the wall and the solver ejects it out of the container. Fix: each
+ * destination is clamped back inside the cavity by the arriving body's radius (see
+ * `clampIntoCavity()` in `session.ts`).
+ */
+describe('命運互換 —— 交換不得穿越容器邊界 / a swap never crosses the boundary', () => {
+  const SMALL_RADIUS = 24;
+  const BIG_RADIUS = 56;
+  /** `core/constants.ts` 的 `WALL_THICKNESS`；空腔 = frame 內縮這麼多。 */
+  const WALL = 16;
+
+  /** 兩種尺寸、永不合成的等級表；fate_swap 改為 `sp` 解鎖，讓測試不必先花 6 點技力。 */
+  function makeSwapSession(virtualWidth: number): GameSession {
+    const config: AllConfig = {
+      ...CONFIG,
+      levels: {
+        ...CONFIG.levels,
+        levels: [level(1, SMALL_RADIUS), level(2, BIG_RADIUS)],
+      },
+      skills: {
+        ...CONFIG.skills,
+        skills: CONFIG.skills.skills.map((s) =>
+          s.id === 'fate_swap' ? { ...s, unlock: { kind: 'sp' } } : s,
+        ),
+      },
+    };
+    return new GameSession({ config, rng: createRng(20261006), virtualWidth });
+  }
+
+  /** 投放直到手上是 `wantId` 才把它放到 `aimX`；等不到的先丟去右側角落堆着。 */
+  function dropUntil(session: GameSession, wantId: number, aimX: number): void {
+    for (let i = 0; i < 24; i += 1) {
+      if (session.pendingLevelId === wantId) {
+        dropAndSettle(session, aimX);
+        return;
+      }
+      dropAndSettle(session, 470);
+    }
+    throw new Error(`level ${String(wantId)} never came up within 24 drops`);
+  }
+
+  it('大顆換進小顆貼牆的位置時，仍要整顆留在空腔內', () => {
+    const session = makeSwapSession(600);
+
+    dropUntil(session, 1, 80); /* 小顆貼左牆。 */
+    dropUntil(session, 2, 300); /* 大顆在中間。 */
+    settleToSleep(session);
+
+    /*
+     * 按位置選目標，不用「第一顆符合半徑的」：`dropUntil` 等不到位時會把不要的丟去右角，
+     * 那裡可能也堆了大顆。左牆的小顆 ＝ 最左的小顆；中間的大顆 ＝ 最接近 x=300 的大顆。
+     * Select by position, not "the first body with this radius": `dropUntil` dumps unwanted
+     * drops in the right corner, which may hold bigs too. The wall-hugging small is the
+     * leftmost small; the middle big is the big closest to x = 300.
+     */
+    const small = session.bodies
+      .filter((b) => b.radius === SMALL_RADIUS)
+      .reduce((a, b) => (b.x < a.x ? b : a));
+    const big = session.bodies
+      .filter((b) => b.radius === BIG_RADIUS)
+      .reduce((a, b) => (Math.abs(b.x - 300) < Math.abs(a.x - 300) ? b : a));
+
+    /* 前提：小顆真的貼着左牆、大顆真的在中間，否則這個場景重現不了「壁插」。 */
+    const frame = session.containerGeometry.frame;
+    expect(small.x).toBeLessThan(frame.x + 130);
+    expect(Math.abs(big.x - 300)).toBeLessThan(80);
+
+    expect(session.activateSkill('fate_swap')).toBe(true);
+    session.canvasPointerAction(small.x, small.y);
+    session.canvasPointerAction(big.x, big.y);
+
+    runFrames(session, 60);
+
+    /* 交換必須真的發生：中間那顆大顆要搬到左側小顆原本的區域（夾制後貼牆）。 */
+    const bigAfter = session.bodies
+      .filter((b) => b.radius === BIG_RADIUS)
+      .reduce((a, b) => (b.x < a.x ? b : a));
+    expect(bigAfter.x).toBeLessThan(250);
+
+    /*
+     * 而且場上每一顆（含被傳送的大顆）的包絡圓都留在空腔內 —— 沒有插牆、沒有穿底。
+     * 夾制之後大顆會貼牆（邊緣剛好在空腔內緣），留 2 單位浮點餘裕。
+     * And every body on the field — the teleported big one included — keeps its bounding circle
+     * inside the cavity: no wall-burial, no floor-piercing. After the clamp the big body rests
+     * flush against the wall, so 2 units of float slack is allowed.
+     */
+    const cavityLeft = frame.x + WALL;
+    const cavityRight = frame.x + frame.width - WALL;
+    const cavityBottom = frame.y + frame.height - WALL;
+    for (const body of session.bodies) {
+      expect(body.x - body.radius).toBeGreaterThanOrEqual(cavityLeft - 2);
+      expect(body.x + body.radius).toBeLessThanOrEqual(cavityRight + 2);
+      expect(body.y + body.radius).toBeLessThanOrEqual(cavityBottom + 2);
+    }
+  });
 });

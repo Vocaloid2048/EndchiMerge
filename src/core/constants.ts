@@ -146,8 +146,20 @@ export const SHAKE_BODY_ACCEL_COUPLING = 0.3;
  * cannot tunnel through, thin enough not to swallow a body that is mid-drop when the skill
  * starts. 40 is about two and a half wall thicknesses — far more than any body's per-step
  * travel, far less than the gap between the drop point and the ceiling.
+ *
+ * **40 → 100（使用者回報後加厚）**：浮動時整堆被追趕速度地板從下面頂住平面，最輕的那顆
+ * 會像西瓜籽一樣被擠出薄平面（畫面上就是「浮到容器口外懸着」）。加厚之後，被擠入的顆粒
+ * 離最近的出口（底面）更遠，求解器的最小平移修正一律把它推回下方；配合每步的
+ * `containAtCeiling()`（見 `session.ts`），穿透在 8 單位內就會被壓回，根本到不了上半。
+ * **40 → 100 (thickened after a user report)**: during a float the whole pile is rammed against
+ * the plane from below by the catch-up velocity floor, and the lightest body gets squeezed
+ * through a thin plane like a watermelon seed (on screen: "hovering outside the container
+ * mouth"). Thicker means a body squeezed in is much closer to the near (bottom) face, so the
+ * solver's minimum-translation correction always pushes it back down; combined with the per-step
+ * `containAtCeiling()` (see `session.ts`), any penetration is pressed back within 8 units and
+ * never reaches the upper half.
  */
-export const CEILING_THICKNESS = 40;
+export const CEILING_THICKNESS = 100;
 
 /** Matter.js 的重力縮放（與 `core/physics.ts` 的引擎設定必須一致）。 */
 export const ENGINE_GRAVITY_SCALE = 0.001;
