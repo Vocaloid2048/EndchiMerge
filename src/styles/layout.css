@@ -451,31 +451,16 @@
   transition: transform var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.skill-card:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.35);
-}
-
 .skill-card:focus-visible {
   outline: 3px solid var(--color-accent);
   outline-offset: 2px;
 }
 
-/*
- * 選取中（或作用中）的技能卡：琥珀金外圈，與畫面上的「」標示同色。
- * The selected (or acting) skill card: an amber ring in the same colour as the on-canvas marker.
- *
- * 圈必須畫在**卡片內側**（`inset`）：技能格網是捲動容器（見 `.skill-grid` 的註解），捲動框
- * 會把超出內容盒的東西裁掉 —— 畫在外側的 3px 圈在左列／頂行正好壓線，左、上兩邊會被切掉。
- * 內側圈貼著卡片的 32px 圓角走，永遠不會被裁。
- * The ring must be drawn **inside** the card (`inset`): the skill grid is a scroll container (see
- * the `.skill-grid` comment), and a scroll box clips anything past its content box — an outer 3px
- * ring sits exactly on that edge for the left column and top row, so its left and top sides get
- * cut off. An inset ring follows the card's 32px radius and can never be clipped.
- */
-.skill-card--active {
-  box-shadow: inset 0 0 0 3px var(--color-accent), 0 0 18px var(--color-accent-soft);
-}
+/* 選取中（或作用中）的技能卡不再畫黃框：使用者定案「不要展示黃框」。選取狀態改由畫面上的
+ * 「」標示呈現，卡片本身維持純色，hover 也不加任何額外動畫。
+ * The selected (or acting) skill card no longer shows an amber ring: the user decided not to show
+ * the yellow border. Selection reads from the on-canvas marker instead, and the card stays a plain
+ * fill with no extra hover animation. */
 
 /*
  * 圖示外面的圓圈框（使用者定案，比照參考圖）。框線取 `--color-accent-ink` 的 35% 淡版，
