@@ -339,18 +339,6 @@
   height: 56px;
 }
 
-/*
- * 重新開始鍵的「已要求確認」狀態（`ui/restartButton.ts`）：第一次按下後整顆轉成警示色，
- * 提示玩家**再按一次**才會真的重設；確認窗過了就由該模組移除這個 class 退回原樣。
- * Restart's "confirm requested" state (`ui/restartButton.ts`): the first press turns the
- * button into the danger color asking for a **second press**; the module removes the class
- * when the confirm window lapses.
- */
-.toolbar__button--confirm {
-  background: var(--color-danger);
-  color: #ffffff;
-}
-
 /* ── ⑥ 容器 / Container（`1408:2110`）────────────────────────────────── */
 
 .stage {

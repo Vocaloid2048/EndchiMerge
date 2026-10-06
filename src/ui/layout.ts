@@ -63,10 +63,10 @@ export interface Layout {
 
 /**
  * 工具列每個圖示的語意（design.md D23 + 重新開始）。
- * 重新開始的**行為**（雙重確認）不在這裡 —— 這裡只負責把按鈕放上工具列，`main.ts`
+ * 重新開始的**行為**（彈出確認對話框）不在這裡 —— 這裡只負責把按鈕放上工具列，`main.ts`
  * 會用 `ui/restartButton.ts` 把確認流程接上。
- * Toolbar semantics per design.md D23, plus restart. Restart's *behaviour* (the double
- * confirmation) does not live here — this only places the button; `main.ts` wires the
+ * Toolbar semantics per design.md D23, plus restart. Restart's *behaviour* (the confirmation
+ * dialog) does not live here — this only places the button; `main.ts` wires the
  * confirm flow via `ui/restartButton.ts`.
  */
 const TOOLBAR_ITEMS: readonly { icon: AssetIconName; label: string; action: string; disabled?: boolean }[] = [

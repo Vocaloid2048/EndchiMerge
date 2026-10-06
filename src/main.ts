@@ -212,14 +212,19 @@ async function bootstrap(): Promise<void> {
   });
 
   /*
-   * 重新開始鍵（工具列、設定右邊）：雙重確認通過後走與結算覆蓋層同一條 `restartRun`。
-   * The toolbar restart button (right of settings): once double-confirmed it takes the
-   * same `restartRun` path as the game-over overlay.
+   * 重新開始鍵（工具列、設定右邊）：按下先彈出確認對話框，確認後走與結算覆蓋層同一條
+   * `restartRun`。對話框掛在 `layout.root`（與結算覆蓋層同一個宿主），所以它跟整張畫布
+   * 一起被等比縮放。
+   * The toolbar restart button (right of settings): a press opens a confirmation dialog and
+   * only a confirmed answer takes the same `restartRun` path as the game-over overlay. The
+   * dialog mounts on `layout.root` (the overlay's host), so it scales with the canvas.
    */
   const restartButton = layout.regions.toolbar.querySelector<HTMLButtonElement>(
     'button[data-action="restart"]',
   );
-  if (restartButton !== null) attachRestartConfirm({ button: restartButton, onRestart: restartRun });
+  if (restartButton !== null) {
+    attachRestartConfirm({ button: restartButton, host: layout.root, onRestart: restartRun });
+  }
 
   /*
    * 除錯輔助線：開發模式下加上 `?debug=1` 就會疊出容器外框、物理空腔與投放線。

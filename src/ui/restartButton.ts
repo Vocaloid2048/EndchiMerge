@@ -1,88 +1,71 @@
 /**
- * 重新開始鍵的雙重確認。
- * Double confirmation for the restart button.
+ * 工具列重新開始鍵。
+ * The toolbar restart button.
  *
- * 重新開始會**丟掉進行中的一局**，誤觸代價太高，所以第一次按下**不會**重設：按鈕進入
- * 「已要求確認」狀態（整顆轉警示色、文案改成「再按一次確認重新開始」），玩家必須在
- * 確認窗內再按一次才會真的重設；離開確認窗（逾時）就自動退回原樣，不留卡住的狀態。
- * 確認窗本身刻意短（三秒）：它防的是誤觸，不是審訊。
- * Restarting throws away the run in progress, so a stray tap must not reset: the first
- * press only arms the button (danger color, label switching to "press again to confirm"),
- * and a **second** press inside the confirm window performs the reset. Letting the window
- * lapse disarms automatically, so the button never sticks in the armed state. The window
- * is deliberately short (three seconds): it guards against accidents, not interrogates.
+ * 重新開始會**丟掉進行中的一局**，誤觸代價太高，所以按下時不直接重設，而是彈出一個
+ * 確認對話框問「是否重新開始」；只有按下對話框裡的「重新開始」才會真的重設，取消（或
+ * Esc／點背景）則原樣退回。
+ * Restarting throws away the run in progress, so a press does not reset: it opens a
+ * confirmation dialog asking whether to restart. Only the dialog's "restart" performs the
+ * reset; cancel (or Esc / a backdrop click) leaves everything as it was.
  *
- * 這支只管**確認狀態機**，不管重設本身要做什麼 —— 那由呼叫端透過 `onRestart` 決定
- * （與 `ui/gameOver.ts` 的分工相同）。
- * This module owns only the confirm state machine, not what a restart does — the caller
- * decides that via `onRestart` (same split as `ui/gameOver.ts`).
+ * **為何不是「再按一次同一顆鈕」**：使用者定案改為對話框。二次按鈕的確認窗只有三秒、
+ * 狀態還留在工具列上（整顆轉紅），玩家常在還來不及讀完提示時就逾時；對話框把問題講清楚、
+ * 給一個看得見的出口，取消也不需要玩家自己發現「其實可以不理它」。對話框本身由
+ * `ui/confirmDialog.ts` 提供 —— 這支只負責**把工具列按鈕接到那個對話框**，以及
+ * 確認通過後呼叫 `onRestart`。
+ * **Why not "press the same button twice"**: the user's decision is a dialog. The old two-tap
+ * confirm had a three-second window and left its state on the toolbar (turning the button red),
+ * so players often timed out before reading it; a dialog states the question plainly, gives a
+ * visible way out, and cancelling needs no discovery. The dialog itself comes from
+ * `ui/confirmDialog.ts` — this module only **wires the toolbar button to that dialog** and
+ * calls `onRestart` once it is confirmed.
  */
 
-/** 進入確認狀態後，多久沒有第二次按下就自動退回。 */
-const DEFAULT_CONFIRM_WINDOW_MS = 3000;
+import { createConfirmDialog } from './confirmDialog';
 
-/** 確認狀態下的提示文案（同步寫進 `title` 與 `aria-label`）。 */
-const CONFIRM_LABEL = '再按一次確認重新開始';
+/** 對話框的文案（使用者定案）。 */
+const DIALOG = {
+  title: '重新開始？',
+  message: '進行中的這一局分數與版面都會清空，確定要重新開始嗎？',
+  confirmLabel: '重新開始',
+  cancelLabel: '取消',
+} as const;
 
 export interface RestartConfirmOptions {
   /** 工具列上的重新開始按鈕。 */
   button: HTMLButtonElement;
-  /** 雙重確認通過後呼叫（真正執行重設的一方）。 */
+  /** 對話框的掛載點；通常是 `layout.root`（同時也是縮放畫布）。 */
+  host: HTMLElement;
+  /** 確認通過後呼叫（真正執行重設的一方）。 */
   onRestart: () => void;
-  /** 覆寫確認窗時長；測試用。 */
-  confirmWindowMs?: number;
 }
 
 export interface RestartConfirm {
-  /** 退回未確認狀態（例如結算覆蓋層已經在處理重設時）。 */
-  disarm(): void;
-  /** 移除事件綁定；頁面層級 teardown 用。 */
+  /** 收起對話框（例如結算覆蓋層已經在處理重設時）。 */
+  close(): void;
+  /** 移除事件綁定與對話框；頁面層級 teardown 用。 */
   dispose(): void;
 }
 
 export function attachRestartConfirm(options: RestartConfirmOptions): RestartConfirm {
-  const button = options.button;
-  const confirmWindowMs = options.confirmWindowMs ?? DEFAULT_CONFIRM_WINDOW_MS;
-  /* 進入確認狀態前先記下原本的文案，退回時原樣還原。 */
-  const baseLabel = button.getAttribute('aria-label') ?? button.title;
+  const dialog = createConfirmDialog({
+    host: options.host,
+    title: DIALOG.title,
+    message: DIALOG.message,
+    confirmLabel: DIALOG.confirmLabel,
+    cancelLabel: DIALOG.cancelLabel,
+    onConfirm: options.onRestart,
+  });
 
-  let armed = false;
-  let timer = Number.NaN;
-
-  const disarm = (): void => {
-    armed = false;
-    if (!Number.isNaN(timer)) {
-      window.clearTimeout(timer);
-      timer = Number.NaN;
-    }
-    button.classList.remove('toolbar__button--confirm');
-    button.title = baseLabel;
-    button.setAttribute('aria-label', baseLabel);
-  };
-
-  const onClick = (): void => {
-    if (!armed) {
-      /* 第一次按下：只進入確認狀態，不重設。 */
-      armed = true;
-      button.classList.add('toolbar__button--confirm');
-      button.title = CONFIRM_LABEL;
-      button.setAttribute('aria-label', CONFIRM_LABEL);
-      timer = window.setTimeout(disarm, confirmWindowMs);
-      return;
-    }
-
-    /* 第二次按下：確認成立，退回原樣後才執行重設。 */
-    disarm();
-    options.onRestart();
-  };
-
-  button.addEventListener('click', onClick);
+  const onClick = (): void => dialog.open();
+  options.button.addEventListener('click', onClick);
 
   return {
-    disarm,
+    close: (): void => dialog.close(),
     dispose(): void {
-      disarm();
-      button.removeEventListener('click', onClick);
+      options.button.removeEventListener('click', onClick);
+      dialog.dispose();
     },
   };
 }
