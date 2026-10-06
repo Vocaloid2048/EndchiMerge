@@ -40,7 +40,7 @@ export interface HudState {
   comboCount: number;
   /** 本次投放合共賺了多少分 —— 第二行的 `+ 18`。 */
   comboDropScore: number;
-  /** 最後一次合成所用的倍率；尚未合成為 1。渲染成 `×1.3`。 */
+  /** 最後一次合成所用的倍率；尚未合成為 1。渲染成 `×1.74`（小數兩位）。 */
   comboMultiplier: number;
   /** 最高分；M7 接上存檔前固定為 0。 */
   bestTry?: number;
@@ -106,13 +106,15 @@ export class Hud {
     }
 
     /*
-     * 第二行：`+ 18 (×1.3)` —— 本次投放合共得分，加上最後一次合成所用的倍率。
-     * 倍率固定一位小數（`×1.3`），避免 `×1.30000000000000004` 這種浮點尾巴。
-     * The second line: `+ 18 (×1.3)` — this drop's total with the multiplier its last merge
-     * used. One decimal keeps float tails like `×1.30000000000000004` off the card.
+     * 第二行：`+ 18 (×1.74)` —— 本次投放合共得分，加上最後一次合成所用的倍率。
+     * 倍率由 `comboMultiplier()` 算好並已四捨五入到小數兩位（使用者定案），這裡**直接顯示**
+     * —— 不可再對它套任何曲線或換算（先前有一版在這裡把倍率又套了一次指數曲線，是錯的）。
+     * The second line: `+ 18 (×1.74)` — this drop's total with the multiplier its last merge
+     * used. `comboMultiplier()` already rounds to two decimals (the user's decision); display
+     * it **as is** — never re-apply a curve here (an earlier version transformed the multiplier
+     * a second time, which was wrong).
      */
-    const shown = Math.round(state.comboMultiplier * 10) / 10;
-    const detail = `+ ${String(state.comboDropScore)} (×${shown.toFixed(1)})`;
+    const detail = `+ ${String(state.comboDropScore)} (×${state.comboMultiplier.toFixed(2)})`;
     if (detail !== this.lastComboDetail) {
       this.comboDetailValue.textContent = detail;
       this.lastComboDetail = detail;

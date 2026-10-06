@@ -2396,9 +2396,9 @@ export class GameSession implements SkillBoard {
    * 這串連勝累積到目前為止所用的倍率；尚未合成過為 `1`。
    * The multiplier this streak has reached; `1` before any merge.
    *
-   * COMBO 卡第二行的 `(×1.3)` 顯示的就是它。因為串長跨投放累積，這個倍率會**一路沿著曲線
+   * COMBO 卡第二行的 `(×1.74)` 顯示的就是它。因為串長跨投放累積，這個倍率會**一路沿著曲線
    * 往上爬**，直到某顆完全沒合成才被重設回 ×1.0。
-   * Exactly what the card's `(×1.3)` renders. Because the chain accumulates across drops, this
+   * Exactly what the card's `(×1.74)` renders. Because the chain accumulates across drops, this
    * multiplier climbs the curve for as long as the streak survives and only drops back to ×1.0
    * when a drop merges nothing at all.
    */

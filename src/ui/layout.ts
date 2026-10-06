@@ -158,7 +158,7 @@ function buildNextCard(): HTMLElement {
  * 兩個數字，回答兩個不同的問題（使用者定案）：
  * - 大數字：**本次投放合成了幾次**（`combo-count`）。
  * - 下面一行：**本次投放合共賺了多少分**，加上最後一次合成所用的倍率
- *   （`combo-detail`，`+ 18 (×1.3)`）。
+ *   （`combo-detail`，`+ 18 (×1.74)`）。
  *
  * 兩者都隨投放歸零，所以「本次投放」的界線與連擊一致，不會出現次數還在跳、
  * 得分卻已經換了一批的錯覺。
@@ -166,7 +166,7 @@ function buildNextCard(): HTMLElement {
  * Two numbers answering two different questions (the user's decision):
  * - the big one: **how many merges this drop produced** (`combo-count`);
  * - the line below: **what this drop earned in total** with the multiplier its last merge
- *   used (`combo-detail`, `+ 18 (×1.3)`).
+ *   used (`combo-detail`, `+ 18 (×1.74)`).
  *
  * Both reset on a drop, so "this drop" spans the same window as the chain and the total can
  * never belong to a different drop than the count.

@@ -175,17 +175,17 @@ at - 上次時刻 ≤ comboWindowMs(1000) → comboCount++（接續這一串）
 ### 3.2 倍率曲線
 
 ```
-comboMultiplier(n) = min( e^(0.25 × n) / 10, 9 ) + 1        // n = comboCount
+comboMultiplier(n) = round2( min( e^(0.075 × n) / 1.5 − 1/1.5, 9 ) + 1 )   // n = comboCount
 ```
 
-| n | 1 | 4 | 8 | 12 | 14 | 18 |
+| n | 1 | 5 | 10 | 20 | 25 | 36 |
 |---|---|---|---|---|---|---|
-| 倍率 | ×1.1 | ×1.3 | ×1.7 | ×3.0 | ×4.3 | **×10.0**（天花板） |
+| 倍率 | ×1.05 | ×1.30 | ×1.74 | ×3.32 | ×4.68 | **×10.00**（天花板） |
 
-- **`n = 0` 回傳 `1.0`**，而不是公式算出的 `1.1`：靜止狀態顯示 ×1.1 會讓玩家以為一直有加成。
-  這是唯一一處刻意偏離公式的地方。
-- 曲線**上升很快**：`n = 4` 就到 ×1.3、`n = 14` 是 ×4.3，`n = 18` 觸頂 ×10.0（`e^4.5 / 10 ≈ 9`
-  剛好追上 `cap`）。HUD 取一位小數顯示。
+- **`n = 0` 回傳 `1.0`**（明確的早退分支，不依賴公式在 `n = 0` 的值）。
+- 曲線**上升平緩**（使用者第三次定案）：`n = 5` 到 ×1.30、`n = 25` 是 ×4.68，
+  `n = 36` 觸頂 ×10.00（`e^2.7/1.5 − 1/1.5 ≈ 9.25` 追上 `cap`）。倍率四捨五入到
+  **小數兩位**，顯示與計分共用同一個值。
 - **調參入口**：`src/game/combo.ts → COMBO_CURVE`。`coefficient` 越小上升越慢；
   `cap + base` 就是天花板。
 
@@ -477,7 +477,7 @@ spawnY        = frame.y - dropAboveRim          // container.json，預設 40（
 | 近接合成的邊緣間隙容差 | `src/core/constants.ts → MERGE_OUTLINE_GAP` | `4` |
 | 合成後推開鄰居的力度 | `src/core/constants.ts → MERGE_PUSH_FACTOR / MERGE_PUSH_SPEED / MERGE_PUSH_MAX_DEPTH` | `1.15 / 0.05 / 12` |
 | 合成後找支撐的吸附上限 | `src/core/constants.ts → MERGE_SETTLE_MAX_DROP` | `80` |
-| 連擊曲線 | `src/game/combo.ts → COMBO_CURVE` | `coefficient 0.25 / cap 9 / base 1` |
+| 連擊曲線 | `src/game/combo.ts → COMBO_CURVE` | `coefficient 0.075 / divisor 1.5 / cap 9 / base 1 / decimals 2` |
 | 彈跳動畫時長與峰值 | `src/core/constants.ts → POP_ANIMATION_MS / POP_PEAK_SCALE` | `180ms / 1.3` |
 | 每次投放／合成的技力 | `skills.json → sp.gainPerDrop / sp.gainPerCombo` | `0.05 / 0.05` |
 | 技力上限 | `skills.json → sp.max` | `3`（可設 1–10 正整數；硬上限常數 `SP_MAX_CEILING`） |

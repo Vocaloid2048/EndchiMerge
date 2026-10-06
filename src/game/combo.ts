@@ -30,46 +30,56 @@
  * Combo 倍率曲線。
  * The combo-multiplier curve.
  *
- * 使用者指定：`y = min(e^(0.25x) / 10, 9) + 1`，`x` 是當下的串長。原本的階梯
- * （第 1 次 ×1、第 2 次 ×2…）換成這條平滑曲線。係數由 `0.05` 調到 `0.25` 之後上升快得多：
- * `x = 4` 就剛好到 `×1.3`（`e^1 / 10 = 0.2718`），`x = 18` 碰到 `×10.0` 的天花板。
- * The user's curve: `y = min(e^(0.25x) / 10, 9) + 1` with `x` the current chain length. The
- * coefficient moved from `0.05` to `0.25`, so the climb is far steeper: ×1.3 lands exactly at
- * `x = 4` (`e^1 / 10 = 0.2718`) and the ×10.0 ceiling is reached at `x = 18`.
+ * 使用者指定（第三次定案）：`y = min(e^(0.075x) / 1.5 − 1/1.5, 9) + 1`，`x` 是當下的串長，
+ * 結果四捨五入到**小數兩位**。示例即驗收：`x = 25` → `×4.68`、`x = 10` → `×1.74`。
+ * 舊版 `min(e^(0.25x)/10, 9) + 1` 上升太急（`x = 12` 就 ×3），新係數 `0.075` 把成長放緩：
+ * `×1.30` 在 `x = 5`（`e^0.375/1.5 − 2/3 + 1 ≈ 1.3033`），×10 天花板從 `x = 36` 起生效
+ * （`e^(0.075·36)/1.5 − 1/1.5 = 9.253 ≥ 9`）。
+ * The user's formula (third decision): `y = min(e^(0.075x) / 1.5 − 1/1.5, 9) + 1` with `x` the
+ * current chain length, rounded to **two decimals**. The user's examples double as acceptance:
+ * `x = 25` → `×4.68`, `x = 10` → `×1.74`. The old `min(e^(0.25x)/10, 9) + 1` climbed far too
+ * fast (×3 by `x = 12`); the new coefficient `0.075` slows the climb: `×1.30` lands at `x = 5`,
+ * and the ×10 ceiling takes effect from `x = 36`.
  *
- * 註：使用者訊息裡寫的是 `max(...)`，但 `max(e^(0.25x)/10, 9) + 1` 在 `x ≤ 18` 時**恆等於
- * ×10**（e 項要 `x = 18` 才追上 9），與他舉的示例「4 / + 18 (×1.3)」直接矛盾 ——
- * `x = 4` 時 `max` 會顯示 ×10 而不是 ×1.3。故按文檔原本的 `min` 結構實作。若真的要 `max`，
- * 把 `Math.min` 換成 `Math.max` 即可。
- * Note: the user's message wrote `max(...)`, but `max(e^(0.25x)/10, 9) + 1` is a flat ×10 for
- * every `x ≤ 18` (the exponential only overtakes 9 at x=18), which contradicts his own
- * example "4 / + 18 (×1.3)" — at `x = 4`, `max` would read ×10, not ×1.3. It is implemented
- * as the documented `min` form. If `max` really is wanted, swap `Math.min` for `Math.max`.
+ * 註：更早的使用者訊息曾寫 `max(...)`，但 `max` 寫法在到達上限前恆等於天花板值，與示例
+ * 直接矛盾 —— 故維持 `min` 結構。若真的要 `max`，把 `Math.min` 換成 `Math.max` 即可。
+ * Note: an earlier message wrote `max(...)`, but the `max` form equals the ceiling for every
+ * `x` below the cap, contradicting the examples — the `min` structure stands. If `max` really
+ * is wanted, swap `Math.min` for `Math.max`.
  *
- * `count = 0`（沒有連擊）時直接回傳 `×1.0`，而不是公式算出的 `×1.0`（`e^0 = 1`，
- * `1/10 + 1 = 1.1`）：靜止狀態顯示 1.1 會讓玩家以為一直有加成。這是一處刻意偏離公式
- * 的地方，只影響「沒有連擊」那一格。
- * At `count = 0` this returns ×1.0 rather than the formula's ×1.1, because an idle card reading
- * 1.1 looks like a permanent bonus. Deliberate, and it only affects the no-combo case.
+ * `count = 0`（沒有連擊）時直接回傳 `×1.0`，而不是公式算出的值（`x = 0` 時公式給
+ * `1/1.5 − 1/1.5 + 1 = ×1.0`，恰好相同，但語意上「沒有連擊」不該依賴公式巧合）：這格
+ * 由明確的早退分支負責。
+ * At `count = 0` this returns ×1.0 explicitly rather than trusting the formula (which happens
+ * to give ×1.0 at `x = 0`): "no combo" is an early exit, not a coincidence of the curve.
  */
 export const COMBO_CURVE = {
   /** 指數係數；越小上升越慢。 */
-  coefficient: 0.25,
-  /** 除數，把指數拉回 1 附近。 */
-  divisor: 10,
+  coefficient: 0.075,
+  /** 除數，把指數拉回 1 附近；`−1/divisor` 是曲線的截距項。 */
+  divisor: 1.5,
   /** 指數項的上限。 */
   cap: 9,
-  /** 加的基數；`cap + base` ＝ 倍率天花板（×10.0）。 */
+  /** 加的基數；`cap + base` ＝ 倍率天花板（×10.00）。 */
   base: 1,
+  /** 倍率顯示與計分共用的小數位數（使用者定案：兩位）。 */
+  decimals: 2,
 } as const;
+
+/** 依 `COMBO_CURVE.decimals` 四捨五入，讓顯示與計分用同一個值。 */
+function roundToCurve(value: number): number {
+  const factor = 10 ** COMBO_CURVE.decimals;
+
+  return Math.round(value * factor) / factor;
+}
 
 /** 由串長算出倍率。`count <= 0` 回傳 `1`（見上方說明）。 */
 export function comboMultiplier(count: number): number {
   if (!Number.isFinite(count) || count <= 0) return 1;
 
-  const raw = Math.exp(COMBO_CURVE.coefficient * count) / COMBO_CURVE.divisor;
+  const raw = Math.exp(COMBO_CURVE.coefficient * count) / COMBO_CURVE.divisor - 1 / COMBO_CURVE.divisor;
 
-  return Math.min(raw, COMBO_CURVE.cap) + COMBO_CURVE.base;
+  return roundToCurve(Math.min(raw, COMBO_CURVE.cap) + COMBO_CURVE.base);
 }
 
 /** 某一刻的連擊狀態快照。 */
@@ -117,9 +127,9 @@ export class ComboTracker {
    * 目前狀態。無副作用，HUD 可以每幀查詢。
    * Current state. Side-effect free, so the HUD may poll it every frame.
    *
-   * `multiplier` 是**最後一次**合成所用的倍率 —— COMBO 卡第二行 `(×1.3)` 顯示的就是它；
+   * `multiplier` 是**最後一次**合成所用的倍率 —— COMBO 卡第二行 `(×1.74)` 顯示的就是它；
    * 尚未合成時為 `1`。
-   * `multiplier` is what the **latest** merge used — exactly what the card's `(×1.3)` shows;
+   * `multiplier` is what the **latest** merge used — exactly what the card's `(×1.74)` shows;
    * `1` before any merge.
    */
   snapshot(): ComboSnapshot {

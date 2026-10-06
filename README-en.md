@@ -46,7 +46,8 @@ Techstack:<br>
 
 > **Current state**: **all five steps are playable**. Dumplings really fall, tumble and stack;
 > same-level contact merges them, with a pop animation and a Combo multiplier of
-> `min(e^(0.25n)/10, 9) + 1` that reaches the ×10.0 ceiling at 18 chained merges.
+> `min(e^(0.075n)/1.5 − 1/1.5, 9) + 1` (two decimals) that reaches the ×10.00 ceiling at 36
+> chained merges.
 > Once the stack crosses the red dashed line 30 units above the container rim you get
 > **5 seconds** to fix it; time out and the run ends with a score summary and a one-tap restart.
 > Every level you merge into existence unlocks that character in the MELTING LIST, and **unlocks
@@ -56,11 +57,11 @@ Techstack:<br>
 
 ### Combo multiplier
 
-| Chain | 1 | 4 | 8 | 12 | 14 | 18 |
+| Chain | 1 | 5 | 10 | 20 | 25 | 36 |
 |:--|:--|:--|:--|:--|:--|:--|
-| Multiplier | ×1.1 | ×1.3 | ×1.7 | ×3.0 | ×4.3 | **×10.0** |
+| Multiplier | ×1.05 | ×1.30 | ×1.74 | ×3.32 | ×4.68 | **×10.00** |
 
-> The curve climbs **fast**: ×1.3 by chain 4, ×4.3 at 14, and the ×10.0 ceiling at 18. Several
+> The curve climbs **gently**: ×1.30 by chain 5, ×4.68 at 25, and the ×10.00 ceiling at 36. Several
 > merges inside the same physics step count once; a cascade spread across steps accumulates
 > normally. The curve constants live in `src/game/combo.ts → COMBO_CURVE`.
 
@@ -284,8 +285,8 @@ EndchiMerge
 > 20% white fill) and both the drop point and the overflow line are now derived from the
 > container's rim (40 / 30) instead of hard-coded coordinates. Merge detection is split into
 > "the collision callback only collects → the merge runs after the physics step". The combo
-> multiplier became a non-linear curve (coefficient `0.075` back then, reaching ×10.0 at 60
-> chained merges; raised to `0.25` in M5, now topping out at 18). Per the
+> multiplier became a non-linear curve (three revisions: `0.075` → `0.25`, now
+> `min(e^(0.075n)/1.5 − 1/1.5, 9) + 1`, two decimals, topping out at 36). Per the
 > user's decision the MELTING LIST **is** the codex, unlock checks key off the level id, and the
 > spawn pool filters out anything not yet unlocked.
 

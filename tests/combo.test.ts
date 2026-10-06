@@ -3,7 +3,8 @@
  * Unit tests for combos.
  *
  * 這裡釘住兩件事：
- * 1. **倍率曲線**：`y = min(e^(0.25x)/10, 9) + 1`（使用者指定），單調上升、`x = 18` 封頂。
+ * 1. **倍率曲線**：`y = min(e^(0.075x)/1.5 − 1/1.5, 9) + 1`（使用者指定，小數兩位），
+ *    單調上升、`x = 36` 封頂 ×10。
  * 2. **窗口的邊界**：窗口**不是時間**，而是「上一顆有沒有合成」——所以時鐘完全不出現在這份
  *    測試裡，唯一能結束一串連勝的動作是 `reset()`（由「零合成」那次投放呼叫）。
  *
@@ -11,8 +12,8 @@
  * 而窗口若不小心接回時間，玩家連續合成時會隨機斷連。
  *
  * Two things are pinned here:
- * 1. the **multiplier curve** — `y = min(e^(0.25x)/10, 9) + 1` (the user's formula), monotonic,
- *    capping at x = 18;
+ * 1. the **multiplier curve** — `y = min(e^(0.075x)/1.5 − 1/1.5, 9) + 1` (the user's formula,
+ *    two decimals), monotonic, capping at ×10 from x = 36;
  * 2. the **window's edges** — the window is *not* time but "did the previous drop merge", so no
  *    clock appears in this suite at all and the only thing that can end a streak is `reset()`.
  *
@@ -23,50 +24,47 @@
 import { describe, expect, it } from 'vitest';
 import { COMBO_CURVE, comboMultiplier, ComboTracker } from '../src/game/combo';
 
-/** 曲線天花板 ＝ `cap + base` ＝ ×10.0。 */
+/** 曲線天花板 ＝ `cap + base` ＝ ×10.00。 */
 const CEILING = COMBO_CURVE.cap + COMBO_CURVE.base;
 
 describe('comboMultiplier — 指數曲線 / the exponential curve', () => {
   it('gives no bonus when there is no chain', () => {
-    /* 靜止狀態顯示 ×1.1 會讓玩家以為一直有加成，所以 0 特別回 ×1.0。 */
+    /* 「沒有連擊」是明確的早退分支，不依賴公式在 x = 0 的巧合值。 */
     expect(comboMultiplier(0)).toBe(1);
     expect(comboMultiplier(-3)).toBe(1);
   });
 
-  it('starts just above ×1.1 on the first merge', () => {
-    expect(comboMultiplier(1)).toBeCloseTo(1.1284, 4);
+  it('starts at ×1.05 on the first merge', () => {
+    /* e^0.075/1.5 − 1/1.5 + 1 = 1.0519 → 小數兩位 = 1.05。 */
+    expect(comboMultiplier(1)).toBe(1.05);
   });
 
-  it('reads ×1.3 at x = 4, exactly as the user\'s example showed', () => {
+  it('matches the user\'s examples exactly: ×1.74 at 10, ×4.68 at 25', () => {
     /*
-     * 使用者舉的示例是「4 / + 18 (×1.3)」，這條測試就是那個示例。
-     * `e^(0.25·4) = e^1`，`e^1 / 10 = 0.2718`，`+ 1 = 1.2718`，四捨五入到小數一位 = ×1.3。
-     *
-     * 順帶把 `max` 寫法的問題釘死：`max(e^(0.25·4)/10, 9) + 1` 會是 ×10.0，與示例矛盾 ——
-     * 所以曲線必須是 `min`。若有人把 `Math.min` 改成 `Math.max`，這條會先爆。
-     * The user's own example is "4 / + 18 (×1.3)", and this test *is* that example:
-     * `e^1 / 10 = 0.2718`, `+ 1 = 1.2718`, which rounds to ×1.3.
-     *
-     * It also nails down why the curve must be `min`: `max(e^(0.25·4)/10, 9) + 1` would be
-     * ×10.0, contradicting the example. Anyone swapping `Math.min` for `Math.max` fails here
-     * first.
+     * 這兩個數就是使用者訊息裡的示例，公式以此驗收：
+     * `x = 10`：`e^0.75/1.5 − 1/1.5 + 1 = 1.7447` → ×1.74。
+     * `x = 25`：`e^1.875/1.5 − 1/1.5 + 1 = 4.6805` → ×4.68。
+     * These two numbers are the user's own examples, and the curve is accepted against them.
      */
-    expect(comboMultiplier(4)).toBeCloseTo(1.2718, 4);
-    expect(Math.round(comboMultiplier(4) * 10) / 10).toBe(1.3);
+    expect(comboMultiplier(10)).toBe(1.74);
+    expect(comboMultiplier(25)).toBe(4.68);
   });
 
-  it('climbs steeply, pinned at known points of the user curve', () => {
-    /* y = min(e^(0.25x)/10, 9) + 1：每 +4 就跳 e 倍，指數項成長很快。 */
-    expect(comboMultiplier(8)).toBeCloseTo(1.7389, 4);
-    expect(comboMultiplier(12)).toBeCloseTo(3.0086, 4);
-    expect(comboMultiplier(16)).toBeCloseTo(6.4598, 4);
+  it('climbs gently, pinned at known points of the user curve', () => {
+    /* y = min(e^(0.075x)/1.5 − 1/1.5, 9) + 1，小數兩位。 */
+    expect(comboMultiplier(5)).toBe(1.3);
+    expect(comboMultiplier(8)).toBe(1.55);
+    expect(comboMultiplier(12)).toBe(1.97);
+    expect(comboMultiplier(16)).toBe(2.55);
+    expect(comboMultiplier(20)).toBe(3.32);
   });
 
-  it('caps at ×10.0 so one long cascade cannot blow the score up', () => {
-    /* e^(0.25·18)/10 = 9.0017 ≥ 9，天花板從 x = 18 起生效。 */
-    expect(comboMultiplier(17)).toBeLessThan(CEILING);
-    expect(comboMultiplier(18)).toBe(CEILING);
-    expect(comboMultiplier(19)).toBe(CEILING);
+  it('caps at ×10.00 so one long cascade cannot blow the score up', () => {
+    /* e^(0.075·36)/1.5 − 1/1.5 = 9.253 ≥ 9，天花板從 x = 36 起生效（x = 35 仍是 ×9.54）。 */
+    expect(comboMultiplier(35)).toBe(9.54);
+    expect(comboMultiplier(35)).toBeLessThan(CEILING);
+    expect(comboMultiplier(36)).toBe(CEILING);
+    expect(comboMultiplier(37)).toBe(CEILING);
     expect(comboMultiplier(500)).toBe(CEILING);
   });
 
