@@ -238,6 +238,13 @@ export class FrameLoop {
          * cleaner than the canvas quietly truncating it.
          */
         clipTop: 0,
+        /*
+         * 技能選取的脈動相位；週期約 900ms（design.md §5.6 的 `selectPulseMs`），由時間推導
+         * 所以畫面本身不存狀態。只改透明度，不動幾何。
+         * The skill-selection pulse phase, about a 900ms period (design.md §5.6's `selectPulseMs`),
+         * derived from the clock so the renderer keeps no state. It changes opacity only.
+         */
+        selectionPulse: 0.5 + 0.5 * Math.sin(this.nowMs / 450),
         debug: this.debug
           ? {
               cavity: this.session.playArea,

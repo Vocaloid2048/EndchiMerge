@@ -175,6 +175,19 @@ export class SpResource {
     this.value = this.clampValue(this.value);
   }
 
+  /**
+   * 把累計消耗歸零（免費技能用完後重新上鎖）。
+   * Clear the cumulative-spend total (so a free skill locks again after use).
+   *
+   * 與 `reset()` 不同：這裡**不動**目前值與臨時上限。技能扣完費之後呼叫它，才不會把玩家
+   * 剩下的技力一起抹掉。
+   * Unlike `reset()` this leaves the current value and any temporary cap alone; a skill calls it
+   * after charging, so the player's remaining SP is not wiped along with the counter.
+   */
+  resetSpent(): void {
+    this.spentTotal = 0;
+  }
+
   /** 開新局：值回到 `initial`，累計消耗歸零，臨時上限清除。 */
   reset(): void {
     this.overrideMax = null;

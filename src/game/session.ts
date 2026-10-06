@@ -29,6 +29,7 @@
 import Matter from 'matter-js';
 import { createCircleBody, createPolygonBody, lockRotation, Physics, pushBody } from '../core/physics';
 import {
+  FLOAT_OVERFLOW_BUFFER_MS,
   MERGE_OUTLINE_GAP,
   MERGE_PUSH_FACTOR,
   MERGE_PUSH_MAX_DEPTH,
@@ -36,6 +37,7 @@ import {
   MERGE_SETTLE_MAX_DROP,
   POP_ANIMATION_MS,
   POP_PEAK_SCALE,
+  SHAKE_MAX_BODY_SPEED,
   WALL_THICKNESS,
 } from '../core/constants';
 import { computeContainerBounds, computeWallOverhang, createContainerBodies } from './containerBox';
@@ -44,6 +46,9 @@ import { mergeResultId } from './merge';
 import { boundsOf, circleMass, distanceToSupport, inheritMomentum } from './mergeSettle';
 import { outlinePenetration, outlinesWithinReach, toWorldPolygon } from './outlineProximity';
 import { OverflowMonitor } from './overflow';
+import { createSkills, type BoardTarget, type FloatRequest, type ShakeRequest, type SkillBoard } from './skills';
+import type { Skill } from './skills';
+import { SpResource } from './sp';
 import { SpawnQueue } from './spawnQueue';
 import { computeContainerGeometry, type ContainerGeometry } from '../render/container';
 import { createRng, type Rng } from '../core/rng';
@@ -106,6 +111,48 @@ interface PendingMerge {
   atMs: number;
 }
 
+/**
+ * 點選目標的容差係數：命中範圍 ＝ 碰撞半徑 × 這個值。
+ * The pick tolerance: the hit area is the collision radius times this factor.
+ *
+ * 大於 1 是因為玩家看到的是方形 sprite 加裝飾（比碰撞圓稍大），半徑乘 1.15 讓「看起來點到了」
+ * 與「真的點到了」盡量一致，同時不會大到誤選隔壁那顆。
+ * Above 1 because the player sees a square sprite with decorations (slightly larger than the
+ * collision circle); 1.15 keeps "it looked like a hit" and "it was a hit" in step without
+ * straying so far that the neighbour gets picked instead.
+ */
+const HIT_SLACK = 1.15;
+
+/** 技能卡要顯示的狀態（給 `ui/skillBar.ts`）。 */
+export interface SkillCardState {
+  id: string;
+  name: string;
+  /** 消耗技力；0 ＝ 免費。 */
+  cost: number;
+  targeting: 'user_pick' | 'immediate';
+  /** 需要點選幾顆。 */
+  pickCount: number;
+  /** 現在可不可以按（技力夠／累計消耗夠）。 */
+  unlocked: boolean;
+  /** 解鎖進度 `0..1`，供遮罩顯示還差多少。 */
+  progress: number;
+  /** 這個技能是否正在選取中。 */
+  active: boolean;
+  /** 選取中已經點了幾顆。 */
+  selectedCount: number;
+}
+
+/** 把內部項目轉成技能看得懂的目標（只暴露它需要的欄位）。 */
+function toBoardTarget(entry: Entry): BoardTarget {
+  return {
+    id: entry.body.id,
+    levelId: entry.level.id,
+    x: entry.body.position.x,
+    y: entry.body.position.y,
+    radius: entry.level.radius,
+  };
+}
+
 export interface GameSessionOptions {
   config: AllConfig;
   /** 可注入的亂數來源；未提供時用固定種子以便重播。 */
@@ -129,7 +176,7 @@ export interface GameSessionOptions {
   silhouettes?: SilhouetteCache;
 }
 
-export class GameSession {
+export class GameSession implements SkillBoard {
   private readonly config: AllConfig;
   private readonly physics: Physics;
   private readonly spawnQueue: SpawnQueue;
@@ -140,6 +187,39 @@ export class GameSession {
   private readonly silhouettes: SilhouetteCache | undefined;
   private readonly combo: ComboTracker;
   private readonly overflow: OverflowMonitor;
+
+  /* ---------------------------------------------------------------- 技力與技能 */
+  /** 技力資源（累積、扣費、臨時上限）。 */
+  private readonly sp: SpResource;
+  /** 技能清單，順序由 `configLoader` 排好（前三個收費、免費技能殿後）。 */
+  private readonly skills: readonly Skill[];
+  private readonly skillsById: ReadonlyMap<string, Skill>;
+  /**
+   * 選取中的技能（＝玩家已按下、正在等點目標）。`null` ＝ 不在選取模式。
+   * The skill being targeted — pressed and waiting for picks. `null` means not selecting.
+   */
+  private activeSkill: Skill | null = null;
+  /** 已點選的目標 id，依點選順序。 */
+  private selectedIds: number[] = [];
+  /** 浮動：開始時刻與時長；`durationMs <= 0` ＝ 不在浮動。 */
+  private floatStartedAtMs = 0;
+  private floatDurationMs = 0;
+  private floatLiftFactor = 0;
+  /** 搖晃：開始時刻、時長、圈數與半徑（世界單位）。 */
+  private shakeStartedAtMs = 0;
+  private shakeDurationMs = 0;
+  private shakeRevolutions = 0;
+  private shakeRadius = 0;
+  /** 目前的容器位移（虛擬單位）；畫與牆都用它。 */
+  private shakeOffsetX = 0;
+  private shakeOffsetY = 0;
+  /** 已經套到牆上的位移，用來只搬動差量。 */
+  private appliedShakeX = 0;
+  private appliedShakeY = 0;
+  /** 目前寫進引擎的重力（浮動時會變成負值）。 */
+  private appliedGravityY: number;
+  /** 溢位暫停到這個時刻為止（浮動期間 ＋ 結束後緩衝）。 */
+  private overflowPauseUntilMs = 0;
 
   private geometry: ContainerGeometry;
   private cavity: Rect;
@@ -224,6 +304,12 @@ export class GameSession {
     this.combo = new ComboTracker();
     this.overflow = new OverflowMonitor(this.config.levels.settings.overflowGraceMs);
 
+    /* 技力與技能：技力是一局之內的資源，技能實作由 JSON 決定。 */
+    this.sp = new SpResource({ ...this.config.skills.sp });
+    this.skills = createSkills(this.config.skills.skills);
+    this.skillsById = new Map(this.skills.map((skill) => [skill.id, skill]));
+    this.appliedGravityY = this.config.levels.settings.gravityY;
+
     /* 先建一次，讓 `aimX` 與牆壁在任何 resize 之前就有合法值。 */
     this.geometry = this.buildGeometry(options.virtualWidth ?? 500, this.virtualHeight);
     this.cavity = computeContainerBounds(this.geometry.frame, WALL_THICKNESS).cavity;
@@ -240,9 +326,28 @@ export class GameSession {
 
   /* ------------------------------------------------------------------ 幾何 */
 
-  /** 目前的容器線框幾何；渲染器直接使用。 */
+  /**
+   * 目前的容器線框幾何；渲染器直接使用。
+   * The current container geometry, consumed directly by the renderer.
+   *
+   * 搖晃期間會疊上位移：容器（連同溢位線、警戒區、裁切範圍）整體沿圓周晃動，而方團團留在
+   * 世界座標系 —— 因此畫面上看到的是「容器在動、球被晃到」，而不是「整張圖平移」。
+   * During a shake the orbit offset is folded in: the container — along with the overflow line,
+   * the warning zone and the clip region — orbits, while the dumplings stay in world coordinates.
+   * On screen that reads as "the container is moving and the balls get rattled", not as "the
+   * whole picture slid".
+   */
   get containerGeometry(): ContainerGeometry {
-    return this.geometry;
+    if (this.shakeOffsetX === 0 && this.shakeOffsetY === 0) return this.geometry;
+
+    return {
+      ...this.geometry,
+      frame: {
+        ...this.geometry.frame,
+        x: this.geometry.frame.x + this.shakeOffsetX,
+        y: this.geometry.frame.y + this.shakeOffsetY,
+      },
+    };
   }
 
   /** 空腔邊界；除錯與測試用。 */
@@ -253,9 +358,13 @@ export class GameSession {
   /**
    * 溢位線的 Y（虛擬單位）：U 形**頂緣上方** `overflowAboveRim`。
    * The overflow line's Y: `overflowAboveRim` **above** the U's rim.
+   *
+   * 用 `containerGeometry` 而非 `geometry`，所以搖晃時它跟著容器走 —— 這條線是容器的一部分。
+   * Uses `containerGeometry` rather than `geometry` so it travels with the container during a
+   * shake; the line is part of the container.
    */
   get overflowLineY(): number {
-    return this.geometry.frame.y - Math.max(0, this.config.container.overflowAboveRim);
+    return this.containerGeometry.frame.y - Math.max(0, this.config.container.overflowAboveRim);
   }
 
   /**
@@ -306,6 +415,16 @@ export class GameSession {
 
     this.wallBodies = createContainerBodies(bounds.walls);
     this.physics.add(...this.wallBodies);
+
+    /*
+     * 牆是全新的，位置就是基準位置，所以「已套用的晃動位移」要歸零 —— 否則下一步會拿舊的
+     * 位移去算差量，把牆多推一次。
+     * The walls are brand new and sit at their base positions, so the "already applied shake
+     * offset" must reset; otherwise the next step computes a delta against a stale value and
+     * shoves them twice.
+     */
+    this.appliedShakeX = 0;
+    this.appliedShakeY = 0;
   }
 
   /* ------------------------------------------------------------------ 瞄準 */
@@ -448,12 +567,28 @@ export class GameSession {
     this.dropMergeCountValue = 0;
     this.dropScoreValue = 0;
 
+    /*
+     * 技力來源之一是**投放**（使用者定案：每投放一次 +0.05），不是合成。掛在這裡而不是
+     * 合成處，是因為「投放」的定義就是這一支成功跑完 —— 冷卻中被擋掉的呼叫不會走到這裡。
+     * One source of SP is the **drop** itself (the user's decision: +0.05 per drop), not merging.
+     * It hangs here rather than on the merge path because "a drop happened" is exactly this
+     * method completing successfully; calls blocked by the cooldown never reach it.
+     */
+    this.sp.gainForDrop();
+
     return true;
   }
 
   /**
-   * 現在可以投放嗎（＝這一局還在進行，且已過投放冷卻）。
-   * Whether a drop is accepted right now: the run is live and the cooldown has elapsed.
+   * 現在可以投放嗎（＝這一局還在進行、沒有技能在作用、且已過投放冷卻）。
+   * Whether a drop is accepted right now: the run is live, no skill is acting, and the cooldown
+   * has elapsed.
+   *
+   * **技能作用期間禁止投放**（使用者定案）：浮動與搖晃的持續時間內、以及選取目標的等待期間，
+   * 一併擋掉。這條規則在**這一處**成立，所以滑鼠、鍵盤、觸控都不可能繞過它。
+   * **Dropping is blocked while a skill acts** (the user's decision): during a float or a shake,
+   * and while a target selection is pending. The rule lives in **this one place**, so no input
+   * path — mouse, keyboard or touch — can bypass it.
    *
    * 輸入層靠它決定要不要把點擊當成投放，HUD 也可以拿它顯示冷卻狀態。
    * The input layer uses this to decide whether a click counts as a drop, and the HUD can use
@@ -461,6 +596,7 @@ export class GameSession {
    */
   get canDrop(): boolean {
     if (this.over) return false;
+    if (this.isSkillBusy) return false;
     return this.elapsedMs - this.lastDropAtMs >= this.dropCooldownMs;
   }
 
@@ -471,6 +607,471 @@ export class GameSession {
   get dropCooldownRemainingMs(): number {
     if (this.over) return 0;
     return Math.max(0, this.dropCooldownMs - (this.elapsedMs - this.lastDropAtMs));
+  }
+
+  /* ---------------------------------------------------------------- 技力 */
+
+  /** 目前技力值（可為小數）。 */
+  get spValue(): number {
+    return this.sp.current;
+  }
+
+  /** 目前技力上限（考慮臨時覆寫）。 */
+  get spMax(): number {
+    return this.sp.max;
+  }
+
+  /** 技力填充比例 `0..1`。 */
+  get spRatio(): number {
+    return this.sp.ratio;
+  }
+
+  /** 這一局累計消耗的技力量（累計消耗型技能的進度來源）。 */
+  get spCumulativeSpent(): number {
+    return this.sp.cumulativeSpent;
+  }
+
+  /**
+   * 臨時把技力上限改成指定值（技能滿足條件時使用）；傳 `null` 還原。
+   * Temporarily substitute the SP cap (used when a skill's condition holds); `null` restores it.
+   */
+  setSpMaxOverride(value: number | null): void {
+    this.sp.setMaxOverride(value);
+  }
+
+  /* ---------------------------------------------------------------- 技能 */
+
+  /** 這一局可用的技能卡狀態（給技能欄 UI）。 */
+  get skillCards(): readonly SkillCardState[] {
+    return this.skills.map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      cost: skill.cost,
+      targeting: skill.targeting,
+      pickCount: skill.pickCount,
+      unlocked: this.isUnlocked(skill),
+      progress: this.unlockProgress(skill),
+      active: this.activeSkill === skill,
+      selectedCount: this.activeSkill === skill ? this.selectedIds.length : 0,
+    }));
+  }
+
+  /**
+   * 技能是否正在**佔用棋盤**：選取中等候點目標，或浮動／搖晃尚未結束。
+   * Whether a skill currently **owns the board**: a selection is pending, or a float / shake is
+   * still running.
+   *
+   * 這正是「技能作用期間禁止投放」的判準，也是 UI 決定要不要把畫布切成「選球模式」的依據。
+   * This is the predicate behind "no dropping while a skill acts", and what the UI uses to decide
+   * whether the canvas is in "pick a dumpling" mode.
+   */
+  get isSkillBusy(): boolean {
+    return this.activeSkill !== null || this.isFloating || this.isShaking;
+  }
+
+  /** 是否正在選取目標（等待玩家點球）。 */
+  get isSelecting(): boolean {
+    return this.activeSkill !== null && this.activeSkill.requiresTargets;
+  }
+
+  /** 選取狀態：正在選的技能與已點選的目標 id，供畫面標示「」。 */
+  get skillSelection(): { skillId: string; pickedIds: readonly number[] } | null {
+    if (this.activeSkill === null) return null;
+    return { skillId: this.activeSkill.id, pickedIds: this.selectedIds };
+  }
+
+  /**
+   * 按下技能格。需要選目標的技能會進入選取模式；即時技能立刻生效。
+   * Press a skill slot. A targeting skill enters selection mode; an immediate skill fires at once.
+   *
+   * @returns 這次按下是否被接受（進入選取或已生效）。
+   */
+  activateSkill(id: string): boolean {
+    if (this.over) return false;
+
+    /*
+     * 再按同一個技能鍵 ＝ 取消（design.md §5.5）。這個判斷必須排在「技能忙碌中就拒絕」之前，
+     * 否則選取模式一開，同一個鍵就再也按不動，玩家只能靠 Esc 或點空白處退出。
+     * Pressing the same slot again cancels (design.md §5.5). This check must come **before** the
+     * "busy means refuse" guard, or entering selection mode would lock the very button that opened
+     * it and the player could only leave via Esc or empty space.
+     */
+    if (this.activeSkill !== null && this.activeSkill.id === id) {
+      this.cancelSkill();
+      return true;
+    }
+
+    if (this.isSkillBusy) return false;
+
+    const skill = this.skillsById.get(id);
+    if (skill === undefined) return false;
+    if (!this.isUnlocked(skill)) return false;
+
+    /*
+     * 場上沒有方團團時任何技能都沒有意義（浮動／搖晃沒有對象、當棄即棄沒有目標），
+     * 所以一律不受理 —— 免得白白扣掉技力。
+     * With an empty board no skill means anything (nothing to float, shake or discard), so every
+     * one of them is refused rather than silently charging SP for nothing.
+     */
+    if (this.entries.length === 0) return false;
+
+    if (skill.requiresTargets) {
+      this.activeSkill = skill;
+      this.selectedIds = [];
+      return true;
+    }
+
+    this.castSkill(skill, []);
+    return true;
+  }
+
+  /** 取消選取（再按同一技能鍵／按 Esc／點空白處）。選取中不扣技力，取消也不退。 */
+  cancelSkill(): void {
+    this.activeSkill = null;
+    this.selectedIds = [];
+  }
+
+  /**
+   * 畫布上的一次點擊：選取模式中就是選目標，否則就是投放。
+   * One canvas tap: pick a target while selecting, otherwise drop.
+   *
+   * 由輸入層呼叫，是「點擊要當成選球還是投放」的**唯一**分岔點。
+   * Called by the input layer; this is the **only** fork between "pick" and "drop".
+   */
+  canvasPointerAction(x: number, y: number): void {
+    if (this.isSelecting) {
+      this.pickTargetAt(x, y);
+      return;
+    }
+
+    this.drop();
+  }
+
+  /**
+   * 點選一顆方團團。點到第 `pickCount` 顆就立刻生效。
+   * Pick a dumpling; once `pickCount` targets are in hand the skill fires immediately.
+   *
+   * 取消規則（design.md §5.5）：點空白處或再點同一顆都視為取消。
+   * Cancelling (design.md §5.5): tapping empty space, or tapping the same body twice, cancels.
+   */
+  pickTargetAt(x: number, y: number): void {
+    const skill = this.activeSkill;
+    if (skill === null || !skill.requiresTargets) return;
+
+    const hit = this.hitTest(x, y);
+
+    if (hit === null) {
+      this.cancelSkill();
+      return;
+    }
+
+    if (this.selectedIds.includes(hit.body.id)) {
+      this.cancelSkill();
+      return;
+    }
+
+    this.selectedIds.push(hit.body.id);
+    if (this.selectedIds.length < skill.pickCount) return;
+
+    const picks = this.selectedIds
+      .map((id) => this.entryByBodyId(id))
+      .filter((entry): entry is Entry => entry !== undefined)
+      .map((entry) => toBoardTarget(entry));
+
+    this.castSkill(skill, picks);
+  }
+
+  /**
+   * 執行技能：**先扣費，成功才作用**。扣費時機是「效果成功執行時」—— 選取中不扣、取消不退。
+   * Cast a skill: **charge first, act only if the charge succeeds**. Charging happens when the
+   * effect actually runs — selecting costs nothing and cancelling refunds nothing.
+   */
+  private castSkill(skill: Skill, targets: readonly BoardTarget[]): void {
+    if (!this.sp.spend(skill.cost)) return;
+
+    skill.apply(this, targets);
+
+    /*
+     * 以累計消耗解鎖的免費技能（命運互換）用掉之後，累計歸零 → 重新上鎖（使用者定案）。
+     * A free skill gated by cumulative spend (fate swap) resets the running total once used, so
+     * it locks again (the user's decision).
+     */
+    if (skill.unlock.kind === 'cumulativeSpent') this.sp.resetSpent();
+
+    this.activeSkill = null;
+    this.selectedIds = [];
+  }
+
+  /** 這個技能現在可不可以按。 */
+  private isUnlocked(skill: Skill): boolean {
+    if (skill.unlock.kind === 'cumulativeSpent') {
+      return this.sp.cumulativeSpent + 1e-9 >= skill.unlock.threshold;
+    }
+    return this.sp.canAfford(skill.cost);
+  }
+
+  /** 解鎖進度 `0..1`，給技能卡的遮罩顯示「還差多少」。 */
+  private unlockProgress(skill: Skill): number {
+    if (skill.unlock.kind === 'cumulativeSpent') {
+      const threshold = skill.unlock.threshold;
+      if (threshold <= 0) return 1;
+      return Math.min(1, this.sp.cumulativeSpent / threshold);
+    }
+    if (skill.cost <= 0) return 1;
+    return Math.min(1, this.sp.current / skill.cost);
+  }
+
+  /**
+   * 找出點擊位置下的方團團：取**圓心最近**且在容差內的那一顆。
+   * Find the dumpling under a tap: the one whose centre is **closest** within tolerance.
+   *
+   * 容差用碰撞半徑（乘一個寬容係數），因為玩家看到的是方形 sprite 加裝飾；用圓心有系統性
+   * 偏差，用矩形又會漏掉圓角處的點擊。
+   * Tolerance is the collision radius times a slack factor: the player sees a square sprite with
+   * decorations, so a pure centre-radius test feels biased and a bounding box would miss taps on
+   * the rounded corners.
+   */
+  private hitTest(x: number, y: number): Entry | null {
+    let best: Entry | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (const entry of this.entries) {
+      const dx = entry.body.position.x - x;
+      const dy = entry.body.position.y - y;
+      const distance = Math.hypot(dx, dy);
+      const reach = entry.level.radius * HIT_SLACK;
+
+      if (distance > reach) continue;
+      if (distance >= bestDistance) continue;
+
+      best = entry;
+      bestDistance = distance;
+    }
+
+    return best;
+  }
+
+  private entryByBodyId(id: number): Entry | undefined {
+    return this.byBodyId.get(id);
+  }
+
+  /* ---------------------------------------------------------------- SkillBoard */
+
+  /** 場上所有可被選取的方團團（`SkillBoard` 的視角）。 */
+  get targets(): readonly BoardTarget[] {
+    return this.entries.map((entry) => toBoardTarget(entry));
+  }
+
+  /** 容器寬度（搖晃半徑的基準）。 */
+  get containerWidth(): number {
+    return this.geometry.frame.width;
+  }
+
+  /** 移除一顆方團團（「當棄即棄！」）。 */
+  removeTarget(id: number): boolean {
+    const entry = this.byBodyId.get(id);
+    if (entry === undefined) return false;
+
+    this.removeEntry(entry);
+    this.physics.remove(entry.body);
+    return true;
+  }
+
+  /**
+   * 交換兩顆方團團的位置，並對周邊施加擾動（「命運互換」）。
+   * Swap two dumplings and disturb the neighbourhood (fate swap).
+   *
+   * 位置與速度**一起**交換：只換位置的話，兩顆會立刻往原本的慣性跑回去，看起來像沒換成功。
+   * Position and velocity are swapped **together**: swapping only positions makes both bodies
+   * immediately drift back along their old momentum, which reads as "the swap failed".
+   */
+  swapTargets(a: number, b: number, disturbance: number): void {
+    const first = this.byBodyId.get(a);
+    const second = this.byBodyId.get(b);
+    if (first === undefined || second === undefined || first === second) return;
+
+    const firstPosition = { x: first.body.position.x, y: first.body.position.y };
+    const secondPosition = { x: second.body.position.x, y: second.body.position.y };
+    const firstVelocity = { x: first.body.velocity.x, y: first.body.velocity.y };
+    const secondVelocity = { x: second.body.velocity.x, y: second.body.velocity.y };
+
+    Matter.Body.setPosition(first.body, secondPosition);
+    Matter.Body.setPosition(second.body, firstPosition);
+    Matter.Body.setVelocity(first.body, secondVelocity);
+    Matter.Body.setVelocity(second.body, firstVelocity);
+
+    if (disturbance <= 0) return;
+
+    /*
+     * 周邊擾動：把壓在兩個新位置上的鄰居推開（原位置忽然空出、新位置忽然擠進，兩邊都會
+     * 產生重疊）。用與合成推力同一套「沿連心線推」的處理，行為一致。
+     * Neighbour disturbance: shove whoever the two new positions landed on. The old spots opened
+     * up and the new ones squeeze into overlapping bodies, so the same "push along the centre line"
+     * routine the merge push uses keeps the behaviour consistent.
+     */
+    for (const entry of this.entries) {
+      if (entry === first || entry === second) continue;
+
+      for (const moved of [first, second]) {
+        const dx = entry.body.position.x - moved.body.position.x;
+        const dy = entry.body.position.y - moved.body.position.y;
+        const distance = Math.hypot(dx, dy);
+        const reach = entry.level.radius + moved.level.radius;
+
+        if (distance >= reach) continue;
+
+        if (distance === 0) {
+          pushBody(entry.body, 1, 0, 0, disturbance);
+        } else {
+          pushBody(entry.body, dx / distance, dy / distance, 0, disturbance);
+        }
+        break;
+      }
+    }
+  }
+
+  /**
+   * 讓所有方團團向上浮起（「協議：浮動」）。以**溢位線為天花板**。
+   * Float every dumpling, with the **overflow line as the ceiling**.
+   *
+   * 使用者定案：「像杯口被壓住」—— 誰都不可以越過警戒線離開容器。實作有兩部分：把重力翻成
+   * 向上的淨加速度（`liftFactor` 倍重力），以及每步把越線的顆粒壓回線下（見 `step()`）。
+   * The user's decision: "like a lid on a cup" — nothing may rise past the warning line and leave
+   * the container. Two parts: gravity is flipped into a net upward acceleration (`liftFactor`
+   * times gravity), and any body above the line is pressed back down each step (see `step()`).
+   */
+  floatAll(request: FloatRequest): void {
+    this.floatStartedAtMs = this.elapsedMs;
+    this.floatDurationMs = Math.max(0, request.durationMs);
+    this.floatLiftFactor = Math.max(0, request.liftFactor);
+
+    /*
+     * 浮動期間（以及結束後的緩衝）完全不計算溢位：浮起來本來就會逼近警戒線，若照常計時，
+     * 這個技能等於自殺。（使用者定案：結束後 0.5 秒緩衝再恢復計算。）
+     * Overflow is not evaluated at all while floating (nor for the buffer afterwards): floating
+     * necessarily approaches the warning line, so counting normally would make the skill
+     * self-defeating. (The user's decision: a 0.5 s buffer before evaluation resumes.)
+     */
+    this.overflowPauseUntilMs = this.elapsedMs + this.floatDurationMs + FLOAT_OVERFLOW_BUFFER_MS;
+  }
+
+  /**
+   * 震動容器（「搖晃！」）：容器沿圓周晃動，方團團留在世界座標系被牆推擠。
+   * Shake the container: it orbits while the dumplings stay in world space and get shoved by the
+   * moving walls.
+   *
+   * 半徑以容器寬度為基準（技能已把比例夾在硬上限 1/3 內）。
+   * The radius is relative to the container width (the skill already clamped the ratio to the
+   * 1/3 hard cap).
+   */
+  shakeContainer(request: ShakeRequest): void {
+    this.shakeStartedAtMs = this.elapsedMs;
+    this.shakeDurationMs = Math.max(1, request.durationMs);
+    this.shakeRevolutions = Math.max(1, request.revolutions);
+    this.shakeRadius = Math.max(0, request.radiusFactor) * this.geometry.frame.width;
+  }
+
+  /** 是否正在浮動。 */
+  get isFloating(): boolean {
+    return this.floatDurationMs > 0 && this.elapsedMs < this.floatStartedAtMs + this.floatDurationMs;
+  }
+
+  /** 是否正在搖晃。 */
+  get isShaking(): boolean {
+    return this.shakeDurationMs > 0 && this.elapsedMs < this.shakeStartedAtMs + this.shakeDurationMs;
+  }
+
+  /**
+   * 更新搖晃位移。用正弦包絡（`sin(πt)`）讓幅度從 0 起、回到 0 —— 容器不會在技能開始或
+   * 結束的瞬間「跳」一下。
+   * Update the shake offset. A sine envelope (`sin(πt)`) ramps it from 0 and back to 0, so the
+   * container never jumps at the moment the skill starts or ends.
+   */
+  private updateShakeOffset(): void {
+    if (!this.isShaking) {
+      this.shakeOffsetX = 0;
+      this.shakeOffsetY = 0;
+      return;
+    }
+
+    const t = (this.elapsedMs - this.shakeStartedAtMs) / this.shakeDurationMs;
+    const envelope = Math.sin(Math.PI * Math.min(1, Math.max(0, t)));
+    const theta = 2 * Math.PI * this.shakeRevolutions * t;
+
+    this.shakeOffsetX = Math.cos(theta) * this.shakeRadius * envelope;
+    this.shakeOffsetY = Math.sin(theta) * this.shakeRadius * envelope;
+  }
+
+  /** 把位移差量套到牆上（牆是靜態剛體，只有位置要搬）。 */
+  private applyShakeToWalls(): void {
+    const dx = this.shakeOffsetX - this.appliedShakeX;
+    const dy = this.shakeOffsetY - this.appliedShakeY;
+    if (dx === 0 && dy === 0) return;
+
+    for (const wall of this.wallBodies) Matter.Body.translate(wall, { x: dx, y: dy });
+
+    this.appliedShakeX = this.shakeOffsetX;
+    this.appliedShakeY = this.shakeOffsetY;
+  }
+
+  /**
+   * 依浮動狀態設定重力：浮動時翻成向上的淨加速度，其餘時候還原。
+   * Set gravity from the float state: flipped to a net upward acceleration while floating,
+   * restored otherwise.
+   */
+  private applyFloatGravity(): void {
+    const base = this.config.levels.settings.gravityY;
+    const desired = this.isFloating ? base * (1 - this.floatLiftFactor) : base;
+
+    if (desired === this.appliedGravityY) return;
+    this.physics.setGravity(desired);
+    this.appliedGravityY = desired;
+  }
+
+  /**
+   * 浮動的天花板：任何一顆的上緣不得高過溢位線，越界就壓回線下並抵銷向上的速度。
+   * The float's ceiling: no body's top edge may rise above the overflow line; a breach is pressed
+   * back down and its upward velocity cancelled.
+   *
+   * 只夾**上緣**（`y - radius`），與溢位判定同一套定義，這樣「浮到貼住警戒線」與「越線」
+   * 在畫面與規則上是同一件事。
+   * Only the **top edge** is clamped (`y - radius`), matching the overflow test, so "floating right
+   * up to the line" and "crossing the line" mean the same thing in the picture and in the rules.
+   */
+  private clampFloatCeiling(): void {
+    const lineY = this.overflowLineY;
+
+    for (const entry of this.entries) {
+      const ceiling = lineY + entry.level.radius;
+      const { y } = entry.body.position;
+      if (y >= ceiling) continue;
+
+      Matter.Body.translate(entry.body, { x: 0, y: ceiling - y });
+      Matter.Body.setVelocity(entry.body, {
+        x: entry.body.velocity.x,
+        y: Math.max(0, entry.body.velocity.y),
+      });
+    }
+  }
+
+  /**
+   * 把剛體速度夾在一個上限內（搖晃的穩定性護欄，見 `SHAKE_MAX_BODY_SPEED`）。
+   * Clamp body speeds to a ceiling — the shake's stability guard (see `SHAKE_MAX_BODY_SPEED`).
+   */
+  private clampBodySpeeds(limit: number): void {
+    for (const entry of this.entries) {
+      const { x, y } = entry.body.velocity;
+      const speed = Math.hypot(x, y);
+      if (speed <= limit) continue;
+
+      const k = limit / speed;
+      Matter.Body.setVelocity(entry.body, { x: x * k, y: y * k });
+    }
+  }
+
+  /** 這一刻是否暫停溢位判定（浮動期間與其後的緩衝）。 */
+  private get overflowPaused(): boolean {
+    return this.elapsedMs < this.overflowPauseUntilMs;
   }
 
   /**
@@ -818,6 +1419,15 @@ export class GameSession {
     this.mergedCountValue += 1;
 
     /*
+     * 技力來源之二是**合成**（使用者定案：每次 combo +0.05）。放在這裡而不是 `combo` 追蹤器
+     * 裡，是因為技力是「這一局的資源」，而 tracker 只管曲線。
+     * The second SP source is the **merge** (the user's decision: +0.05 per combo). It lives here
+     * rather than in the `combo` tracker because SP is a run resource while the tracker owns only
+     * the curve.
+     */
+    this.sp.gainForCombo();
+
+    /*
      * 連擊：每一次合成拿「當下串長」對應的曲線倍率（`COMBO_CURVE`）。倍率由 tracker 算，
      * 這裡只管把它乘上等級分數 —— 「第幾次拿幾倍」的規則全在 `game/combo.ts`，可以在
      * 單元測試裡逐條釘住。
@@ -1030,10 +1640,26 @@ export class GameSession {
     const dt = Math.max(0, deltaMs);
     this.elapsedMs += dt;
 
+    /*
+     * 技能在自己的一小段前置之後才跑物理：先算好容器位移並搬到牆上，再依浮動狀態設定重力，
+     * 這一刻的 `physics.step()` 才會反映它們。順序反過來的話，效果會慢整整一幀。
+     * Skills run their physics prep before stepping: the container offset is computed and moved
+     * onto the walls, and gravity is set from the float state, so *this* `physics.step()` already
+     * reflects them. The other order would lag the effect by a whole frame.
+     */
+    this.updateShakeOffset();
+    this.applyShakeToWalls();
+    this.applyFloatGravity();
+
     /* 清空必須早於 `physics.step()` —— 碰撞回呼在那之中就會填它。 */
     this.stepClaimed.clear();
 
     this.physics.step(dt);
+
+    /* 浮動的天花板與搖晃的速度上限都在物理之後修正，畫面上不會出現越線的一幀。 */
+    if (this.isFloating) this.clampFloatCeiling();
+    if (this.isShaking) this.clampBodySpeeds(SHAKE_MAX_BODY_SPEED);
+
     if (!this.over) this.collectProximityMerges(this.stepClaimed, this.elapsedMs);
     this.flushMerges();
     this.prunePops();
@@ -1084,6 +1710,18 @@ export class GameSession {
   private updateOverflow(dt: number): void {
     if (this.over) return;
 
+    /*
+     * 浮動期間與其後的緩衝完全不判定溢位（使用者定案）：浮起本來就會逼近警戒線，照常計時
+     * 等於技能一用就自殺。這裡直接跳過，連計時器都不推進 —— 凍結而不是歸零，因為歸零會
+     * 讓緩衝結束後「從頭倒數」，而那既不是玩家的意圖也不是原本的狀態。
+     * Overflow is not evaluated while floating nor during the buffer afterwards (the user's
+     * decision): floating necessarily approaches the warning line, so counting would make the
+     * skill self-defeating. The call is skipped outright, so not even the timer advances —
+     * frozen rather than reset, because resetting would restart the countdown after the buffer,
+     * which is neither what the player did nor what the state was.
+     */
+    if (this.overflowPaused) return;
+
     const bodies = this.entries.map((entry) => ({
       id: entry.body.id,
       x: entry.body.position.x,
@@ -1114,6 +1752,41 @@ export class GameSession {
     this.stepClaimed.clear();
     this.combo.reset();
     this.overflow.reset();
+
+    /*
+     * 技力與技能狀態屬於「這一局」，與分數一起歸零：開新局時技力條是空的、選取模式關掉、
+     * 浮動與搖晃的效果也一併停掉。重力必須還原 —— 上一局可能在浮動狀態結束，若不還原，
+     * 新的這一局會一開始就反重力。
+     * SP and skill state belong to the run and reset along with the score: the meter starts empty,
+     * selection is off, and any float or shake stops. Gravity must be restored too — the previous
+     * run may have ended mid-float, and without this the new run would start anti-gravity.
+     */
+    this.sp.reset();
+    this.activeSkill = null;
+    this.selectedIds = [];
+    this.floatStartedAtMs = 0;
+    this.floatDurationMs = 0;
+    this.floatLiftFactor = 0;
+    this.shakeStartedAtMs = 0;
+    this.shakeDurationMs = 0;
+    this.shakeRevolutions = 0;
+    this.shakeRadius = 0;
+    this.shakeOffsetX = 0;
+    this.shakeOffsetY = 0;
+    /*
+     * 把牆搬回基準位置。上一局可能在搖晃中結束，牆還帶著位移；若只把 `shakeOffset` 歸零，
+     * 下一步會拿「0 − 舊位移」當差量再把牆推一次，容器就從此歪掉。`applyShakeToWalls()`
+     * 依差量搬牆，這裡正好用它把差量補回來（位移已是 0，等於搬回原點）。
+     * Move the walls back to their base positions. The previous run may have ended mid-shake with
+     * the walls still offset; zeroing `shakeOffset` alone would make the next step treat
+     * "0 − old offset" as the delta and shove them again, tilting the container for good.
+     * `applyShakeToWalls()` moves them by the delta, so calling it here absorbs that delta.
+     */
+    this.applyShakeToWalls();
+    this.overflowPauseUntilMs = 0;
+    this.physics.setGravity(this.config.levels.settings.gravityY);
+    this.appliedGravityY = this.config.levels.settings.gravityY;
+
     this.scoreValue = 0;
     this.mergedCountValue = 0;
     this.over = false;
@@ -1132,17 +1805,22 @@ export class GameSession {
 
   /* ------------------------------------------------------------------ 輸出 */
 
-  /** 場上所有方團團的畫面資料（含彈跳縮放）。 */
+  /** 場上所有方團團的畫面資料（含彈跳縮放與選取標記）。 */
   get bodies(): RenderBody[] {
-    return this.entries.map((entry) => ({
-      levelId: entry.level.id,
-      x: entry.body.position.x,
-      y: entry.body.position.y,
-      radius: entry.level.radius,
-      angle: entry.body.angle,
-      scale: this.popScale(entry.body.id),
-      velocity: { x: entry.body.velocity.x, y: entry.body.velocity.y },
-    }));
+    return this.entries.map((entry) => {
+      const pickIndex = this.selectedIds.indexOf(entry.body.id);
+
+      return {
+        levelId: entry.level.id,
+        x: entry.body.position.x,
+        y: entry.body.position.y,
+        radius: entry.level.radius,
+        angle: entry.body.angle,
+        scale: this.popScale(entry.body.id),
+        velocity: { x: entry.body.velocity.x, y: entry.body.velocity.y },
+        ...(pickIndex >= 0 ? { pickIndex: pickIndex + 1 } : {}),
+      };
+    });
   }
 
   /**
@@ -1305,17 +1983,18 @@ export class GameSession {
    * still moving shows nothing at all (the user's decision).
    */
   get overflowSettled(): boolean {
-    return !this.over && this.overflow.settled;
+    return !this.over && !this.overflowPaused && this.overflow.settled;
   }
 
   /** 溢位倒數剩餘秒數（整數，1 起跳）；未起算時為 0。 */
   get overflowSecondsLeft(): number {
+    if (this.overflowPaused) return 0;
     return this.overflow.settled ? this.overflow.remainingSeconds : 0;
   }
 
   /** 這一步是否處於「已越線且已停定」的危險狀態。 */
   get overflowDanger(): boolean {
-    return !this.over && this.overflow.settled;
+    return !this.over && !this.overflowPaused && this.overflow.settled;
   }
 
   /** 這一局是否已結束（溢位逾時）。 */

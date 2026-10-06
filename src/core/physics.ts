@@ -19,6 +19,7 @@ import Matter from 'matter-js';
 import decomp from 'poly-decomp';
 import {
   ENGINE_ENABLE_SLEEPING,
+  ENGINE_GRAVITY_SCALE,
   ENGINE_POSITION_ITERATIONS,
   ENGINE_VELOCITY_ITERATIONS,
 } from './constants';
@@ -244,7 +245,7 @@ export class Physics {
       positionIterations: ENGINE_POSITION_ITERATIONS,
       velocityIterations: ENGINE_VELOCITY_ITERATIONS,
       enableSleeping: ENGINE_ENABLE_SLEEPING,
-      gravity: { x: 0, y: options.gravityY ?? 1, scale: 0.001 },
+      gravity: { x: 0, y: options.gravityY ?? 1, scale: ENGINE_GRAVITY_SCALE },
     });
   }
 

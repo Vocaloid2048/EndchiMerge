@@ -18,7 +18,7 @@
  * indistinguishable to `GameSession`.
  */
 
-import type { Viewport } from '../render/viewport';
+import type { Viewport, VirtualPoint } from '../render/viewport';
 
 export interface DropInputOptions {
   /** 接收指標事件的元素，通常就是遊戲畫布。 */
@@ -27,8 +27,20 @@ export interface DropInputOptions {
   viewport: Viewport;
   /** 瞄準位置改變。 */
   onAim: (x: number) => void;
-  /** 在目前瞄準位置投放。 */
-  onDrop: () => void;
+  /**
+   * 確認投放。帶上**虛擬座標**，因為同一顆按鈕在「技能選取模式」下要改為選球 —— 判斷在
+   * `GameSession`，這裡只負責把位置傳過去。鍵盤沒有座標，所以傳 `null`（＝照目前瞄準點
+   * 投放）。
+   * Confirm the drop, carrying the **virtual coordinates**: the same press becomes "pick a
+   * dumpling" while a skill is selecting, and only `GameSession` decides which. The keyboard has no
+   * coordinates, so it passes `null` (= drop at the current aim).
+   */
+  onDrop: (point: VirtualPoint | null) => void;
+  /**
+   * 取消目前的技能選取（`Esc`）。選填，未提供時 `Esc` 不做任何事。
+   * Cancel the current skill selection (`Esc`). Optional; without it `Esc` does nothing.
+   */
+  onCancel?: () => void;
   /** 鍵盤一次移動的虛擬距離；預設 20。 */
   keyStep?: number;
   /** 初始瞄準位置；鍵盤用它累加相對位移。 */
@@ -41,9 +53,8 @@ const DEFAULT_KEY_STEP = 20;
 const MOVE_LEFT_KEYS = new Set(['ArrowLeft', 'ArrowUp']);
 const MOVE_RIGHT_KEYS = new Set(['ArrowRight', 'ArrowDown']);
 const DROP_KEYS = new Set(['Enter', ' ', 'Spacebar']);
-
 export function attachDropInput(options: DropInputOptions): () => void {
-  const { target, viewport, onAim, onDrop } = options;
+  const { target, viewport, onAim, onDrop, onCancel } = options;
   const keyStep = options.keyStep ?? DEFAULT_KEY_STEP;
 
   /*
@@ -75,11 +86,12 @@ export function attachDropInput(options: DropInputOptions): () => void {
    * `viewport.toVirtual()` too, which divides the scale back out; passing only the offset
    * makes the pointer outrun the screen by a factor of k and the droppable range look narrow.
    */
-  const aimAt = (clientX: number, clientY: number): void => {
+  const aimAt = (clientX: number, clientY: number): VirtualPoint | null => {
     const rect = target.getBoundingClientRect();
     const point = viewport.toVirtual(rect, clientX, clientY);
-    if (point === null) return;
+    if (point === null) return null;
     aim(point.x);
+    return point;
   };
 
   const handlePointerMove = (event: PointerEvent): void => {
@@ -88,22 +100,28 @@ export function attachDropInput(options: DropInputOptions): () => void {
 
   const handlePointerDown = (event: PointerEvent): void => {
     /*
-     * 先瞄準再投放。少了第一步，觸控裝置上第一次點擊會掉在**上一次**的位置，
+     * 先瞄準再確認。少了第一步，觸控裝置上第一次點擊會掉在**上一次**的位置，
      * 因為觸控沒有 hover 階段可以先用來更新瞄準。
-     * Aim before dropping: without it the first tap on touch lands wherever the aim
+     * Aim before confirming: without it the first tap on touch lands wherever the aim
      * happened to be, since touch has no hover phase to update it.
      */
-    aimAt(event.clientX, event.clientY);
-    onDrop();
+    const point = aimAt(event.clientX, event.clientY);
+    onDrop(point);
 
     /* 捕獲指標，讓拖到畫布外時仍能繼續瞄準。 */
     capturePointer(target, event.pointerId);
   };
 
   const handleKeyDown = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      onCancel?.();
+      return;
+    }
+
     if (DROP_KEYS.has(event.key)) {
       event.preventDefault();
-      onDrop();
+      /* 鍵盤沒有座標：`null` ＝ 照目前瞄準點投放。 */
+      onDrop(null);
       return;
     }
 

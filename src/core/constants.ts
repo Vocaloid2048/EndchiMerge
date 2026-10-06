@@ -100,6 +100,23 @@ export const SHAKE_RADIUS_FACTOR_MAX = 1 / 3;
  */
 export const FLOAT_OVERFLOW_BUFFER_MS = 500;
 
+/**
+ * 搖晃期間剛體速度的保險上限，世界單位／步。
+ * A safety cap on body speed while a shake runs, in world units per step.
+ *
+ * 使用者給的晃動幅度（2 秒 5 圈、半徑最多 1/3 容器寬）換算成牆壁線速度是每步數十單位 ——
+ * 照字面跑會把整箱方團團甩飛、甚至穿透薄牆。這個上限讓最壞情況仍然是「被搖得很厲害」
+ * 而不是「炸開」，是**穩定性護欄**而非玩法參數。
+ * The user's stated amplitude (5 revolutions in 2 s, radius up to 1/3 the width) works out to
+ * tens of world units of wall travel per step — taken literally it flings the box and can tunnel
+ * through the thin walls. This cap keeps the worst case at "vigorously shaken" rather than
+ * "exploded"; it is a **stability guard**, not a gameplay parameter.
+ */
+export const SHAKE_MAX_BODY_SPEED = 12;
+
+/** Matter.js 的重力縮放（與 `core/physics.ts` 的引擎設定必須一致）。 */
+export const ENGINE_GRAVITY_SCALE = 0.001;
+
 /** Matter.js 求解器迭代次數。提高位置迭代可減少堆疊穿透，代價是 CPU。 */
 export const ENGINE_POSITION_ITERATIONS = 8;
 

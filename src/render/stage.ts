@@ -148,6 +148,17 @@ export interface RenderBody {
    * required to use it.
    */
   velocity?: { x: number; y: number };
+  /**
+   * 這一顆是否在技能選取中，以及是第幾顆（1 起算）。未選取時不提供。
+   * Whether this dumpling is being picked for a skill, and which pick it is (1-based). Absent
+   * when nothing is selected.
+   *
+   * 用「第幾顆」而不是單純的布林，是為了讓第 2 顆換色（design.md §3.1）：玩家要能一眼看出
+   * 命運互換已經選了第一顆、正在等第二顆。
+   * A pick number rather than a boolean so the second pick can change colour (design.md §3.1):
+   * the player must see at a glance that fate swap has its first target and waits for a second.
+   */
+  pickIndex?: number;
 }
 
 /** 投放下落前的預覽。 */
@@ -210,6 +221,12 @@ export interface StageFrame {
    * effect of the canvas boundary.
    */
   clipTop?: number;
+  /**
+   * 技能選取的脈動相位 `0..1`（由迴圈以時間驅動）。未提供時標示恆亮。
+   * The skill-selection pulse phase `0..1`, driven by the loop's clock. Omitted means a steady
+   * marker.
+   */
+  selectionPulse?: number;
   /**
    * 除錯輔助。提供時額外畫出容器的外框、物理空腔、投放線與**碰撞框標註**。
    * Only wired up behind `?debug=1` in development.
@@ -413,6 +430,100 @@ function drawOverflowLine(
 }
 
 /**
+ * 技能選取標示的樣式：方團團外側的「」角括號 ＋ 一圈加粗白框（design.md §3.1）。
+ * The skill-selection marker: 「」corner brackets around a dumpling plus a thickened outline
+ * (design.md §3.1).
+ *
+ * **調參入口**：括號長度、留白、粗幼與兩種顏色都在這裡改。
+ * The tuning entry point for bracket length, padding, weight and the two colours.
+ */
+const SELECTION_STYLE = {
+  /** 角括號的線寬。 */
+  strokeWidth: 6,
+  /** 白框線寬（比括號細，讓括號成為視覺主角）。 */
+  boxWidth: 3,
+  /** 標示離方團團外緣的留白。 */
+  padding: 9,
+  /** 每一段折線的長度。 */
+  bracketLength: 24,
+  /** 白框圓角。 */
+  boxRadius: 12,
+  /** 第 1 顆的顏色（白）。 */
+  firstColor: 'rgba(255, 255, 255, 0.98)',
+  /** 第 2 顆的顏色（琥珀金，與技力條同色，用來區分兩個選取步驟）。 */
+  secondColor: 'rgba(249, 255, 81, 0.98)',
+  /** 脈動時的 alpha 下限；1 表示不脈動。 */
+  pulseAlphaMin: 0.45,
+} as const;
+
+/**
+ * 畫「」角括號 ＋ 白框，標示技能選取中的方團團。
+ * Draw the 「」brackets and outline that mark a dumpling picked for a skill.
+ *
+ * 標示**不得位移**（design.md §3.1）：位置完全由半徑決定，所以它永遠跟著方團團，但不會
+ * 反過來影響物理。脈動只改透明度，不改任何幾何。
+ * The marker must **not move the body** (design.md §3.1): its geometry is derived purely from the
+ * radius, so it always follows the dumpling without ever feeding back into physics. The pulse
+ * changes opacity only, never geometry.
+ */
+function drawSelectionBracket(
+  ctx: CanvasRenderingContext2D,
+  body: RenderBody,
+  pulse: number,
+): void {
+  const pick = body.pickIndex;
+  if (pick === undefined) return;
+
+  const half = body.radius + SELECTION_STYLE.padding;
+  const left = body.x - half;
+  const right = body.x + half;
+  const top = body.y - half;
+  const bottom = body.y + half;
+  const length = Math.min(SELECTION_STYLE.bracketLength, half * 2);
+  const color = pick > 1 ? SELECTION_STYLE.secondColor : SELECTION_STYLE.firstColor;
+  const alpha = SELECTION_STYLE.pulseAlphaMin + (1 - SELECTION_STYLE.pulseAlphaMin) * pulse;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  /* 白框：一圈圓角矩形，把這顆圈起來。 */
+  ctx.strokeStyle = color;
+  ctx.lineWidth = SELECTION_STYLE.boxWidth;
+  ctx.beginPath();
+  ctx.roundRect(
+    left,
+    top,
+    right - left,
+    bottom - top,
+    Math.min(SELECTION_STYLE.boxRadius, half),
+  );
+  ctx.stroke();
+
+  /* 角括號：四個角各兩段折線，畫成「」的意象。 */
+  ctx.lineWidth = SELECTION_STYLE.strokeWidth;
+
+  const corners: readonly (readonly [number, number, number, number])[] = [
+    /* [起點X, 起點Y, 水平方向, 垂直方向] */
+    [left, top, 1, 1],
+    [right, top, -1, 1],
+    [left, bottom, 1, -1],
+    [right, bottom, -1, -1],
+  ];
+
+  for (const [x, y, hx, vy] of corners) {
+    ctx.beginPath();
+    ctx.moveTo(x + hx * length, y);
+    ctx.lineTo(x, y);
+    ctx.lineTo(x, y + vy * length);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+/**
  * 除錯輔助線：容器外框、物理空腔、投放高度，以及**碰撞框標註**。
  * Debug guides: container frame, physics cavity, spawn height and the collider annotations.
  */
@@ -529,6 +640,18 @@ export function drawStage(
 
   /* 4. U 形線框。少了這步就沒有「裝在槽內」的感覺。 */
   drawContainerFront(ctx, geometry);
+
+  /*
+   * 4b. 技能選取標示：畫在線框之上，因為它是一個**互動**提示，任何時候都要讀得到；
+   * 同時不受遊戲區裁切影響，貼邊的那一顆才不會被切掉半個括號。
+   * The skill-selection marker, drawn above the outline because it is an **interaction** cue that
+   * must always read, and outside the play-field clip so a dumpling at the edge does not lose half
+   * its bracket.
+   */
+  const pulse = frame.selectionPulse ?? 1;
+  for (const body of bodies) {
+    drawSelectionBracket(ctx, body, pulse);
+  }
 
   /* 5. 溢位紅線壓在最上層，任何時候都讀得到。 */
   if (overflow !== undefined) {
