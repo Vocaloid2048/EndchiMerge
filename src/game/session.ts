@@ -27,8 +27,16 @@
  */
 
 import Matter from 'matter-js';
-import { createCircleBody, createPolygonBody, lockRotation, Physics, pushBody } from '../core/physics';
 import {
+  createCircleBody,
+  createPolygonBody,
+  createStaticRect,
+  lockRotation,
+  Physics,
+  pushBody,
+} from '../core/physics';
+import {
+  FLOAT_CEILING_THICKNESS,
   FLOAT_OVERFLOW_BUFFER_MS,
   MERGE_OUTLINE_GAP,
   MERGE_PUSH_FACTOR,
@@ -37,6 +45,7 @@ import {
   MERGE_SETTLE_MAX_DROP,
   POP_ANIMATION_MS,
   POP_PEAK_SCALE,
+  SHAKE_BODY_ACCEL_COUPLING,
   SHAKE_MAX_BODY_SPEED,
   WALL_THICKNESS,
 } from '../core/constants';
@@ -136,6 +145,20 @@ export interface SkillCardState {
   unlocked: boolean;
   /** 解鎖進度 `0..1`，供遮罩顯示還差多少。 */
   progress: number;
+  /**
+   * 這個技能靠什麼解鎖。`sp` ＝ 技力足夠；`cumulativeSpent` ＝ 累計消耗達標（免費技能）。
+   * What gates this skill: `sp` (enough SP) or `cumulativeSpent` (a free skill whose running
+   * total must reach a threshold).
+   *
+   * UI 靠它決定徽章要顯示什麼：收費技能顯示消耗數字，累計型顯示 `n/m` 進度。
+   * The UI uses it to decide the badge: a paid skill shows its cost, a cumulative one shows
+   * `n/m` progress.
+   */
+  unlockKind: 'sp' | 'cumulativeSpent';
+  /** 累計消耗型：當前累計值（分子 `n`）；其餘為 0。 */
+  cumulativeSpent: number;
+  /** 累計消耗型：解鎖門檻（分母 `m`）；其餘為 0。 */
+  unlockThreshold: number;
   /** 這個技能是否正在選取中。 */
   active: boolean;
   /** 選取中已經點了幾顆。 */
@@ -205,11 +228,24 @@ export class GameSession implements SkillBoard {
   private floatStartedAtMs = 0;
   private floatDurationMs = 0;
   private floatLiftFactor = 0;
-  /** 搖晃：開始時刻、時長、圈數與半徑（世界單位）。 */
+  /**
+   * 浮動天花板那片**隱形靜態平面**；不在浮動時為 `null`。
+   * The invisible static plane that is the float's ceiling; `null` whenever nothing floats.
+   *
+   * 使用者定案「警戒區下方加一片透明的平面 border」：有了實體接觸面，顆粒是**撞到**才停，
+   * 而不是被每步傳送回線下 —— 前者會自然疊成「壓在杯蓋下」的形狀，後者會抖。
+   * The user's decision: "add a transparent plane border below the warning zone". With a real
+   * contact surface the bodies **hit** the ceiling rather than being teleported back under it
+   * every step — the former stacks them naturally under a lid, the latter jitters.
+   */
+  private floatCeilingBody: Matter.Body | null = null;
+  /** 搖晃：開始時刻、時長、圈數、幅度（世界單位）、擺動軸傾角（弧度）與持續向上力比例。 */
   private shakeStartedAtMs = 0;
   private shakeDurationMs = 0;
   private shakeRevolutions = 0;
   private shakeRadius = 0;
+  private shakeAxisTiltRad = 0;
+  private shakeUpwardFactor = 0;
   /** 目前的容器位移（虛擬單位）；畫與牆都用它。 */
   private shakeOffsetX = 0;
   private shakeOffsetY = 0;
@@ -651,6 +687,9 @@ export class GameSession implements SkillBoard {
       pickCount: skill.pickCount,
       unlocked: this.isUnlocked(skill),
       progress: this.unlockProgress(skill),
+      unlockKind: skill.unlock.kind,
+      cumulativeSpent: skill.unlock.kind === 'cumulativeSpent' ? this.sp.cumulativeSpent : 0,
+      unlockThreshold: skill.unlock.kind === 'cumulativeSpent' ? skill.unlock.threshold : 0,
       active: this.activeSkill === skill,
       selectedCount: this.activeSkill === skill ? this.selectedIds.length : 0,
     }));
@@ -874,6 +913,27 @@ export class GameSession implements SkillBoard {
 
     this.removeEntry(entry);
     this.physics.remove(entry.body);
+
+    /*
+     * **叫醒其餘全部**，這是「上面的方團團會掉下來」的全部關鍵。
+     *
+     * Matter 開了休眠（`ENGINE_ENABLE_SLEEPING`），而引擎對休眠剛體是**完全跳過**的：
+     * `Engine._bodiesApplyGravity` 與 `Engine._bodiesUpdate` 都 `if (body.isSleeping) continue;`。
+     * 更糟的是 `Sleeping.afterCollisions` 只會在「撞到一顆 motion 夠大的移動物體」時喚醒，
+     * 移除支撐**不產生任何碰撞事件**，所以那一疊永遠醒不過來、就懸在半空。
+     * **Wake everything else** — this is the whole reason "the dumplings above fall down".
+     * Matter runs with sleeping on, and the engine **skips** sleeping bodies outright:
+     * `Engine._bodiesApplyGravity` and `Engine._bodiesUpdate` both `continue` on `isSleeping`,
+     * and `Sleeping.afterCollisions` only wakes a body when it is hit by a body moving fast
+     * enough. Removing a support produces no collision at all, so the stack above never wakes
+     * and hangs in mid-air.
+     *
+     * 代價是 O(n) 一次（n 是場上顆粒數，幾十），可忽略 —— 遠比每顆掛一個每幀觸發的
+     * listener 便宜，而且後者根本修不好這個問題。
+     * The cost is one O(n) pass (n is a few dozen), which is negligible — far cheaper than
+     * attaching a per-frame listener to every body, which would not fix this anyway.
+     */
+    this.wakeAll();
     return true;
   }
 
@@ -928,17 +988,32 @@ export class GameSession implements SkillBoard {
         break;
       }
     }
+
+    /*
+     * 被交換的兩顆與被推到的鄰居都必須是醒的：`Body.setPosition`／`setVelocity` 不會改變
+     * `isSleeping`，而引擎跳過休眠剛體，所以不叫醒它們的話，這次互換在畫面上等於沒發生。
+     * The two swapped bodies and whoever they landed on must all be awake: `setPosition` /
+     * `setVelocity` do not clear `isSleeping`, and the engine skips sleeping bodies, so without
+     * this the swap would be invisible.
+     */
+    this.wakeAll();
   }
 
   /**
-   * 讓所有方團團向上浮起（「協議：浮動」）。以**溢位線為天花板**。
-   * Float every dumpling, with the **overflow line as the ceiling**.
+   * 讓**每一顆**方團團向上浮起（「協議：浮動」），以警戒區下方的隱形平面為天花板。
+   * Float **every** dumpling, with an invisible plane below the warning zone as the ceiling.
    *
-   * 使用者定案：「像杯口被壓住」—— 誰都不可以越過警戒線離開容器。實作有兩部分：把重力翻成
-   * 向上的淨加速度（`liftFactor` 倍重力），以及每步把越線的顆粒壓回線下（見 `step()`）。
-   * The user's decision: "like a lid on a cup" — nothing may rise past the warning line and leave
-   * the container. Two parts: gravity is flipped into a net upward acceleration (`liftFactor`
-   * times gravity), and any body above the line is pressed back down each step (see `step()`).
+   * 使用者定案：「像杯口被壓住」—— 誰都不可以升到溢位線。實作有三部分：
+   * 1. 重力翻成向上的淨加速度（`liftFactor` 倍重力），見 `applyFloatGravity()`；
+   * 2. 一片**隱形靜態平面**擋在 `floatCeilingBelowRim` 的深度上（見 `syncFloatCeiling()`）；
+   * 3. 浮動期間每步叫醒全部顆粒（見 `step()`）—— 少了這一步，只有剛動過的顆粒會浮，
+   *    因為休眠剛體收不到重力（`Engine._bodiesApplyGravity` 會跳過它們）。
+   * The user's decision: "like a lid pressed on a cup" — nothing may rise into the overflow line.
+   * Three parts: (1) gravity flipped into a net upward acceleration (`liftFactor` times gravity,
+   * see `applyFloatGravity()`); (2) an **invisible static plane** parked at `floatCeilingBelowRim`
+   * (see `syncFloatCeiling()`); (3) waking every body each step while afloat (see `step()`) —
+   * without that last part only the recently-moved bodies would rise, because sleeping bodies
+   * receive no gravity (`Engine._bodiesApplyGravity` skips them).
    */
   floatAll(request: FloatRequest): void {
     this.floatStartedAtMs = this.elapsedMs;
@@ -953,22 +1028,47 @@ export class GameSession implements SkillBoard {
      * self-defeating. (The user's decision: a 0.5 s buffer before evaluation resumes.)
      */
     this.overflowPauseUntilMs = this.elapsedMs + this.floatDurationMs + FLOAT_OVERFLOW_BUFFER_MS;
+
+    /*
+     * 先把**已經在天花板之上**的顆粒壓回平面下方，再放上平面。順序反過來的話，那幾顆會
+     * 卡在平面內部，被求解器往最近的出口擠 —— 而最短路徑往往是「往上」，等於被彈出容器。
+     * Press anything **already above the ceiling** back under the plane *before* installing it.
+     * The other order leaves those bodies inside the plane, and the solver pushes them out of the
+     * nearest face — usually the top, i.e. straight out of the container.
+     */
+    this.clampFloatCeiling();
+    this.syncFloatCeiling();
   }
 
   /**
-   * 震動容器（「搖晃！」）：容器沿圓周晃動，方團團留在世界座標系被牆推擠。
-   * Shake the container: it orbits while the dumplings stay in world space and get shoved by the
-   * moving walls.
+   * 震動容器（「搖晃！」）：改成**地震** —— 容器沿一條斜線往復，顆粒也被真的甩動。
+   * Shake the container — as an **earthquake**: it oscillates along a tilted line, and the
+   * dumplings are genuinely thrown around.
    *
-   * 半徑以容器寬度為基準（技能已把比例夾在硬上限 1/3 內）。
-   * The radius is relative to the container width (the skill already clamped the ratio to the
-   * 1/3 hard cap).
+   * 使用者 2026-10-06 定案：不再是順時針圓周晃動，改成水平地震，但擺動軸斜 15°、另加 10%
+   * 的持續向上力。幅度以容器寬度為基準（技能已把比例夾在硬上限 1/3 內）。
+   * The user's 2026-10-06 decision: no more clockwise orbit — a horizontal quake, but with the
+   * oscillation axis tilted 15° and an extra steady 10% upward force. The amplitude is relative to
+   * the container width (the skill already clamped the ratio to the 1/3 hard cap).
+   *
+   * **牆只是畫面**：把牆搬來搬去並不會讓顆粒跟着動 —— 牆是靜態剛體，`Body.translate` 不帶
+   * 速度，而且 `Sleeping.afterCollisions` 對「靜態 vs 休眠」直接 `continue`，所以牆掃過去
+   * 也叫不醒它們。真正讓顆粒動起來的是 `applyShakeImpulse()`（對每顆施加慣性力）。
+   * **The walls are only the picture**: moving them does not move the dumplings — they are static
+   * bodies, `Body.translate` carries no velocity, and `Sleeping.afterCollisions` `continue`s
+   * outright for "static vs sleeping", so a sweeping wall cannot even wake them. What actually
+   * moves the pile is `applyShakeImpulse()`.
    */
   shakeContainer(request: ShakeRequest): void {
     this.shakeStartedAtMs = this.elapsedMs;
     this.shakeDurationMs = Math.max(1, request.durationMs);
     this.shakeRevolutions = Math.max(1, request.revolutions);
     this.shakeRadius = Math.max(0, request.radiusFactor) * this.geometry.frame.width;
+    this.shakeAxisTiltRad = (Math.max(0, request.axisTiltDeg) * Math.PI) / 180;
+    this.shakeUpwardFactor = Math.max(0, request.upwardFactor);
+
+    /* 一樣要叫醒：睡着的顆粒既收不到重力也不吃衝量，整箱會像沒被搖到。 */
+    this.wakeAll();
   }
 
   /** 是否正在浮動。 */
@@ -982,10 +1082,15 @@ export class GameSession implements SkillBoard {
   }
 
   /**
-   * 更新搖晃位移。用正弦包絡（`sin(πt)`）讓幅度從 0 起、回到 0 —— 容器不會在技能開始或
-   * 結束的瞬間「跳」一下。
-   * Update the shake offset. A sine envelope (`sin(πt)`) ramps it from 0 and back to 0, so the
-   * container never jumps at the moment the skill starts or ends.
+   * 更新搖晃位移：沿**與水平成 `axisTiltDeg` 的斜線**往復（地震），不再繞圈。
+   * Update the shake offset: it oscillates along a **line `axisTiltDeg` above the horizontal**
+   * (an earthquake), instead of going round in circles.
+   *
+   * 用正弦包絡（`sin(πt)`）讓幅度從 0 起、回到 0 —— 容器不會在技能開始或結束的瞬間「跳」
+   * 一下。位移只影響**畫面與牆**；顆粒的受力在 `applyShakeImpulse()`。
+   * A sine envelope (`sin(πt)`) ramps the amplitude from 0 and back to 0, so the container never
+   * jumps at the start or the end. This offset only drives **the picture and the walls**; the
+   * forces on the bodies live in `applyShakeImpulse()`.
    */
   private updateShakeOffset(): void {
     if (!this.isShaking) {
@@ -996,10 +1101,83 @@ export class GameSession implements SkillBoard {
 
     const t = (this.elapsedMs - this.shakeStartedAtMs) / this.shakeDurationMs;
     const envelope = Math.sin(Math.PI * Math.min(1, Math.max(0, t)));
-    const theta = 2 * Math.PI * this.shakeRevolutions * t;
+    const phase = 2 * Math.PI * this.shakeRevolutions * t;
+    const swing = Math.sin(phase) * envelope * this.shakeRadius;
 
-    this.shakeOffsetX = Math.cos(theta) * this.shakeRadius * envelope;
-    this.shakeOffsetY = Math.sin(theta) * this.shakeRadius * envelope;
+    /*
+     * 沿斜線分解：水平吃 cos、垂直吃 sin，垂直取負號代表「往上」。
+     * Resolve along the tilted axis: the horizontal takes cos, the vertical sin, and the negative
+     * sign means "upward".
+     */
+    this.shakeOffsetX = Math.cos(this.shakeAxisTiltRad) * swing;
+    this.shakeOffsetY = -Math.sin(this.shakeAxisTiltRad) * swing;
+  }
+
+  /**
+   * 搖晃時對**每一顆**方團團施加慣性力（地震的本體）。
+   * Apply the inertial force to **every** dumpling while the shake runs — the earthquake proper.
+   *
+   * 站在震動地面上的物體，感受到的是與地面**相同的加速度**；容器位移是
+   * `A·sin(ωt)`（`A` ＝ `shakeRadius`，`ω` ＝ 圈數換算的角頻率），所以加速度是
+   * `−A·ω²·sin(ωt)`。這裡把它換算成「每步的速度增量」：Matter 的速度是**每步位移**，
+   * 因此 `Δv = a · Δt²`（`a` 為每毫秒平方的加速度）。再乘上一個手感耦合係數
+   * （`SHAKE_BODY_ACCEL_COUPLING`），否則全量耦合會把整箱甩飛。
+   * A body on shaking ground feels the **same acceleration** as the ground. The container's
+   * displacement is `A·sin(ωt)` (`A` = `shakeRadius`, `ω` from the cycle count), so its
+   * acceleration is `−A·ω²·sin(ωt)`. That becomes a per-step velocity increment here: Matter's
+   * velocity is displacement **per step**, so `Δv = a · Δt²` for an acceleration `a` in units per
+   * ms². A feel coupling (`SHAKE_BODY_ACCEL_COUPLING`) scales it down; full coupling flings the
+   * whole box.
+   *
+   * 垂直方向有兩份：傾角帶來的**交替**上下（與水平反相），以及一個固定的向上托力
+   * （`upwardFactor` × 水平衝量峰值，使用者定案 10%）。
+   * The vertical has two parts: the alternation that comes from the tilt (out of phase with the
+   * horizontal), and a constant upward bias (`upwardFactor` × the peak horizontal impulse — the
+   * user's 10%).
+   *
+   * @param deltaMs 這一步的毫秒數 / This step's duration in ms.
+   */
+  private applyShakeImpulse(deltaMs: number): void {
+    if (!this.isShaking) return;
+
+    /* 施力前必須先醒：休眠剛體既收不到重力，也不會被衝量推走。 */
+    this.wakeAll();
+
+    const elapsed = this.elapsedMs - this.shakeStartedAtMs;
+    const t = elapsed / this.shakeDurationMs;
+    const envelope = Math.sin(Math.PI * Math.min(1, Math.max(0, t)));
+    const omega = (2 * Math.PI * this.shakeRevolutions) / this.shakeDurationMs;
+    const dt = Math.max(0, deltaMs);
+
+    const peak = this.shakeRadius * omega * omega * dt * dt * SHAKE_BODY_ACCEL_COUPLING;
+    const impulse = peak * envelope * Math.sin(omega * elapsed);
+
+    const dvx = impulse * Math.cos(this.shakeAxisTiltRad);
+    const dvy =
+      -impulse * Math.sin(this.shakeAxisTiltRad) - peak * envelope * this.shakeUpwardFactor;
+
+    for (const entry of this.entries) {
+      const { x, y } = entry.body.velocity;
+      Matter.Body.setVelocity(entry.body, { x: x + dvx, y: y + dvy });
+    }
+  }
+
+  /**
+   * 叫醒場上所有方團團。
+   * Wake every dumpling on the board.
+   *
+   * Matter 開了休眠，而引擎對休眠剛體是**完全跳過**的（`_bodiesApplyGravity`、
+   * `_bodiesUpdate`），而且 `Sleeping.afterCollisions` 只認「被移動物體撞到」——
+   * 靜態牆移動、支撐被移除、重力改變都不會喚醒任何東西。所以「技能生效後物理要跟上」的
+   * 唯一做法就是在技能碰到棋盤時把全部叫醒。O(n) 一次，n 是幾十。
+   * Matter runs with sleeping on and the engine **skips** sleeping bodies entirely
+   * (`_bodiesApplyGravity`, `_bodiesUpdate`), while `Sleeping.afterCollisions` only recognises
+   * "hit by a moving body" — a static wall sliding, a support being removed, or gravity changing
+   * wakes nothing. So the only way for physics to follow a skill is to wake everything the moment
+   * the skill touches the board. One O(n) pass, n in the tens.
+   */
+  private wakeAll(): void {
+    for (const entry of this.entries) Matter.Sleeping.set(entry.body, false);
   }
 
   /** 把位移差量套到牆上（牆是靜態剛體，只有位置要搬）。 */
@@ -1029,20 +1207,85 @@ export class GameSession implements SkillBoard {
   }
 
   /**
-   * 浮動的天花板：任何一顆的上緣不得高過溢位線，越界就壓回線下並抵銷向上的速度。
-   * The float's ceiling: no body's top edge may rise above the overflow line; a breach is pressed
-   * back down and its upward velocity cancelled.
+   * 浮動天花板的 Y：容器頂緣**下方** `floatCeilingBelowRim`，虛擬單位。
+   * The float ceiling's Y, `floatCeilingBelowRim` **below** the container's rim.
    *
-   * 只夾**上緣**（`y - radius`），與溢位判定同一套定義，這樣「浮到貼住警戒線」與「越線」
+   * 取頂緣下方而不是直接取溢位線（溢位線在頂緣**上方** 30）：使用者定案要「警戒區下方」一片
+   * 透明的平面，而警戒區的下緣就是頂緣，再往下一段是為了讓 sprite 的美術也不那麼容易冒出
+   * 容器口。因為天花板一定在溢位線之下，浮動期間的上緣永遠不可能觸發溢位判定。
+   * Below the rim rather than at the overflow line (which sits 30 **above** the rim): the user
+   * asked for a transparent plane "below the warning zone", and that band's lower edge *is* the
+   * rim; the extra depth keeps the artwork from poking out of the mouth. Because the ceiling is
+   * always under the line, a floating body's top edge can never trip the overflow test.
+   */
+  private get floatCeilingY(): number {
+    return this.geometry.frame.y + Math.max(0, this.config.container.floatCeilingBelowRim);
+  }
+
+  /**
+   * 建立／移除浮動天花板那片隱形平面，並在浮動期間持續叫醒所有顆粒。
+   * Create or remove the invisible float-ceiling plane, and keep every body awake while afloat.
+   *
+   * 每步都呼叫，但它只在狀態**改變**時動世界：`isFloating` 由真轉假時把平面移出世界，
+   * 並叫醒全部 —— 貼在天花板上的顆粒在重力還原的那一刻若還在睡，就會繼續懸空。
+   * Called every step, but it only touches the world on a **change**: when `isFloating` goes true
+   * to false the plane leaves the world and everything is woken, because a body resting on the
+   * ceiling would otherwise stay asleep — and therefore hanging — the moment gravity returns.
+   */
+  private syncFloatCeiling(): void {
+    if (this.isFloating) {
+      if (this.floatCeilingBody === null) {
+        const frame = this.geometry.frame;
+        const ceiling = this.floatCeilingY;
+
+        this.floatCeilingBody = createStaticRect(
+          frame.x + frame.width / 2,
+          ceiling - FLOAT_CEILING_THICKNESS / 2,
+          frame.width,
+          FLOAT_CEILING_THICKNESS,
+        );
+        this.physics.add(this.floatCeilingBody);
+      }
+
+      /*
+       * 浮動期間每步都叫醒：顆粒在平面上壓穩之後會進入休眠，而休眠剛體收不到重力 ——
+       * 一旦重力翻回向下，它們就不會掉回來。
+       * Wake every step while afloat: a body pressed against the plane falls asleep, and sleeping
+       * bodies receive no gravity — so once gravity flips back down, they would never come back.
+       */
+      this.wakeAll();
+      return;
+    }
+
+    if (this.floatCeilingBody === null) return;
+
+    this.physics.remove(this.floatCeilingBody);
+    this.floatCeilingBody = null;
+    this.wakeAll();
+  }
+
+  /**
+   * 浮動天花板的一次性夾制：把已經在平面上方的顆粒壓回平面下方，並抵銷向上的速度。
+   * The float ceiling's one-shot clamp: press any body already above the plane back under it and
+   * cancel its upward velocity.
+   *
+   * **只在施放的那一刻跑一次**（見 `floatAll()`），之後由那片靜態平面接手。之所以還留著它，
+   * 是因為平面是「加進世界」而不是「無中生有地擋住」—— 施放前就在天花板之上的顆粒會直接
+   * 卡在平面內部，被求解器往最近的出口（通常是上方）擠出去。
+   * It runs **once, at cast time** (see `floatAll()`), after which the static plane takes over. It
+   * survives because installing a plane is not the same as stopping bodies that were already above
+   * it: those would sit inside the plane and be squeezed out of its nearest face — usually the top.
+   *
+   * 只夾**上緣**（`y - radius`），與溢位判定同一套定義，這樣「浮到貼住平面」與「越線」
    * 在畫面與規則上是同一件事。
    * Only the **top edge** is clamped (`y - radius`), matching the overflow test, so "floating right
-   * up to the line" and "crossing the line" mean the same thing in the picture and in the rules.
+   * up to the plane" and "crossing the line" mean the same thing in the picture and in the rules.
    */
   private clampFloatCeiling(): void {
-    const lineY = this.overflowLineY;
+    const ceilingY = this.floatCeilingY;
 
     for (const entry of this.entries) {
-      const ceiling = lineY + entry.level.radius;
+      const ceiling = ceilingY + entry.level.radius;
       const { y } = entry.body.position;
       if (y >= ceiling) continue;
 
@@ -1641,23 +1884,27 @@ export class GameSession implements SkillBoard {
     this.elapsedMs += dt;
 
     /*
-     * 技能在自己的一小段前置之後才跑物理：先算好容器位移並搬到牆上，再依浮動狀態設定重力，
-     * 這一刻的 `physics.step()` 才會反映它們。順序反過來的話，效果會慢整整一幀。
+     * 技能在自己的一小段前置之後才跑物理：先算好容器位移並搬到牆上、維護浮動天花板那片平面、
+     * 依浮動狀態設定重力、再把搖晃的慣性衝量加到顆粒上，這一刻的 `physics.step()` 才會反映
+     * 它們。順序反過來的話，效果會慢整整一幀。
      * Skills run their physics prep before stepping: the container offset is computed and moved
-     * onto the walls, and gravity is set from the float state, so *this* `physics.step()` already
-     * reflects them. The other order would lag the effect by a whole frame.
+     * onto the walls, the float ceiling plane is created or torn down, gravity is set from the
+     * float state, and the shake's inertial impulse is added to the bodies — so *this*
+     * `physics.step()` already reflects them. The other order would lag the effect by a whole
+     * frame.
      */
     this.updateShakeOffset();
     this.applyShakeToWalls();
+    this.syncFloatCeiling();
     this.applyFloatGravity();
+    this.applyShakeImpulse(dt);
 
     /* 清空必須早於 `physics.step()` —— 碰撞回呼在那之中就會填它。 */
     this.stepClaimed.clear();
 
     this.physics.step(dt);
 
-    /* 浮動的天花板與搖晃的速度上限都在物理之後修正，畫面上不會出現越線的一幀。 */
-    if (this.isFloating) this.clampFloatCeiling();
+    /* 搖晃的速度上限在物理之後夾，畫面上不會出現超速的一幀。 */
     if (this.isShaking) this.clampBodySpeeds(SHAKE_MAX_BODY_SPEED);
 
     if (!this.over) this.collectProximityMerges(this.stepClaimed, this.elapsedMs);
@@ -1767,10 +2014,23 @@ export class GameSession implements SkillBoard {
     this.floatStartedAtMs = 0;
     this.floatDurationMs = 0;
     this.floatLiftFactor = 0;
+    /*
+     * 浮動天花板那片平面是**靜態**剛體，所以 `removeDynamicBodies()` 不會帶走它，必須自己
+     * 收掉 —— 否則上一局留下的隱形平面會讓新的一局從一開始就撞到一道看不見的天花板。
+     * The ceiling plane is a **static** body, so `removeDynamicBodies()` leaves it behind; it has
+     * to be removed here, or the leftover invisible plane would make the new run hit a ceiling
+     * from the very first frame.
+     */
+    if (this.floatCeilingBody !== null) {
+      this.physics.remove(this.floatCeilingBody);
+      this.floatCeilingBody = null;
+    }
     this.shakeStartedAtMs = 0;
     this.shakeDurationMs = 0;
     this.shakeRevolutions = 0;
     this.shakeRadius = 0;
+    this.shakeAxisTiltRad = 0;
+    this.shakeUpwardFactor = 0;
     this.shakeOffsetX = 0;
     this.shakeOffsetY = 0;
     /*
