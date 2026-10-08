@@ -231,15 +231,33 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
      * The rank reads "Nth of M players". Locally there is only one player, so it reads "1st of 1"
      * — which is the truth: the board really does hold one person. A cross-player percentile
      * needs the server and lands in this same slot when it does.
+     *
+     * **名次掉出榜外（第 101 名起）就不再報名次**（使用者定案）：榜只列前 100，那個名次沒有
+     * 對應的列可以讓玩家核對，報出來只是為難他。改成報「超越了百分之多少的玩家」—— 同一個
+     * 事實、換一個有意義的說法。門檻用 `LEADERBOARD_LIMIT` 而不是目前這一頁的長度：榜的長度
+     * 就是它的定義，跟畫面上剛好幾列無關。
+     * **A rank that falls off the board (#101 and beyond) is not reported** (the user's decision):
+     * the board lists the top 100, so that rank has no row the player could check it against, and
+     * quoting it helps nobody. The share of players beaten is reported instead — the same fact, in
+     * a form that means something. The threshold is `LEADERBOARD_LIMIT` rather than the current
+     * page length: the board's size is what the board *is*, not how many rows happen to be drawn.
      */
-    const { entry, rank, total } = snapshot.self;
+    const { entry, rank, total, beats } = snapshot.self;
     summary.hidden = false;
-    summary.textContent = t('leaderboard.self', {
-      value: primaryValue(entry, category),
-      score: formatNumber(entry.score),
-      rank,
-      total,
-    });
+    summary.textContent =
+      rank > LEADERBOARD_LIMIT
+        ? t('leaderboard.selfBeats', {
+            value: primaryValue(entry, category),
+            score: formatNumber(entry.score),
+            beats,
+            total,
+          })
+        : t('leaderboard.self', {
+            value: primaryValue(entry, category),
+            score: formatNumber(entry.score),
+            rank,
+            total,
+          });
   }
 
   function render(): void {

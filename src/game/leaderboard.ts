@@ -128,6 +128,23 @@ export interface LeaderboardRank {
   entry: LeaderboardEntry;
   /** 榜上的玩家總數（＝已同意分享且已上載的人數）。 */
   total: number;
+  /**
+   * 贏過多少比例的玩家，0–100 的整數（`(total − rank) / total`）。
+   * The share of players beaten, an integer 0–100 (`(total − rank) / total`).
+   *
+   * **由資料層算，不讓 UI 自己推**：名次是資料層的事實，換一個（伺服器）實作時它可能拿到
+   * 真正的跨玩家百分位，屆時這一格直接換算法，UI 一行都不用動。
+   * **Computed here rather than by the UI**: the rank is the data layer's fact, and a server
+   * implementation may well have a real percentile to put in this slot — at which point only this
+   * line changes and the UI stays put.
+   *
+   * 公式刻意把「自己」留在分母裡（`(total − rank) / total` 而不是除以 `total − 1`）：榜首在
+   * 一千人的榜上讀作「超越 99%」，而不是一句沒人相信的 100%。
+   * The formula deliberately keeps the player in the denominator (`(total − rank) / total` rather
+   * than dividing by `total − 1`): being first of a thousand then reads "beats 99%", not a
+   * 100% nobody believes.
+   */
+  beats: number;
 }
 
 /** 讀取某一分類的結果。 */
@@ -366,15 +383,26 @@ function parseProfile(raw: unknown): PlayerProfile | null {
   };
 }
 
-/** 空的本機紀錄。 */
-function emptyProfile(playerId: string): PlayerProfile {
+/**
+ * 空的本機紀錄。
+ * An empty local record.
+ *
+ * `at` 取**當下**而不是 0：同意分享會立刻把本機紀錄推上榜（使用者定案：同意就不必再按任何
+ * 鍵），所以一個還沒玩過、就先勾了同意的人也會在榜上看到自己那一筆。那筆的分數當然是 0，
+ * 但時間戳不該是 1970 —— 畫面上寫著 1970/01/01 只會讓人以為壞了。
+ * `at` is stamped **now** rather than 0: consenting uploads the local record immediately (the
+ * user's decision — agreeing means never pressing an upload key), so a player who consents before
+ * playing does see a row of his own. Its score is legitimately 0, but its timestamp must not be
+ * 1970 — a date of 1970/01/01 on screen only reads as "this is broken".
+ */
+function emptyProfile(playerId: string, at: number): PlayerProfile {
   return {
     playerId,
     name: '',
     score: 0,
     maxCombo: 0,
     merges: 0,
-    at: 0,
+    at,
     revision: 0,
     uploaded: 0,
   };
@@ -428,21 +456,37 @@ function profileFromEntry(entry: LeaderboardEntry, playerId: string, revision: n
 }
 
 /**
- * 保留每個分類各自的 Top `limit`。
- * Keep each category's own top `limit`.
+ * 保留每個分類各自的 Top `limit`，外加**玩家自己那一筆**。
+ * Keep each category's own top `limit`, plus **the player's own row**.
  *
  * 三個分頁都要正確的最小代價：只存分數的前十名，COMBO 分頁就永遠看不到那些「分數不高但連擊
  * 很長」的玩家。
  * The least storage that keeps all three tabs correct: keeping only the score top ten would hide
  * every high-combo, low-score player from the COMBO tab forever.
+ *
+ * 自己那一筆**無條件保留**（使用者定案）：榜身只列前 `limit` 名，但「你的最佳」那一行要報
+ * 名次或「超越百分之多少」，而兩者都需要自己那一筆還在資料裡。以前它會跟著被裁掉，於是排到
+ * 100 名之外就變成「榜上沒有你」，連百分比都算不出來 —— 那個節錄才是這一條存在的理由。
+ * The player's own row is kept **unconditionally** (the user's decision): the board itself lists
+ * only the top `limit`, but the "your best" line reports either a rank or a share of players
+ * beaten, and both need that row to still exist. It used to be trimmed away with the rest, so
+ * ranking past 100 meant "you are not on the board at all" and there was no percentage to compute
+ * — which is exactly what this clause is for.
  */
-function capEntries(entries: readonly LeaderboardEntry[], limit: number): LeaderboardEntry[] {
+function capEntries(
+  entries: readonly LeaderboardEntry[],
+  limit: number,
+  keepId: string,
+): LeaderboardEntry[] {
   const kept = new Map<string, LeaderboardEntry>();
 
   for (const category of LEADERBOARD_CATEGORIES) {
     const top = [...entries].sort((a, b) => compareBy(category, a, b)).slice(0, limit);
     for (const entry of top) kept.set(entry.id, entry);
   }
+
+  const mine = entries.find((entry) => entry.id === keepId);
+  if (mine !== undefined) kept.set(mine.id, mine);
 
   return [...kept.values()];
 }
@@ -548,7 +592,7 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
     (() => {
       /* 沒有本機紀錄時，用榜上自己那一筆當起點；連那一筆都沒有就是空的。 */
       const mine = entries.find((entry) => entry.id === playerId);
-      return mine === undefined ? emptyProfile(playerId) : profileFromEntry(mine, playerId, 1);
+      return mine === undefined ? emptyProfile(playerId, now()) : profileFromEntry(mine, playerId, 1);
     })();
 
   /*
@@ -595,7 +639,7 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
     const updated =
       index >= 0 ? entries.map((entry, at) => (at === index ? row : entry)) : [...entries, row];
 
-    entries = capEntries(updated, limit);
+    entries = capEntries(updated, limit, playerId);
     writeBoard();
 
     profile = { ...profile, name: displayName, uploaded: profile.revision };
@@ -744,10 +788,19 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
       /* 自己不在榜上（未同意、或還沒上載過）時 `self` 是 `null`。 */
       if (mine === undefined) return { category, entries: top, self: null };
 
+      /*
+       * `beats` 只在**名次落在榜外**時才會被看到（見 `ui/leaderboard.ts`），但那不代表它可以
+       * 隨便算 —— 伺服器版會直接給真數字，這裡先給一致的定義。
+       * `beats` is only ever read when the rank falls **off the board** (see `ui/leaderboard.ts`),
+       * which does not make it a throwaway: a server build supplies the real number, so the local
+       * one defines the same thing.
+       */
+      const beats = Math.round(((sorted.length - (rank + 1)) / sorted.length) * 100);
+
       return {
         category,
         entries: top,
-        self: { rank: rank + 1, entry: mine, total: sorted.length },
+        self: { rank: rank + 1, entry: mine, total: sorted.length, beats },
       };
     },
 

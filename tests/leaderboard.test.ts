@@ -313,6 +313,51 @@ describe('createLocalLeaderboard — 一位玩家一筆 / one row per player', (
     expect(self?.rank).toBe(2);
     expect(self?.total).toBe(3);
     expect(self?.entry.id).toBe('me');
+    /* 3 位玩家、第 2 名 → 贏過 1 位 → 33%（`(total − rank) / total`）。 */
+    expect(self?.beats).toBe(33);
+  });
+
+  /*
+   * 名次掉出榜外時，那一筆**必須還留著**，否則 UI 既沒有名次也沒有百分比可報（見
+   * `ui/leaderboard.ts` 的 `rank > LEADERBOARD_LIMIT` 分支）—— 這是「你的最佳」那一行的前提。
+   * When the rank falls off the board the row **has to survive**, or the UI has neither a rank nor
+   * a percentage to report (see the `rank > LEADERBOARD_LIMIT` branch in `ui/leaderboard.ts`) —
+   * which is the precondition for the whole "your best" line.
+   *
+   * 用一個很小的 `limit` 重現「排到榜外」：位元組上與 150 位玩家無異，但不必為了測一條界線塞
+   * 150 筆資料進存檔。
+   * A tiny `limit` reproduces "off the board": byte for byte the same situation as 150 players,
+   * without pushing 150 rows through storage to test one boundary.
+   */
+  it('keeps the player on the record even at a rank past the listed top', () => {
+    const many = Array.from({ length: 6 }, (_, index) =>
+      /* 三個數值一起遞減，讓每個分類的前三名都是同一批人，截斷才可預期。 */
+      playerRow(`q${String(index)}`, 600 - index * 100, 60 - index * 10, 6 - index),
+    );
+
+    const { board } = makeBoard(3, many);
+    board.setSharing(true);
+    board.record({ score: 250, maxCombo: 1, merges: 1 });
+    board.sync();
+
+    const snapshot = board.snapshot('score');
+
+    /* 榜身只列前三名，自己（第四名）不在裡面。 */
+    expect(snapshot.entries.map((entry) => entry.id)).toEqual(['q0', 'q1', 'q2']);
+
+    expect(snapshot.self).not.toBeNull();
+    expect(snapshot.self?.rank).toBe(4);
+    /*
+     * 本機儲存只留得住各分類的前 `limit` 名，所以排到榜外的人在**留住的那些人**之中一定是
+     * 最後一名，百分比自然是 0 —— 這是本地版的極限，不是公式錯了。真正的跨玩家百分位要有
+     * 伺服器才知道分母（見 `game/leaderboard.ts` 的 `beats` 說明）。
+     * The local store only keeps each category's top `limit`, so anyone past it is necessarily
+     * last among the rows that were kept and the share is 0 — that is the local ceiling, not a
+     * broken formula. A real cross-player share needs a server that knows its own denominator (see
+     * the `beats` note in `game/leaderboard.ts`).
+     */
+    expect(snapshot.self?.total).toBe(4);
+    expect(snapshot.self?.beats).toBe(0);
   });
 
   it('has no self row while the player is not on the board', () => {
