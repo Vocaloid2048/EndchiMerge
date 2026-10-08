@@ -1,0 +1,310 @@
+/*
+ * 設定彈窗（`ui/settings.ts`）。
+ * The settings popup.
+ *
+ * 蓋在整個設計畫布上（1920×1080），尺寸都是**設計稿像素**，跟著畫布一起被 `ui/scale.ts`
+ * 等比縮放 —— 與排行榜彈窗、結算覆蓋層、確認對話框同一套座標語言。
+ * It covers the whole design canvas (1920×1080), so its sizes are **design pixels** scaled with
+ * the canvas by `ui/scale.ts` — the same coordinate language as the leaderboard popup, the
+ * overlay and the dialog.
+ *
+ * 版面是使用者定案的兩欄：**左欄分類、右欄該分類的內容**，一行一個設定，說明就在它下面。
+ * The two-column layout the user decided on: **the category on the left, its content on the
+ * right**, one setting per row with its note directly beneath.
+ *
+ * 發布設定（名稱／分享）的樣式不在這裡，那組欄位住在 `publish-fields.css`，與首次的發布
+ * 詢問彈窗共用。
+ * The publish-settings styles are not here: those fields live in `publish-fields.css`, shared
+ * with the one-off publish prompt.
+ */
+
+.settings {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(12, 13, 18, 0.66);
+  backdrop-filter: blur(6px);
+  z-index: 26;
+}
+
+/* `[hidden]` 一定要蓋掉上面的 `display: grid`，否則彈窗會永遠顯示。 */
+.settings[hidden] {
+  display: none;
+}
+
+.settings__card {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 28px;
+  width: 1180px;
+  max-width: 1180px;
+  max-height: 880px;
+  padding: 44px 56px 52px;
+  border-radius: 32px;
+  background: var(--glass-fill);
+  border: 1px solid var(--glass-stroke);
+  box-shadow: var(--glass-shadow);
+}
+
+/* ── 標題列 ──────────────────────────────────────────────────────────── */
+
+.settings__header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 24px;
+}
+
+.settings__title {
+  margin: 0;
+  font-size: 48px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.settings__close {
+  grid-column: 2;
+  width: 56px;
+  height: 56px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-object);
+  color: var(--color-fg);
+  font-family: inherit;
+  font-size: 34px;
+  line-height: 1;
+  cursor: pointer;
+  transition: filter var(--transition-fast);
+}
+
+.settings__close:hover {
+  filter: brightness(1.3);
+}
+
+.settings__close:focus-visible {
+  outline: 3px solid var(--color-fg);
+  outline-offset: 3px;
+}
+
+/* ── 內容 ──────────────────────────────────────────────────────────── */
+
+/* 卡片自己帶 `max-height`，內容自己在這裡滾：否則溢出只會被裁掉而不是可捲動（同排行榜）。 */
+.settings__body {
+  display: grid;
+  gap: 0;
+  align-content: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 12px;
+}
+
+.settings__category {
+  display: grid;
+  /*
+   * 左欄固定寬：分類名稱長短不一，讓它們各自撐開會讓右欄的控件忽左忽右，眼睛要重新找位置。
+   * A fixed left column: category names differ in length, and letting each one size itself
+   * would slide the controls left and right so the eye has to re-find them every time.
+   */
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 10px 40px;
+  align-items: start;
+  padding: 30px 0;
+}
+
+/* 分類之間的分隔線；最後一類不需要。 */
+.settings__category + .settings__category {
+  border-top: 1px solid var(--color-border);
+}
+
+.settings__heading {
+  margin: 0;
+  /* 標題與右欄第一行的副標題對齊在同一條基線上。 */
+  padding-top: 2px;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.settings__panel {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+
+.settings__subtitle {
+  margin: 0;
+  color: var(--color-fg-muted);
+  font-size: 22px;
+  letter-spacing: 0.04em;
+}
+
+.settings__item {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings__item-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 24px;
+}
+
+.settings__item-label {
+  font-size: 24px;
+  letter-spacing: 0.04em;
+}
+
+/* 說明：淺灰、較小、行高寬一點，讓它一眼就是註腳而不是另一條設定。 */
+.settings__note {
+  margin: 0;
+  color: var(--color-fg-dim);
+  font-size: 19px;
+  line-height: 1.7;
+  letter-spacing: 0.02em;
+}
+
+.settings__more {
+  margin: 0;
+  color: var(--color-fg-dim);
+  font-size: 19px;
+  letter-spacing: 0.04em;
+}
+
+/* 總開關關著時，子規則整列變灰；閘門語意要先看得出來，才不會讓人以為開關壞了。 */
+.settings__item--disabled .settings__item-label,
+.settings__item--disabled .settings__note {
+  opacity: 0.45;
+}
+
+/* ── 開關 ──────────────────────────────────────────────────────────── */
+
+/*
+ * 用原生 `<input type="checkbox" role="switch">`，只是把輸入本身藏起來、由 `track` 代畫。
+ * 輸入仍留在 DOM 裡（`opacity: 0`）而不是 `display: none` —— 否則它會同時失去鍵盤焦點與
+ * 輔助技術的可見性。
+ * A native `<input type="checkbox" role="switch">` with the input merely hidden and the `track`
+ * doing the drawing. The input stays in the DOM at `opacity: 0` rather than `display: none`,
+ * which would take away both keyboard focus and assistive-tech visibility.
+ */
+.settings__switch {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  cursor: pointer;
+}
+
+.settings__switch-input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.settings__switch-track {
+  position: relative;
+  display: block;
+  width: 76px;
+  height: 40px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  /*
+   * 純裝飾，不接收指標事件：它壓在輸入框上面，收下的話真正被點到的就是它而不是 input。
+   * 玩家仍可按（label 會把點擊轉給 input），但「開關本身」就拿不到那一點 —— 對輔助技術與
+   * 自動化測試都是一種不誠實。
+   * Decorative only, and it does not take pointer events: it sits on top of the input, and
+   * swallowing the press would mean the thing being clicked is the track rather than the input.
+   * A press would still work (the label forwards it), but the switch itself would never receive
+   * the click — dishonest both to assistive tech and to an automated test.
+   */
+  pointer-events: none;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.settings__switch-track::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 5px;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--color-fg-muted);
+  transform: translateY(-50%);
+  transition: transform var(--transition-fast), background var(--transition-fast);
+}
+
+.settings__switch-input:checked + .settings__switch-track {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+
+.settings__switch-input:checked + .settings__switch-track::after {
+  background: var(--color-accent-ink);
+  transform: translate(36px, -50%);
+}
+
+.settings__switch-input:focus-visible + .settings__switch-track {
+  outline: 3px solid var(--color-fg);
+  outline-offset: 3px;
+}
+
+.settings__item--disabled .settings__switch,
+.settings__item--disabled .settings__switch-input {
+  cursor: not-allowed;
+}
+
+.settings__item--disabled .settings__switch-track {
+  opacity: 0.4;
+}
+
+/* ── 語言 ──────────────────────────────────────────────────────────── */
+
+.settings__languages {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.settings__language {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.22);
+  font-size: 23px;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.settings__language:hover {
+  border-color: var(--color-fg-dim);
+}
+
+.settings__language-input {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.settings__language-input:focus-visible {
+  outline: 3px solid var(--color-fg);
+  outline-offset: 3px;
+}
+
+/* 語系名一律是該語言自己的寫法（endonym），不翻譯 —— 也不該被其他語系的字型吃掉。 */
+.settings__language-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

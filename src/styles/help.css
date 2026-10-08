@@ -1,0 +1,150 @@
+/*
+ * 遊戲說明彈窗（`ui/help.ts`）。
+ * The help popup.
+ *
+ * 蓋在整個設計畫布上（1920×1080），尺寸都是**設計稿像素**，跟著畫布一起被 `ui/scale.ts`
+ * 等比縮放 —— 與排行榜、設定彈窗同一套座標語言。
+ * It covers the whole design canvas (1920×1080), so its sizes are **design pixels** scaled with
+ * the canvas by `ui/scale.ts` — the same coordinate language as the leaderboard and settings
+ * popups.
+ */
+
+.help {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(12, 13, 18, 0.66);
+  backdrop-filter: blur(6px);
+  z-index: 24;
+}
+
+/* `[hidden]` 一定要蓋掉上面的 `display: grid`，否則彈窗會永遠顯示。 */
+.help[hidden] {
+  display: none;
+}
+
+.help__card {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 28px;
+  width: 1040px;
+  max-width: 1040px;
+  max-height: 880px;
+  padding: 44px 56px 52px;
+  border-radius: 32px;
+  background: var(--glass-fill);
+  border: 1px solid var(--glass-stroke);
+  box-shadow: var(--glass-shadow);
+}
+
+/* ── 標題列 ──────────────────────────────────────────────────────────── */
+
+.help__header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 24px;
+}
+
+.help__title {
+  margin: 0;
+  font-size: 48px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.help__close {
+  grid-column: 2;
+  width: 56px;
+  height: 56px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-object);
+  color: var(--color-fg);
+  font-family: inherit;
+  font-size: 34px;
+  line-height: 1;
+  cursor: pointer;
+  transition: filter var(--transition-fast);
+}
+
+.help__close:hover {
+  filter: brightness(1.3);
+}
+
+.help__close:focus-visible {
+  outline: 3px solid var(--color-fg);
+  outline-offset: 3px;
+}
+
+/* ── 內容 ──────────────────────────────────────────────────────────── */
+
+/* 卡片定高、內容自己在這裡滾：版權聲明較長，一眼看不完（同排行榜榜身）。 */
+.help__body {
+  display: grid;
+  gap: 34px;
+  align-content: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 12px;
+}
+
+.help__section {
+  display: grid;
+  gap: 12px;
+}
+
+.help__heading {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+/*
+ * 內文行高刻意放寬（1.9）：這幾段是連續文字而不是 UI 標籤，行距太窄讀起來會擠成一團。
+ * The line height is deliberately loose (1.9): these are running paragraphs rather than UI
+ * labels, and tight leading turns them into a wall.
+ */
+.help__text {
+  margin: 0;
+  color: var(--color-fg-muted);
+  font-size: 22px;
+  line-height: 1.9;
+  letter-spacing: 0.02em;
+}
+
+.help__repo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/*
+ * 連結樣式：底色 + 圓角 + 底線，讓它一眼就是可以按的東西（其餘文字都是灰的，只剩它有色）。
+ * The link carries a tinted pill, a radius and an underline so it reads as pressable at a
+ * glance — every other string on this card is grey.
+ */
+.help__link {
+  display: inline-block;
+  padding: 10px 22px;
+  border-radius: 12px;
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent);
+  color: var(--color-fg);
+  font-size: 22px;
+  letter-spacing: 0.04em;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  transition: filter var(--transition-fast);
+}
+
+.help__link:hover {
+  filter: brightness(1.12);
+}
+
+.help__link:focus-visible {
+  outline: 3px solid var(--color-fg);
+  outline-offset: 3px;
+}

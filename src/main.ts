@@ -1,16 +1,20 @@
 import './styles/main.css';
 import { attachDropInput } from './core/input';
 import { loadConfig } from './core/configLoader';
+import { resolveLocalizedName } from './core/localizedName';
 import type { AllConfig } from './core/types';
 import { FrameLoop } from './game/loop';
 import { createLocalLeaderboard, type LeaderboardSource } from './game/leaderboard';
+import { createPreferencesStore, type PreferencesStore } from './game/preferences';
 import { createProgressStore, type ProgressStore } from './game/progress';
 import { GameSession } from './game/session';
+import { i18n } from './i18n';
 import { SpriteLoader } from './render/spriteLoader';
 import { buildSilhouetteCache } from './render/silhouetteLoader';
 import { Viewport } from './render/viewport';
 import { hook } from './ui/dom';
 import { createGameOver, type GameOverView } from './ui/gameOver';
+import { createHelp, type HelpView } from './ui/help';
 import { Hud } from './ui/hud';
 import { createLayout, type Layout } from './ui/layout';
 import { createLeaderboard, type LeaderboardView } from './ui/leaderboard';
@@ -19,6 +23,7 @@ import { createNotice } from './ui/notice';
 import { createPublishPrompt, type PublishPromptView } from './ui/publishPrompt';
 import { attachRestartConfirm } from './ui/restartButton';
 import { attachStageScale } from './ui/scale';
+import { createSettings, type SettingsView } from './ui/settings';
 import { createSkillBar, type SkillBar } from './ui/skillBar';
 import { createSkillHint, type SkillHint } from './ui/skillHint';
 import { createSpMeter, type SpMeter } from './ui/spMeter';
@@ -54,10 +59,20 @@ export interface AppContext {
   leaderboard: LeaderboardView;
   /** 首次的發布詢問彈窗（名稱＋分享意願）。 */
   publishPrompt: PublishPromptView;
+  /** 玩家偏好（語系、規則總開關、無盡模式）。 */
+  preferences: PreferencesStore;
+  /** 設定彈窗。 */
+  settings: SettingsView;
+  /** 遊戲說明彈窗。 */
+  help: HelpView;
   /** 卸下投放輸入的事件綁定。 */
   detachInput: () => void;
   /** 停止監看視窗尺寸與名冊尺寸。 */
   detachScale: () => void;
+  /** 取消語系變更的訂閱。 */
+  detachI18n: () => void;
+  /** 取消偏好變更的訂閱。 */
+  detachPreferences: () => void;
 }
 
 async function bootstrap(): Promise<void> {
@@ -67,8 +82,33 @@ async function bootstrap(): Promise<void> {
     throw new Error('Root element "#app" is missing from index.html.');
   }
 
+  /*
+   * 偏好要**在版面之前**讀：版面建立時就會用 `i18nText` 把每個標籤寫成當下語系的字，所以
+   * 語系必須先確定。存檔有值就以存檔為準，沒有則跟隨裝置／瀏覽器語言（見
+   * `game/preferences.ts`）。
+   * Preferences are read **before the layout exists**: the layout writes every label with
+   * `i18nText` at build time, so the locale has to be settled first. A saved value wins;
+   * otherwise the device/browser language decides (see `game/preferences.ts`).
+   */
+  const preferences = createPreferencesStore();
+  i18n.setLocale(preferences.locale);
+  i18n.setDocumentLang();
+
   /* 先建版面：即使配置或素材全部失敗，玩家至少看得到骨架與非官方聲明。 */
   const layout = createLayout(host);
+
+  /*
+   * 語系一換就把整個版面重寫一遍：`applyTo()` 走 `[data-i18n]` 等標記，所有靜態文字（含之後
+   * 才掛上去的排行榜、設定、說明彈窗，它們全都住在 `layout.root` 底下）一次換掉。動態文字
+   * （帶數字的句子）由各自的模組自己重畫。
+   * A locale change rewrites the whole layout in one `applyTo()` pass over the `[data-i18n]`
+   * tags — including the leaderboard, settings and help popups mounted later, since they all
+   * live under `layout.root`. Dynamic text (sentences with numbers) is redrawn by its own module.
+   */
+  const detachI18n = i18n.subscribe((): void => {
+    i18n.applyTo(layout.root);
+    i18n.setDocumentLang();
+  });
 
   /*
    * 版面一建好就開始等比縮放，而不是等配置載入完 —— 否則在那段時間裡畫面會是一張
@@ -129,6 +169,34 @@ async function bootstrap(): Promise<void> {
   const hud = new Hud({ layout, sprites, levels: config.levels.levels });
 
   /*
+   * 無盡模式由偏好驅動。它是**跨局設定**，所以在 `reset()` 之外（見 `game/session.ts`），
+   * 這裡只需在開局前交一次，之後跟著偏好變。
+   * Endless mode is driven by preferences. It is a **cross-run setting** and therefore lives
+   * outside `reset()` (see `game/session.ts`); it is handed over once before the first run and
+   * follows the preference from then on.
+   */
+  session.setEndless(preferences.endless);
+
+  /**
+   * 偏好一變就同步兩件事：語系交給 `i18n`（它會通知版面重寫），規則交給 `session`。
+   * A preference change syncs two things: the locale goes to `i18n` (which notifies the layout
+   * rewrite) and the rules go to `session`.
+   */
+  const detachPreferences = preferences.subscribe((): void => {
+    i18n.setLocale(preferences.locale);
+    session.setEndless(preferences.endless);
+  });
+
+  /*
+   * 技能名的語系解析。`GameSession` 刻意不認識語系（見 `SkillCardState.name`），所以
+   * `skills.json` 的逐語系名稱在這裡才被合併進去；技能欄每幀重畫，換語系時名字自然更新。
+   * Locale resolution for skill names. `GameSession` deliberately knows nothing about locales
+   * (see `SkillCardState.name`), so the per-locale names from `skills.json` are folded in here.
+   * The bar redraws every frame, so a locale change updates the names by itself.
+   */
+  const skillNames = new Map(config.skills.skills.map((def) => [def.id, def.names]));
+
+  /*
    * 技能欄。可不可以按完全由 `GameSession` 決定（它才看得到技力與累計消耗），所以這裡
    * 只需要在按下時把 id 交回去 —— 連「再按一次取消」也是 session 的規則。
    * The skill bar. Whether a card is pressable is entirely `GameSession`'s call (it is the only
@@ -143,6 +211,8 @@ async function bootstrap(): Promise<void> {
       skillBar.update(session.skillCards);
       spMeter.update({ value: session.spValue, max: session.spMax });
     },
+    nameFor: (state): string =>
+      resolveLocalizedName(state.name, skillNames.get(state.id), i18n.locale),
   });
   skillBar.update(session.skillCards);
 
@@ -217,8 +287,15 @@ async function bootstrap(): Promise<void> {
    * 完全沒有動靜的一局（0 分、0 次合成）不記：那些是誤按，記進去只會把榜洗掉。
    * A run with no activity at all (0 score, 0 merges) is skipped: a stray tap would otherwise
    * wash out the board.
+   *
+   * **規則總開關一開，這裡整個短路**（使用者定案）：「開啟期間的成績一律不記入排行榜」是總開關
+   * 的定義，所以判準放在這一條唯一的記錄出口上，而不是散在四五個呼叫點各自檢查。
+   * **With the master rule switch on, this short-circuits entirely** (the user's decision):
+   * "nothing is recorded while it is on" is what the switch *means*, so the test lives on this
+   * one recording exit rather than being repeated at each of the four or five call sites.
    */
   const recordCurrentRun = (): void => {
+    if (preferences.rulesEnabled) return;
     if (session.score <= 0 && session.mergedCount <= 0) return;
 
     leaderboardSource.record({
@@ -340,6 +417,48 @@ async function bootstrap(): Promise<void> {
   }
 
   /*
+   * 「?」說明彈窗（工具列）。四段靜態文案，全部走 i18n 標記，所以語系一換由上面那條
+   * `applyTo()` 一次改掉。
+   * The "?" help popup (toolbar). Four static sections, all tagged for i18n, so the `applyTo()`
+   * subscription above rewrites them in one pass on a locale change.
+   */
+  const help = createHelp({ host: layout.root });
+
+  const helpButton = layout.regions.toolbar.querySelector<HTMLButtonElement>(
+    'button[data-action="help"]',
+  );
+  if (helpButton !== null) {
+    helpButton.addEventListener('click', (): void => {
+      help.open();
+    });
+  }
+
+  /*
+   * 設定彈窗（工具列齒輪）。它把三個來源接在一起：偏好（語系／規則）、排行榜（名稱／分享）
+   * 與上面同一條 `recordCurrentRun`。在設定裡按下儲存、且同意分享之後，會把**正在進行**的
+   * 這一局交出去 —— 玩家改完名字立刻在榜上看到自己，和首次詢問走的是同一條路。
+   * The settings popup (toolbar gear) ties three sources together: preferences (locale/rules),
+   * the leaderboard (name/sharing) and the same `recordCurrentRun` path. Pressing save in
+   * settings **with sharing on** hands over the run **in progress**, so a rename shows up on
+   * the board immediately — the very same path the one-off prompt takes.
+   */
+  const settings = createSettings({
+    host: layout.root,
+    preferences,
+    leaderboard: leaderboardSource,
+    onPublish: recordCurrentRun,
+  });
+
+  const settingsButton = layout.regions.toolbar.querySelector<HTMLButtonElement>(
+    'button[data-action="settings"]',
+  );
+  if (settingsButton !== null) {
+    settingsButton.addEventListener('click', (): void => {
+      settings.open();
+    });
+  }
+
+  /*
    * 除錯輔助線：開發模式下加上 `?debug=1` 就會疊出容器外框、物理空腔與投放線。
    */
   const debugOverlay = import.meta.env.DEV && new URLSearchParams(window.location.search).has('debug');
@@ -450,8 +569,13 @@ async function bootstrap(): Promise<void> {
     leaderboardSource,
     leaderboard,
     publishPrompt,
+    preferences,
+    settings,
+    help,
     detachInput,
     detachScale,
+    detachI18n,
+    detachPreferences,
   };
   exposeForDebugging(context);
 }
