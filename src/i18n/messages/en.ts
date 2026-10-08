@@ -67,7 +67,7 @@ export const en: Messages = {
   'leaderboard.comboValue': '{value} combo',
   'leaderboard.mergesValue': '{value} merges',
   'leaderboard.self':
-    'Your best: {value} ({score} pts) · beats {percentile}% of your own runs ({total} total)',
+    'Your best: {value} ({score} pts) · #{rank} of {total} players',
   'leaderboard.tab.score': 'Best score',
   'leaderboard.tab.combo': 'COMBO',
   'leaderboard.tab.merges': 'Merges',
@@ -114,7 +114,7 @@ export const en: Messages = {
   'settings.leaderboard.heading': 'Leaderboard',
   'settings.leaderboard.subtitle': 'Display name and sharing',
   'settings.leaderboard.note':
-    'With sharing off, your scores do not appear on the leaderboard. You can come back and change this anytime.',
+    'With sharing off, your scores stay off the leaderboard. Once you agree, later scores upload on their own — there is no button to press. You can change this anytime.',
 
   'help.title': 'How to play',
   'help.close': 'Close help',

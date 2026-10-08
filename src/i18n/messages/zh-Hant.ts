@@ -81,8 +81,7 @@ export const zhHant = {
   'leaderboard.unnamed': '（未命名）',
   'leaderboard.comboValue': '{value} 連',
   'leaderboard.mergesValue': '{value} 次',
-  'leaderboard.self':
-    '你的最佳：{value}（{score} 分）· 超越你自己 {percentile}% 的場次（共 {total} 場）',
+  'leaderboard.self': '你的最佳：{value}（{score} 分）· 第 {rank} 名，共 {total} 位玩家',
   'leaderboard.tab.score': '最高分數',
   'leaderboard.tab.combo': 'COMBO 數',
   'leaderboard.tab.merges': '合成數',
@@ -132,7 +131,8 @@ export const zhHant = {
   'settings.language.note': '預設依照你的裝置或瀏覽器語言自動選擇。',
   'settings.leaderboard.heading': '排行榜',
   'settings.leaderboard.subtitle': '顯示名稱與分享意願',
-  'settings.leaderboard.note': '未同意分享時，成績不會上排行榜；之後隨時可以回來更改。',
+  'settings.leaderboard.note':
+    '未同意分享時，成績不會上排行榜。同意之後，之後的成績會自動上載，不必再手動儲存；隨時可以回來更改。',
 
   /* ── 遊戲說明彈窗 / Help popup ─────────────────────────────────── */
   /*

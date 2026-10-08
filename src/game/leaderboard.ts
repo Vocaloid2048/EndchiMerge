@@ -14,66 +14,74 @@
  *
  * 設計要點（皆為使用者定案）/ Design points, all decided by the user:
  *
- * 1. **全時段單一榜，三個分類**：最高分數／COMBO 數／合成數。三個分類是**同一批紀錄的三種
- *    排序鍵**，不是三份不同的資料。
- *    One all-time board with **three categories** (best score / COMBO / merges). The three tabs
- *    are three sort keys over the *same* records, not three separate datasets.
- * 2. **Top `LEADERBOARD_LIMIT`，每局都記**。因為三個分類各自要有正確的 Top N，儲存時保留
- *    **每個分類各自前 N 名的聯集**（現為 3×100 ＝ 最多 300 筆）—— 只按分數裁切會讓 COMBO
- *    分頁從一開始就偏斜。
- *    **Top `LEADERBOARD_LIMIT`, every run recorded.** Each category needs its own correct top N,
- *    so storage keeps the **union of each category's top N** (3×100 = at most 300 rows).
- *    Trimming by score alone would bias the COMBO tab from the start.
- * 3. **同意分享才上榜**：未同意時榜是空的（唯讀），紀錄本身仍然照記 —— 之後同意就一併出現。
- *    **Opt-in to appear.** While sharing is off the board reads empty; runs are still recorded,
- *    and turning sharing on reveals them all (a global switch, the user's decision).
- * 4. **名稱與分享意願是「玩家設定」，會單獨被問一次**：首次開啟排行榜時彈出一次發布詢問
- *    （見 `publishPromptDone`），之後要改就到設定。這個事實狀態也住在這裡，因為它與名稱、
- *    分享意願是同一組設定。
- *    **The name and the sharing preference are player settings, asked once**: the first time the
- *    leaderboard opens, a publish prompt appears (see `publishPromptDone`); after that they are
- *    edited in settings. That fact lives here too, beside the two settings it belongs to.
- * 4. **百分位**：跨玩家的百分位需要伺服器，本地做不到，所以現階段以**你自己的歷史場次**計算
- *    （「超越你自己 X% 的場次」），並由 `LeaderboardRank.percentile` 這個欄位承載 —— 接上
- *    真後端後，同一個欄位改由伺服器回傳真·跨玩家百分位。
- *    **Percentile.** A true cross-player percentile needs a server, so for now it is computed
- *    against **the player's own run history** ("beats X% of your own runs") and carried by
- *    `LeaderboardRank.percentile`. When the server lands, that same field just gets the real
- *    cross-player number.
- * 5. **一局只佔一筆（`runId` upsert）**：一局會在多處被記錄（自然結束、重新開始、分頁被隱藏
- *    或關閉、玩家在發布列按儲存），這些都是**同一局**的不同時間點，不該各留一筆。帶 `runId`
- *    時 `record()` 是 upsert，後記的數值覆蓋先記的。
- *    **One row per run (`runId` upsert).** A run is recorded from several places (natural game
- *    over, restart, the page being hidden or closed, save pressed in the publish bar) — all the
- *    same run at different moments, and none should leave its own row. With a `runId`, `record()`
- *    upserts, so a later recording overwrites an earlier one.
- * 6. **命名時認領無名紀錄**：名稱是在榜上才問的，先前記下的場次是無名的；`setDisplayName()`
- *    把那些空名的紀錄歸到新名字下，玩家才看得到「自己的紀錄」。
- *    **Naming claims the nameless.** The name is only asked for on the board, so earlier runs are
- *    nameless; `setDisplayName()` moves those to the new name so the player actually sees his own
- *    records.
+ * 1. **每位玩家一筆，每個分類最多一筆**：榜排的是**玩家**，不是場次。一局跑完只是把這位玩家
+ *    的數字往上推，不會多留一筆歷史。
+ *    **One row per player, at most one per category.** The board ranks **players**, not runs; a
+ *    finished run pushes that player's numbers up instead of leaving another row behind.
+ * 2. **三個數值各自獨立取歷史最大**：分數／COMBO／合成各自與存檔比大小，所以同一行的三個數字
+ *    可能來自不同的局 —— 這是刻意的，三個分頁才都名副其實。若三個數字綁在同一局，COMBO 分頁
+ *    會永遠只看到高分局。
+ *    **The three values are independent maxima.** Score, combo and merges are each compared
+ *    against storage on their own, so one row's three numbers can come from different runs. That
+ *    is deliberate: the three tabs are only honest this way — tied to a single run, the COMBO tab
+ *    would only ever show high-score games.
+ * 3. **只升不降**：較差的表現不會覆蓋較好的紀錄，連時間戳都不動。
+ *    **Monotonic.** A worse run never overwrites a better record, not even its timestamp.
+ * 4. **名字不是身份**：身份是一個本機鑄造的 `playerId`（`endchimerge:device-id`）。改名只改
+ *    那一筆的 `name` 欄位 —— 不新增一筆，也不會留下掛在舊名字底下、再也認不回來的孤兒紀錄。
+ *    **The name is not the identity.** Identity is a locally minted `playerId`
+ *    (`endchimerge:device-id`). Renaming only rewrites that one row's `name` field: no new row,
+ *    and no orphan left behind under the old name that can never be claimed again.
+ * 5. **兩層：本機紀錄與榜。** 這條分界就是日後接真後端的那條線。
+ *    **Two layers: the local record and the board.** This seam is exactly where the real backend
+ *    will go.
+ *    - `profile`（`endchimerge:profile`）＝ 這台裝置上的最佳成績，**邊玩邊更新**（只有真的刷新
+ *      才寫入），所以關分頁、當機、斷電都不掉成績。它帶 `revision`（每次刷新 +1）與
+ *      `uploaded`（最後一次推上排行榜的 revision）。
+ *      `profile` is this device's best, **updated as you play** (written only on a real
+ *      improvement), so a closed tab or a crash costs nothing. It carries `revision`
+ *      (incremented on every improvement) and `uploaded` (the revision last pushed to the board).
+ *    - `board`（`endchimerge:leaderboard`）＝ 榜本身。**只有 `sync()` 會寫它。**
+ *      `board` is the board itself, and **only `sync()` writes it.**
+ * 6. **甚麼時候上載**：該局結束、重新開始、關分頁／切到背景、下次開頁（有未上載的更新時），
+ *    以及**同意分享的那一刻**。同意之後玩家不必再手動按任何東西。
+ *    **When it uploads**: at the end of a run, on restart, when the page is hidden or closed, on
+ *    the next open if something is pending — and the moment consent is given. After that the
+ *    player never has to press anything again.
+ * 7. **同意分享之前榜是空的**：不是「記了但不顯示」，而是根本還沒推上去。
+ *    **The board is empty until consent**: not "recorded but hidden" — nothing has been pushed
+ *    yet.
+ * 8. **防竄改**：兩份存檔都附一段摘要（`core/integrity.ts`），讀回來重算比對，對不上就當作
+ *    那筆不存在。⚠️ 那是門檻不是防護，理由寫在該檔案裡。
+ *    **Tamper check**: both blobs carry a digest (`core/integrity.ts`), recomputed and compared
+ *    on read; a mismatch means the record is treated as absent. ⚠️ It is a speed bump rather than
+ *    a defence, for the reasons given in that file.
+ * 9. **首次的發布詢問**：名稱與分享意願只在第一次開榜之前問一次（見 `publishPromptDone`），
+ *    之後要改就到設定。
+ *    **The one-off publish prompt**: name and consent are asked once, before the board first
+ *    opens (see `publishPromptDone`); changes afterwards happen in settings.
  *
  * 只做儲存與排序，不含任何遊戲規則（與 `game/progress.ts` 的分工相同）。
  * Storage and ordering only, no game rules — the same split as `game/progress.ts`.
  */
 
 import { STORAGE_KEYS } from '../core/constants';
+import { open, seal } from '../core/integrity';
 import type { ProgressStorage } from './progress';
 
 /** 榜單分類。 */
 export type LeaderboardCategory = 'score' | 'combo' | 'merges';
 
-/** 三個分頁的順序與標題（UI 直接用，順序即顯示順序）。 */
-export const LEADERBOARD_CATEGORIES: readonly {
-  id: LeaderboardCategory;
-  label: string;
-  /** 該分類的數值要顯示在哪個位置時的短名。 */
-  column: string;
-}[] = [
-  { id: 'score', label: '最高分數', column: '分數' },
-  { id: 'combo', label: 'COMBO 數', column: 'COMBO' },
-  { id: 'merges', label: '合成數', column: '合成' },
-];
+/**
+ * 三個分類的識別與順序（UI 直接用，順序即顯示順序）。
+ * The three categories, id and order (the UI uses this directly; the order is the display order).
+ *
+ * 只有**識別**在這裡：顯示文字住在 `src/i18n`（`leaderboard.tab.*`），否則同一個標籤會有
+ * 兩個來源，改了一個忘了另一個。
+ * Only the **ids** live here: the displayed text lives in `src/i18n` (`leaderboard.tab.*`),
+ * otherwise one label has two sources and one of them gets forgotten.
+ */
+export const LEADERBOARD_CATEGORIES: readonly LeaderboardCategory[] = ['score', 'combo', 'merges'];
 
 /**
  * 榜上顯示的名次數（使用者定案：Top 100）。
@@ -81,59 +89,44 @@ export const LEADERBOARD_CATEGORIES: readonly {
  */
 export const LEADERBOARD_LIMIT = 100;
 
-/** 一筆紀錄。 */
+/**
+ * 榜上的一筆：一位玩家。
+ * One row on the board: one player.
+ */
 export interface LeaderboardEntry {
-  /** 穩定識別碼，供 UI 標記「你自己那筆」。 */
+  /**
+   * 玩家的穩定識別碼。**這不是名字** —— 改名不會換 id，所以改名只是改這一筆的內容。
+   * The player's stable id. **This is not the name**: renaming does not change the id, which is
+   * why a rename edits this row rather than adding another.
+   */
   id: string;
-  /** 記錄當下的顯示名；未設定時為空字串。 */
+  /** 顯示名；未設定時為空字串。 */
   name: string;
+  /** 歷史最高分。 */
   score: number;
-  /** 這一局爬到過的最高連擊數。 */
+  /** 歷史最高連擊（可能來自另一局）。 */
   maxCombo: number;
-  /** 這一局累計合成次數。 */
+  /** 歷史最高單局合成次數（可能來自另一局）。 */
   merges: number;
-  /** 這一局結束的時刻（epoch ms）。 */
+  /** 這筆紀錄最後一次被刷新的時刻（epoch ms）。 */
   at: number;
 }
 
-/** 一局要送進榜單的成績。 */
+/** 目前的成績，併入本機紀錄時用。 */
 export interface LeaderboardRun {
   score: number;
   maxCombo: number;
   merges: number;
   /** 覆寫時間戳；未提供時用時鐘。測試用。 */
   at?: number;
-  /**
-   * 這一局的穩定識別碼。提供時 `record()` 是 **upsert** —— 同一局再記一次會更新同一筆，
-   * 而不是多出一筆；未提供時每次呼叫都新增一筆（純粹的「一局一筆」）。
-   * A stable id for this run. When given, `record()` **upserts**: recording the same run again
-   * updates that one entry instead of adding another. Without it every call appends a new entry.
-   *
-   * 需要它的理由：一局不只在一處被記錄（自然結束、按重新開始、關分頁／切到背景、以及玩家
-   * 在發布列按下儲存的那一刻），逐處去重很容易漏；有了這個 id，同一局怎麼記都只會是一筆，
-   * 而且每次記都把最新的成績寫進去。
-   * It exists because a run is recorded from several places (a natural game over, a restart, the
-   * page being hidden/closed, and the moment the player presses save in the publish bar), and
-   * de-duplicating at every call site is easy to get wrong. With the id, a run is one row no
-   * matter how often it is recorded, and each recording just writes the latest numbers.
-   */
-  runId?: string;
 }
 
-/** 某一分類下，玩家自己那筆的排名資訊。 */
+/** 榜上玩家自己那一筆的排名資訊。 */
 export interface LeaderboardRank {
   /** 1 起算的名次。 */
   rank: number;
   entry: LeaderboardEntry;
-  /**
-   * 百分位 `0..100`：這一筆超越了「所有已記錄場次」中的百分之多少。
-   * Percentile `0..100`: the share of **all recorded runs** this entry beats.
-   *
-   * 只計**嚴格低於**自己的場次，所以最高的一筆永遠不會是 100（它沒有超越自己）。
-   * Only strictly-lower runs count, so the top run never reads 100 — it does not beat itself.
-   */
-  percentile: number;
-  /** 百分位的分母（＝已記錄且已同意分享的場次數）。 */
+  /** 榜上的玩家總數（＝已同意分享且已上載的人數）。 */
   total: number;
 }
 
@@ -142,7 +135,7 @@ export interface LeaderboardSnapshot {
   category: LeaderboardCategory;
   /** 該分類的前 N 名（已依分類排序）。 */
   entries: readonly LeaderboardEntry[];
-  /** 玩家自己在該分類的最佳一筆；榜為空時是 `null`。 */
+  /** 玩家自己在該分類的那一筆；不在榜上時是 `null`。 */
   self: LeaderboardRank | null;
 }
 
@@ -163,18 +156,20 @@ export interface LeaderboardSource {
    * 設定顯示名（呼叫端已驗證過）。
    * Set the display name (already validated by the caller).
    *
-   * 實作應把先前**沒有名字**的紀錄一併歸到這個名字下：玩家是先玩、後命名（發布列是在排行榜
-   * 彈窗裡才問名稱的），那些在他命名之前記下的場次本來是無名的，命名後他會預期看到「自己的
-   * 紀錄」。已經有名字的紀錄不動 —— 那是他在那個名字下跑出來的成績。
-   * An implementation should claim previously **unnamed** records for this name: the player plays
-   * first and names themselves later (the publish bar lives in the leaderboard popup), so runs
-   * recorded before naming are nameless, and he expects to see "his own records" once he names
-   * himself. Records that already carry a name are left alone.
+   * **改名不會產生新的一筆**：身份是 `playerId`，名字只是那一筆的一個欄位。榜上自己那一筆
+   * （如果已經在上面）與本機紀錄會一起改名。
+   * **Renaming never creates a second row**: identity is the `playerId` and the name is just one
+   * of that row's fields. The player's row on the board (if it is there) and the local record are
+   * renamed together.
    */
   setDisplayName(name: string): void;
   /** 是否同意分享成績上榜（全域開關）。 */
   readonly sharing: boolean;
-  /** 切換分享意願。 */
+  /**
+   * 切換分享意願。**開啟時會立刻上載一次**，所以玩家同意之後不必再手動按下任何鍵。
+   * Toggle the sharing preference. **Turning it on uploads immediately**, so consenting is the
+   * only thing the player has to do.
+   */
   setSharing(on: boolean): void;
   /**
    * 首次的「發布成績」詢問是否已經處理過。
@@ -190,15 +185,29 @@ export interface LeaderboardSource {
   /** 記下首次的發布詢問已經處理過。 */
   finishPublishPrompt(): void;
   /**
-   * 記錄一局。每局都記（使用者定案），與是否同意分享無關；帶 `runId` 時是 upsert（同一局
-   * 只會有一筆，重複記錄更新數值）。
-   * Record a run. Every run is recorded (the user's decision) regardless of sharing; with a
-   * `runId` this upserts, so a run stays a single row whose numbers get updated.
+   * 把目前的成績併入**本機紀錄**。**只升不降**：三個數值各自與存檔比大小，只有更高才覆蓋。
+   * Fold the current numbers into the **local record**. **Monotonic**: each of the three values is
+   * compared against storage on its own and only a higher one overwrites.
+   *
+   * 可以安全地每幀呼叫 —— 沒有刷新時立刻返回，不碰儲存體，也不通知任何人。
+   * Safe to call every frame: with no improvement it returns immediately, touching neither
+   * storage nor the listeners.
+   *
+   * 這一步**不上榜**。上載是 `sync()`。
+   * This step **does not touch the board**; uploading is `sync()`.
+   *
+   * @returns 是否刷新了紀錄。
    */
-  record(run: LeaderboardRun): void;
+  record(run: LeaderboardRun): boolean;
+  /**
+   * 把本機紀錄推上排行榜。未同意分享、或沒有未上載的更新時什麼都不做（回傳 `false`）。
+   * Push the local record onto the board. Does nothing when consent has not been given or when
+   * there is no un-uploaded update (returns `false`).
+   */
+  sync(): boolean;
   /** 讀取某一分類的前 N 名與自己的名次。 */
   snapshot(category: LeaderboardCategory, limit?: number): LeaderboardSnapshot;
-  /** 訂閱變更（記錄、改名、切換分享）；回傳取消訂閱的函式。 */
+  /** 訂閱變更（刷新、上載、改名、切換分享）；回傳取消訂閱的函式。 */
   subscribe(listener: () => void): () => void;
 }
 
@@ -206,13 +215,46 @@ export interface LocalLeaderboardOptions {
   /** 注入儲存體；未提供時用 `localStorage`，不可用時退回記憶體。 */
   storage?: ProgressStorage | null;
   /** 覆寫儲存鍵；測試用。 */
-  keys?: { entries?: string; name?: string; sharing?: string; prompt?: string };
+  keys?: {
+    entries?: string;
+    name?: string;
+    sharing?: string;
+    prompt?: string;
+    profile?: string;
+    device?: string;
+  };
   /** 顯示名次數；預設 `LEADERBOARD_LIMIT`。 */
   limit?: number;
   /** 時鐘；測試用。 */
   now?: () => number;
-  /** 產生紀錄 id；測試用。 */
-  idFactory?: () => string;
+  /**
+   * 覆寫玩家識別碼；測試用。未提供時依序讀本機紀錄、裝置鍵，都沒有才鑄一個。
+   * Override the player id; for tests. Otherwise it comes from the local record, then the device
+   * key, and is minted only if neither exists.
+   */
+  playerId?: string;
+  /** 覆寫防竄改用的鹽；測試用。 */
+  salt?: string;
+}
+
+/**
+ * 防竄改摘要用的鹽（見 `core/integrity.ts`）。
+ * The salt for the tamper digest (see `core/integrity.ts`).
+ */
+const CONTENT_SALT = 'endchimerge/leaderboard/v2';
+
+/** 本機紀錄：這台裝置上的最佳成績，也就是「要上載的那一筆」。 */
+interface PlayerProfile {
+  playerId: string;
+  name: string;
+  score: number;
+  maxCombo: number;
+  merges: number;
+  at: number;
+  /** 每次刷新 +1。 */
+  revision: number;
+  /** 最後一次推上排行榜的 `revision`。 */
+  uploaded: number;
 }
 
 /** 三種分類各自的取值。 */
@@ -257,6 +299,9 @@ function parseEntry(raw: unknown): LeaderboardEntry | null {
   if (raw === null || typeof raw !== 'object') return null;
 
   const candidate = raw as Record<string, unknown>;
+  const id = candidate['id'];
+  if (typeof id !== 'string' || id === '') return null;
+
   const score = toCount(candidate['score']);
   const maxCombo = toCount(candidate['maxCombo']);
   const merges = toCount(candidate['merges']);
@@ -264,46 +309,138 @@ function parseEntry(raw: unknown): LeaderboardEntry | null {
 
   if (score === null || maxCombo === null || merges === null || at === null) return null;
 
-  const id = typeof candidate['id'] === 'string' ? candidate['id'] : '';
   const name = typeof candidate['name'] === 'string' ? candidate['name'] : '';
 
   return { id, name, score, maxCombo, merges, at };
 }
 
-/** 解析存下來的紀錄陣列；壞掉一律當作空的。 */
-function parseEntries(text: string | null): LeaderboardEntry[] {
-  if (text === null) return [];
+/** 解析紀錄陣列；壞掉一律當作空的。 */
+function parseEntries(raw: unknown): LeaderboardEntry[] {
+  if (!Array.isArray(raw)) return [];
 
-  try {
-    const parsed: unknown = JSON.parse(text);
-    if (!Array.isArray(parsed)) return [];
-
-    const entries: LeaderboardEntry[] = [];
-    for (const raw of parsed) {
-      const entry = parseEntry(raw);
-      if (entry !== null) entries.push(entry);
-    }
-
-    return entries;
-  } catch {
-    return [];
+  const entries: LeaderboardEntry[] = [];
+  for (const item of raw) {
+    const entry = parseEntry(item);
+    if (entry !== null) entries.push(entry);
   }
+
+  return entries;
+}
+
+/** 解析本機紀錄；壞掉回傳 null（呼叫端會退回空的）。 */
+function parseProfile(raw: unknown): PlayerProfile | null {
+  if (raw === null || typeof raw !== 'object') return null;
+
+  const candidate = raw as Record<string, unknown>;
+  const playerId = candidate['playerId'];
+  if (typeof playerId !== 'string' || playerId === '') return null;
+
+  const score = toCount(candidate['score']);
+  const maxCombo = toCount(candidate['maxCombo']);
+  const merges = toCount(candidate['merges']);
+  const at = toCount(candidate['at']);
+  const revision = toCount(candidate['revision']);
+  const uploaded = toCount(candidate['uploaded']);
+
+  if (
+    score === null ||
+    maxCombo === null ||
+    merges === null ||
+    at === null ||
+    revision === null ||
+    uploaded === null
+  ) {
+    return null;
+  }
+
+  return {
+    playerId,
+    name: typeof candidate['name'] === 'string' ? candidate['name'] : '',
+    score,
+    maxCombo,
+    merges,
+    at,
+    revision,
+    /* `uploaded` 不可以超過 `revision`，否則「有待上載的更新」永遠不成立。 */
+    uploaded: Math.min(uploaded, revision),
+  };
+}
+
+/** 空的本機紀錄。 */
+function emptyProfile(playerId: string): PlayerProfile {
+  return {
+    playerId,
+    name: '',
+    score: 0,
+    maxCombo: 0,
+    merges: 0,
+    at: 0,
+    revision: 0,
+    uploaded: 0,
+  };
 }
 
 /**
- * 保留每個分類各自的 Top `limit` 聯集。
- * Keep the union of each category's own top `limit`.
+ * 舊格式（每局一筆）的榜 → 一位玩家一筆。
+ * The old per-run board collapsed into one row per player.
  *
- * 這是「三個分頁都要正確」的最小代價：只存分數的前十名，COMBO 分頁就永遠看不到那些
- * 「分數不高但連擊很長」的場次。
- * This is the least storage that keeps all three tabs correct: keeping only the score top ten
- * would hide every high-combo, low-score run from the COMBO tab forever.
+ * 舊版的鍵存的是一個裸陣列，每一局一筆。使用者定案改成「每位玩家一筆、只保留最佳」之後，
+ * 那些歷史紀錄的唯一合理去處就是：三個數值各取最大值，合成一筆。
+ * The old key held a bare array with one row per run. Now that the model is one row per player
+ * holding the best, the only sensible home for that history is to take the maximum of each of
+ * the three values and fold it into a single row.
+ */
+function collapseLegacy(rows: readonly LeaderboardEntry[], playerId: string): LeaderboardEntry | null {
+  if (rows.length === 0) return null;
+
+  /*
+   * 名字取**最新那一筆非空的**：玩家大半是先玩、後命名，所以越新的紀錄越可能帶著他現在
+   * 用的名字。
+   * The name comes from the **newest non-empty** row: players usually play first and name
+   * themselves later, so the most recent rows are the ones likely to carry the name in use.
+   */
+  const newestName =
+    [...rows].sort((a, b) => b.at - a.at).find((row) => row.name !== '')?.name ?? '';
+
+  return {
+    id: playerId,
+    name: newestName,
+    score: Math.max(...rows.map((row) => row.score)),
+    maxCombo: Math.max(...rows.map((row) => row.maxCombo)),
+    merges: Math.max(...rows.map((row) => row.merges)),
+    at: Math.max(...rows.map((row) => row.at)),
+  };
+}
+
+/** 把一筆榜上的紀錄轉成本機紀錄（給遷移用）。 */
+function profileFromEntry(entry: LeaderboardEntry, playerId: string, revision: number): PlayerProfile {
+  return {
+    playerId,
+    name: entry.name,
+    score: entry.score,
+    maxCombo: entry.maxCombo,
+    merges: entry.merges,
+    at: entry.at,
+    revision,
+    /* 遷移過來的那一筆還沒上載過，所以 `uploaded` 留在 0：下次 `sync()` 會推上去。 */
+    uploaded: 0,
+  };
+}
+
+/**
+ * 保留每個分類各自的 Top `limit`。
+ * Keep each category's own top `limit`.
+ *
+ * 三個分頁都要正確的最小代價：只存分數的前十名，COMBO 分頁就永遠看不到那些「分數不高但連擊
+ * 很長」的玩家。
+ * The least storage that keeps all three tabs correct: keeping only the score top ten would hide
+ * every high-combo, low-score player from the COMBO tab forever.
  */
 function capEntries(entries: readonly LeaderboardEntry[], limit: number): LeaderboardEntry[] {
   const kept = new Map<string, LeaderboardEntry>();
 
   for (const category of LEADERBOARD_CATEGORIES) {
-    const top = [...entries].sort((a, b) => compareBy(category.id, a, b)).slice(0, limit);
+    const top = [...entries].sort((a, b) => compareBy(category, a, b)).slice(0, limit);
     for (const entry of top) kept.set(entry.id, entry);
   }
 
@@ -319,33 +456,171 @@ function defaultStorage(): ProgressStorage | null {
   }
 }
 
+/** 鑄一個玩家識別碼。 */
+function mintId(): string {
+  const uuid = globalThis.crypto?.randomUUID;
+  return typeof uuid === 'function'
+    ? uuid.call(globalThis.crypto)
+    : `${String(Date.now())}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): LeaderboardSource {
   const storage = options.storage === undefined ? defaultStorage() : options.storage;
   const limit = Math.max(1, Math.trunc(options.limit ?? LEADERBOARD_LIMIT));
   const now = options.now ?? ((): number => Date.now());
-  const idFactory =
-    options.idFactory ??
-    ((): string => {
-      const uuid = globalThis.crypto?.randomUUID;
-      return typeof uuid === 'function'
-        ? uuid.call(globalThis.crypto)
-        : `${String(now())}-${Math.random().toString(36).slice(2, 10)}`;
-    });
+  const salt = options.salt ?? CONTENT_SALT;
 
   const entriesKey = options.keys?.entries ?? STORAGE_KEYS.leaderboard;
   const nameKey = options.keys?.name ?? STORAGE_KEYS.playerName;
   const sharingKey = options.keys?.sharing ?? STORAGE_KEYS.shareScore;
   const promptKey = options.keys?.prompt ?? STORAGE_KEYS.publishPrompt;
-
-  let entries = storage === null ? [] : parseEntries(readItem(storage, entriesKey));
-  let displayName = storage === null ? '' : (readItem(storage, nameKey) ?? '');
-  let sharing = storage === null ? false : readItem(storage, sharingKey) === 'true';
-  let publishPromptDone = storage === null ? false : readItem(storage, promptKey) === 'true';
+  const profileKey = options.keys?.profile ?? STORAGE_KEYS.profile;
+  const deviceKey = options.keys?.device ?? STORAGE_KEYS.deviceId;
 
   const listeners = new Set<() => void>();
 
   const notify = (): void => {
     for (const listener of listeners) listener();
+  };
+
+  const readBoard = (): LeaderboardEntry[] => {
+    if (storage === null) return [];
+    return parseEntries(open(readItem(storage, entriesKey), salt));
+  };
+
+  const writeBoard = (): void => {
+    if (storage === null) return;
+    writeItem(storage, entriesKey, seal(entries, salt));
+  };
+
+  const writeProfile = (): void => {
+    if (storage === null) return;
+    writeItem(storage, profileKey, seal(profile, salt));
+  };
+
+  /* ── 身份 ────────────────────────────────────────────────────────────
+   * 玩家識別碼優先取本機紀錄裡的那一個（身份跟著紀錄走，裝置鍵被清掉也認得回來），
+   * 其次取裝置鍵，都沒有才鑄一個。
+   * The player id comes from the local record first (identity travels with the record, so losing
+   * the device key does not orphan it), then from the device key, and is minted only if neither
+   * exists.
+   */
+  const storedProfile = storage === null ? null : parseProfile(open(readItem(storage, profileKey), salt));
+  const storedDevice = storage === null ? '' : (readItem(storage, deviceKey) ?? '');
+  const playerId =
+    options.playerId ?? storedProfile?.playerId ?? (storedDevice !== '' ? storedDevice : mintId());
+
+  if (storage !== null && storedDevice !== playerId) writeItem(storage, deviceKey, playerId);
+
+  /* ── 榜 ──────────────────────────────────────────────────────────────
+   * 先讀原始字串：舊格式是一個裸陣列（每局一筆），新格式是信封（一筆一位玩家）。兩者要分開
+   * 處理，而 `open()` 對舊格式只會回 `null`。
+   * Read the raw text first: the old format is a bare array (one row per run) and the new one is
+   * an envelope (one row per player). They need separate handling, and `open()` just returns
+   * `null` for the old one.
+   */
+  const rawBoard = storage === null ? null : readItem(storage, entriesKey);
+
+  let entries: LeaderboardEntry[];
+  let legacy: LeaderboardEntry[] | null = null;
+
+  try {
+    const parsed: unknown = rawBoard === null ? null : JSON.parse(rawBoard);
+    legacy = Array.isArray(parsed) ? parseEntries(parsed) : null;
+  } catch {
+    legacy = null;
+  }
+
+  if (legacy !== null) {
+    const collapsed = collapseLegacy(legacy, playerId);
+    entries = collapsed === null ? [] : [collapsed];
+
+    if (collapsed !== null) {
+      const name = storage === null ? '' : (readItem(storage, nameKey) ?? '');
+      if (name !== '') entries = [{ ...collapsed, name }];
+    }
+  } else {
+    entries = readBoard();
+  }
+
+  let profile: PlayerProfile =
+    storedProfile ??
+    (() => {
+      /* 沒有本機紀錄時，用榜上自己那一筆當起點；連那一筆都沒有就是空的。 */
+      const mine = entries.find((entry) => entry.id === playerId);
+      return mine === undefined ? emptyProfile(playerId) : profileFromEntry(mine, playerId, 1);
+    })();
+
+  /*
+   * 名字是**設定**，以 `player-name` 為準 —— 但「沒有這個鍵」與「鍵裡是空的」是兩件事：
+   * 前者是舊存檔遷移過來（名字本來只存在紀錄裡），後者是玩家自己把名字清掉了，不該幫他填回去。
+   * The name is a **setting**, so `player-name` wins — but "the key is absent" and "the key is
+   * empty" are different things: the first is a migrated old save (where the name only ever lived
+   * on the records), the second is the player clearing it on purpose, which must not be undone.
+   */
+  const savedName = storage === null ? null : readItem(storage, nameKey);
+  let displayName = savedName ?? profile.name;
+
+  let sharing = storage === null ? false : readItem(storage, sharingKey) === 'true';
+  let publishPromptDone = storage === null ? false : readItem(storage, promptKey) === 'true';
+
+  if (displayName !== '') {
+    profile = { ...profile, name: displayName };
+    const index = entries.findIndex((entry) => entry.id === playerId);
+    if (index >= 0) {
+      entries = entries.map((entry, at) => (at === index ? { ...entry, name: displayName } : entry));
+    }
+    /* 名字是從紀錄裡撿回來的，就順手把它補進設定，之後兩邊才不會各說各話。 */
+    if (savedName === null && storage !== null) writeItem(storage, nameKey, displayName);
+  }
+
+  /* 遷移結果要落地，否則下次開啟又會走一次舊格式。 */
+  if (legacy !== null) {
+    writeBoard();
+    writeProfile();
+  }
+
+  /** 把本機紀錄的那一筆寫上（或更新）榜。 */
+  const push = (): void => {
+    const row: LeaderboardEntry = {
+      id: profile.playerId,
+      name: displayName,
+      score: profile.score,
+      maxCombo: profile.maxCombo,
+      merges: profile.merges,
+      at: profile.at,
+    };
+
+    const index = entries.findIndex((entry) => entry.id === playerId);
+    const updated =
+      index >= 0 ? entries.map((entry, at) => (at === index ? row : entry)) : [...entries, row];
+
+    entries = capEntries(updated, limit);
+    writeBoard();
+
+    profile = { ...profile, name: displayName, uploaded: profile.revision };
+    writeProfile();
+  };
+
+  /**
+   * 上載：把本機紀錄推上榜。
+   * Upload: push the local record onto the board.
+   *
+   * 兩個前提都成立才會動：玩家同意分享、而且有一筆還沒送出去的更新（`revision` 領先
+   * `uploaded`）。後者是「上次回來之後又刷新過」的判準，也是「下次回來如有更新就上載」的
+   * 實作。
+   * Both preconditions must hold: consent, and an update that has not been sent (`revision`
+   * ahead of `uploaded`). The second is what "there is something newer than last time" means, and
+   * it is how "upload on the next visit if anything changed" is implemented.
+   */
+  const sync = (): boolean => {
+    if (!sharing) return false;
+    if (profile.revision === profile.uploaded) return false;
+
+    push();
+    notify();
+
+    return true;
   };
 
   return {
@@ -354,24 +629,30 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
     },
 
     setDisplayName(name: string): void {
+      if (name === displayName) return;
+
       displayName = name;
       if (storage !== null) writeItem(storage, nameKey, name);
 
       /*
-       * 認領先前「未命名」的紀錄。
-       * Claim the previously unnamed records.
-       *
-       * 發布列是在排行榜彈窗裡才問名稱的，所以玩家多半先玩了好幾局、之後才命名 —— 那些場次
-       * 記下時 `displayName` 還是空字串。命名之後若不去認領，他會在榜上看到一堆「（未命名）」
-       * 而以為「自己的紀錄不見了」。只認領空名的，有名字的不動。
-       * The publish bar asks for a name inside the leaderboard popup, so the player usually plays
-       * several runs before naming himself — those entries were stored while `displayName` was an
-       * empty string. Without claiming them he would see a board full of "（未命名）" and conclude
-       * his records are missing. Only empty names are claimed; named entries are left untouched.
+       * 本機紀錄的名字跟著改，並把 `revision` 往上推一次 —— 名字也是要上載的東西之一，
+       * 推過了才知道下次 `sync()` 得再送一趟。
+       * The local record's name follows, and the revision moves up once: the name is part of what
+       * gets uploaded, so bumping it is what tells the next `sync()` to send again.
        */
-      if (name !== '' && entries.some((entry) => entry.name === '')) {
-        entries = entries.map((entry) => (entry.name === '' ? { ...entry, name } : entry));
-        if (storage !== null) writeItem(storage, entriesKey, JSON.stringify(entries));
+      profile = { ...profile, name, revision: profile.revision + 1 };
+      writeProfile();
+
+      /*
+       * 榜上自己那一筆（如果已經在上面）一起改名。**不會新增一筆** —— 找到的是自己那個
+       * `playerId` 的那一列。
+       * The player's row on the board (if it is up there) is renamed too, and **no row is added**:
+       * what gets found is the row carrying this `playerId`.
+       */
+      const index = entries.findIndex((entry) => entry.id === playerId);
+      if (index >= 0) {
+        entries = entries.map((entry, at) => (at === index ? { ...entry, name } : entry));
+        writeBoard();
       }
 
       notify();
@@ -382,8 +663,20 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
     },
 
     setSharing(on: boolean): void {
-      sharing = on;
-      if (storage !== null) writeItem(storage, sharingKey, on ? 'true' : 'false');
+      if (sharing !== on) {
+        sharing = on;
+        if (storage !== null) writeItem(storage, sharingKey, on ? 'true' : 'false');
+      }
+
+      /*
+       * 同意的那一刻就推一次。使用者定案：「在用戶同意分享下，不需要用戶手動按下上載記錄」，
+       * 所以「同意」本身就是上載的觸發點，而不是等玩家在某處再按一顆按鈕。
+       * Consent itself is the trigger: the user's decision is that a player who has agreed should
+       * never have to press an upload button. `sync()` notifies when it does something, so only
+       * the paths that changed nothing need to notify here.
+       */
+      if (on && sync()) return;
+
       notify();
     },
 
@@ -399,62 +692,62 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
       notify();
     },
 
-    record(run: LeaderboardRun): void {
+    record(run: LeaderboardRun): boolean {
+      const score = toCount(run.score) ?? 0;
+      const maxCombo = toCount(run.maxCombo) ?? 0;
+      const merges = toCount(run.merges) ?? 0;
+
       /*
-       * 同一局用 `runId` upsert，沒有 id 才新增一筆。數值一律以**這一次**為準 —— 一局可能
-       * 先被記成中途的成績（背景分頁、按儲存），之後再被記成最終成績，後者要蓋掉前者。
-       * With a `runId` the same run upserts; only a run without an id appends. The numbers always
-       * come from *this* call: a run may first be recorded mid-way (tab hidden, save pressed) and
-       * later with its final score, and the later recording must win.
+       * 三個數值**各自**比大小，而且只要有一個沒刷新就整個不動 —— 包括時間戳。所以「關分頁
+       * 前又記了一次中途成績」不會把那筆紀錄的時間改成現在。
+       * The three values are compared **independently**, and nothing moves unless at least one of
+       * them improved — the timestamp included. Recording a mid-run score on the way out therefore
+       * does not restamp the record.
        */
-      const fields = {
-        name: displayName,
-        score: toCount(run.score) ?? 0,
-        maxCombo: toCount(run.maxCombo) ?? 0,
-        merges: toCount(run.merges) ?? 0,
+      if (score <= profile.score && maxCombo <= profile.maxCombo && merges <= profile.merges) {
+        return false;
+      }
+
+      profile = {
+        ...profile,
+        score: Math.max(profile.score, score),
+        maxCombo: Math.max(profile.maxCombo, maxCombo),
+        merges: Math.max(profile.merges, merges),
         at: toCount(run.at) ?? now(),
+        revision: profile.revision + 1,
       };
 
-      const id = run.runId ?? idFactory();
-      const index = run.runId === undefined ? -1 : entries.findIndex((entry) => entry.id === id);
-
-      const updated =
-        index >= 0
-          ? entries.map((entry, at) => (at === index ? { ...entry, ...fields } : entry))
-          : [...entries, { id, ...fields }];
-
-      entries = capEntries(updated, limit);
-      if (storage !== null) writeItem(storage, entriesKey, JSON.stringify(entries));
+      writeProfile();
       notify();
+
+      return true;
     },
+
+    sync,
 
     snapshot(category: LeaderboardCategory, requested?: number): LeaderboardSnapshot {
       const take = Math.max(1, Math.trunc(requested ?? limit));
 
       /*
-       * 同意分享之前不上榜（使用者定案）：紀錄照記，但榜是空的，同意後一併現身。
-       * Nothing appears until sharing is on (the user's decision): runs are still recorded,
-       * the board just reads empty, and turning sharing on reveals them all at once.
+       * 同意之前榜是空的。這一條同時是「同意後立刻看得到自己」的原因：`setSharing(true)`
+       * 會先 `sync()` 才通知。
+       * Empty until consent. It is also why consenting shows the player himself immediately:
+       * `setSharing(true)` syncs before it notifies.
        */
       const visible = sharing ? entries : [];
       const sorted = [...visible].sort((a, b) => compareBy(category, a, b));
       const top = sorted.slice(0, take);
 
-      const best = sorted[0];
-      if (best === undefined) return { category, entries: top, self: null };
+      const rank = sorted.findIndex((entry) => entry.id === playerId);
+      const mine = rank < 0 ? undefined : sorted[rank];
 
-      const total = sorted.length;
-      const below = sorted.filter((entry) => valueOf(entry, category) < valueOf(best, category)).length;
+      /* 自己不在榜上（未同意、或還沒上載過）時 `self` 是 `null`。 */
+      if (mine === undefined) return { category, entries: top, self: null };
 
       return {
         category,
         entries: top,
-        self: {
-          rank: 1,
-          entry: best,
-          percentile: Math.round((below / total) * 100),
-          total,
-        },
+        self: { rank: rank + 1, entry: mine, total: sorted.length },
       };
     },
 

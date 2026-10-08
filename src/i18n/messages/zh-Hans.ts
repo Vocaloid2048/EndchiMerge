@@ -52,7 +52,7 @@ export const zhHans: Messages = {
   'leaderboard.unnamed': '（未命名）',
   'leaderboard.comboValue': '{value} 连',
   'leaderboard.mergesValue': '{value} 次',
-  'leaderboard.self': '你的最佳：{value}（{score} 分）· 超越你自己 {percentile}% 的场次（共 {total} 场）',
+  'leaderboard.self': '你的最佳：{value}（{score} 分）· 第 {rank} 名，共 {total} 位玩家',
   'leaderboard.tab.score': '最高分数',
   'leaderboard.tab.combo': 'COMBO 数',
   'leaderboard.tab.merges': '合成数',
@@ -95,7 +95,8 @@ export const zhHans: Messages = {
   'settings.language.note': '默认依照你的设备或浏览器语言自动选择。',
   'settings.leaderboard.heading': '排行榜',
   'settings.leaderboard.subtitle': '显示名称与分享意愿',
-  'settings.leaderboard.note': '未同意分享时，成绩不会上排行榜；之后随时可以回来更改。',
+  'settings.leaderboard.note':
+    '未同意分享时，成绩不会上排行榜。同意之后，之后的成绩会自动上传，不必再手动保存；随时可以回来更改。',
 
   'help.title': '游戏说明',
   'help.close': '关闭说明',

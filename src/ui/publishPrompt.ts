@@ -35,8 +35,6 @@ export interface PublishPromptOptions {
   host: HTMLElement;
   /** 設定來源。 */
   source: LeaderboardSource;
-  /** 儲存成功且同意分享後呼叫（把正在進行的一局交出去）。 */
-  onPublish?: () => void;
   /** 儲存成功之後呼叫；`main.ts` 用它接著開榜，讓玩家立刻看到自己。 */
   onSaved?: () => void;
 }
@@ -49,7 +47,7 @@ export interface PublishPromptView {
 }
 
 export function createPublishPrompt(options: PublishPromptOptions): PublishPromptView {
-  const { source, onPublish, onSaved } = options;
+  const { source, onSaved } = options;
 
   const root = el('section', 'publish-prompt');
   root.hidden = true;
@@ -77,9 +75,14 @@ export function createPublishPrompt(options: PublishPromptOptions): PublishPromp
    */
   const fields = createPublishFields({
     source,
-    ...(onPublish === undefined ? {} : { onPublish }),
     onCommitted: (): void => {
-      /* 儲存即回答；接著開榜讓玩家立刻看到剛上榜的那一筆。 */
+      /*
+       * 儲存即回答。上載不必在這裡做 —— 勾了同意之後，`setSharing(true)` 已經把本機紀錄推上
+       * 榜了（見 `game/leaderboard.ts`）。這裡只負責開榜，讓玩家立刻看到剛上榜的那一筆。
+       * Saving is the answer. No upload belongs here: ticking consent already pushed the local
+       * record (see `game/leaderboard.ts`). This only opens the board so the player sees the row
+       * that just went up.
+       */
       source.finishPublishPrompt();
       close();
       onSaved?.();

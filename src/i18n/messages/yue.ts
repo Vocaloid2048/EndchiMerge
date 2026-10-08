@@ -59,7 +59,7 @@ export const yue: Messages = {
   'leaderboard.comboValue': '{value} 連',
   'leaderboard.mergesValue': '{value} 次',
   'leaderboard.self':
-    '最佳：{value}（{score} 分）· 超越你自己 {percentile}% 的場次（共 {total} 場）',
+    '你嘅最佳：{value}（{score} 分）· 第 {rank} 名，共 {total} 位玩家',
   'leaderboard.tab.score': '最高分數',
   'leaderboard.tab.combo': 'COMBO 數',
   'leaderboard.tab.merges': '合成數',
@@ -103,7 +103,8 @@ export const yue: Messages = {
   'settings.language.note': '預設跟返你部機或者瀏覽器嘅語言揀。',
   'settings.leaderboard.heading': '排行榜',
   'settings.leaderboard.subtitle': '顯示名稱同分享意願',
-  'settings.leaderboard.note': '唔同意分享嘅話，成績唔會Upload上去排行榜；隨時都可以改。',
+  'settings.leaderboard.note':
+    '唔同意分享嘅話，成績唔會上排行榜。同意咗之後，之後嘅成績會自己上載，唔使你手動撳掣；隨時都可以改。',
 
   'help.title': '遊戲說明',
   'help.close': '閂咗佢',

@@ -16,12 +16,16 @@
  * (`ui/publishPrompt.ts`) and edited in settings afterwards. This module only shows the board —
  * no input field, no save key.
  *
- * 這一支**不含任何規則或儲存**：榜單、名次、百分位全部由 `game/leaderboard.ts` 的
- * `LeaderboardSource` 報告。接上真後端時只需要換一個 `LeaderboardSource` 實作，這個檔案
- * 一行都不用動。
- * **No rules or storage live here**: the board, the ranks and the percentile all come from the
+ * 這一支**不含任何規則或儲存**：榜單、名次全部由 `game/leaderboard.ts` 的 `LeaderboardSource`
+ * 報告。接上真後端時只需要換一個 `LeaderboardSource` 實作，這個檔案一行都不用動。
+ * **No rules or storage live here**: the board and the ranks all come from the
  * `LeaderboardSource` in `game/leaderboard.ts`. Wiring up a real backend means swapping that one
  * implementation — this file does not change.
+ *
+ * 一筆紀錄是**一位玩家**（不是一局）：榜排的是玩家，每一行顯示該玩家在目前分頁那個分類的
+ * 最佳值。
+ * A row is a **player** rather than a run: the board ranks players, and each row shows that
+ * player's best in whichever category the current tab is showing.
  *
  * 尺寸是**設計稿像素**（掛在 `.stage-scale` 內，與整張畫布一起被 `ui/scale.ts` 等比縮放），
  * 與結算覆蓋層、確認對話框同一套座標語言。
@@ -107,7 +111,7 @@ function primaryValue(entry: LeaderboardEntry, category: LeaderboardCategory): s
 export function createLeaderboard(options: LeaderboardOptions): LeaderboardView {
   const { source } = options;
 
-  let category: LeaderboardCategory = LEADERBOARD_CATEGORIES[0]!.id;
+  let category: LeaderboardCategory = LEADERBOARD_CATEGORIES[0]!;
 
   const root = el('section', 'leaderboard');
   root.hidden = true;
@@ -139,10 +143,10 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
     button.type = 'button';
     button.setAttribute('role', 'tab');
     button.addEventListener('click', (): void => {
-      category = item.id;
+      category = item;
       render();
     });
-    tabButtons.set(item.id, button);
+    tabButtons.set(item, button);
     tabs.append(button);
   }
 
@@ -168,7 +172,7 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
     subtitle.textContent = t('leaderboard.subtitle', { limit: LEADERBOARD_LIMIT });
 
     for (const item of LEADERBOARD_CATEGORIES) {
-      tabButtons.get(item.id)!.textContent = t(TAB_KEYS[item.id]);
+      tabButtons.get(item)!.textContent = t(TAB_KEYS[item]);
     }
   }
 
@@ -222,18 +226,18 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
     }
 
     /*
-     * 百分位在本地是「超越你自己 X% 的場次」——跨玩家版本需要伺服器（見 `game/leaderboard.ts`）。
-     * 文案照這個事實寫，不假裝它是全球排名。
-     * The percentile is local — "beats X% of your own runs" — because a cross-player version
-     * needs the server (see `game/leaderboard.ts`). The copy says exactly that instead of
-     * pretending it is a global rank.
+     * 名次寫的是「第幾名／共幾位玩家」。本地只有自己一位，所以它現在讀起來會是「第 1 名，
+     * 共 1 位玩家」—— 這是實話：榜上確實只有一個人。跨玩家百分位要等伺服器，屆時補在同一格。
+     * The rank reads "Nth of M players". Locally there is only one player, so it reads "1st of 1"
+     * — which is the truth: the board really does hold one person. A cross-player percentile
+     * needs the server and lands in this same slot when it does.
      */
-    const { entry, percentile, total } = snapshot.self;
+    const { entry, rank, total } = snapshot.self;
     summary.hidden = false;
     summary.textContent = t('leaderboard.self', {
       value: primaryValue(entry, category),
       score: formatNumber(entry.score),
-      percentile,
+      rank,
       total,
     });
   }

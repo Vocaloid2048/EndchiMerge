@@ -37,13 +37,6 @@ export interface PublishFieldsOptions {
   /** 設定來源。 */
   source: LeaderboardSource;
   /**
-   * 儲存成功**且同意分享**之後呼叫。呼叫端用它在這一刻把「正在進行的一局」交出去 —— 玩家
-   * 按下儲存就預期看到自己的紀錄，不是等這一局結束。
-   * Called after a successful save **with sharing on**. The caller uses it to hand over the
-   * **run in progress**: the player expects to see his record as soon as save is pressed.
-   */
-  onPublish?: () => void;
-  /**
    * 內嵌儲存鍵按下且驗證通過之後呼叫。宿主用它收尾（關窗、開榜），不必自己去找那顆按鈕。
    * Called when the inset save key is pressed and validation passes. The host uses it to finish
    * up (close, open the board) without having to reach for the button itself.
@@ -86,7 +79,7 @@ const NAME_ERROR_KEYS: Readonly<Record<NameError, MessageKey>> = {
 let instanceCount = 0;
 
 export function createPublishFields(options: PublishFieldsOptions): PublishFields {
-  const { source, onPublish, onCommitted } = options;
+  const { source, onCommitted } = options;
 
   instanceCount += 1;
   const nameId = `publish-fields-name-${String(instanceCount)}`;
@@ -197,19 +190,24 @@ export function createPublishFields(options: PublishFieldsOptions): PublishField
     }
 
     source.setDisplayName(result.value);
+
+    /*
+     * 先寫名字再寫分享意願，順序不能顛倒：`setSharing(true)` 會**順手把本機紀錄推上榜**，
+     * 而那筆紀錄的名字取自來源，所以名字必須已經在裡面了。
+     * The name goes in before the consent, and the order matters: `setSharing(true)` **uploads the
+     * local record** as a side effect, and that record's name comes from the source — so the name
+     * has to be there first.
+     *
+     * 這裡**不再需要**任何「把這一局交出去」的呼叫：同意本身就是上載的觸發點（使用者定案：
+     * 同意分享的玩家不必再手動按上載）。
+     * No "hand over the run" call is needed any more: consent is itself the trigger (the user's
+     * decision: a player who has agreed should never have to press upload).
+     */
     source.setSharing(wantSharing);
     nameInput.value = result.value;
     lastError = null;
     error.hidden = true;
     refreshUnits();
-
-    /*
-     * 同意分享之後，把正在進行的一局也交出去。名稱已經先寫進來源，那一局才會掛上新名字
-     * （資料層會認領先前無名的紀錄）。
-     * After consenting, hand over the run in progress. The name is written first so that run
-     * carries it (the data layer claims the previously nameless records).
-     */
-    if (wantSharing) onPublish?.();
 
     return true;
   }

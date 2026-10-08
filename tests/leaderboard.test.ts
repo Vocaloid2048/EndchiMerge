@@ -2,15 +2,28 @@
  * 排行榜資料層與名稱驗證的單元測試。
  * Unit tests for the leaderboard data layer and display-name validation.
  *
- * 這個模組要在沒有伺服器的情況下仍然「像個榜」：三個分類各自排序正確、每局都記、同意之前
- * 不上榜、百分位誠實。以下每條都對應其中一項，用注入的假儲存體，不碰 `localStorage`。
- * The module has to behave like a real board without a server: each of the three categories
- * sorts correctly, every run is recorded, nothing shows before the player opts in, and the
- * percentile is honest. Each test below pins one of those, over an injected fake storage.
+ * 現在的模型是「**每位玩家一筆，每個分類最多一筆**」，所以這個模組要釘住的行為換了一批：
+ * 一局一局記下來只會是一行、只升不降、改名不新增紀錄、本機紀錄與上載分開、同意之前不上榜、
+ * 上載有觸發時機，以及存檔被手改過時認得出來。以下每條對應其中一項，用注入的假儲存體，
+ * 不碰 `localStorage`。
+ * The model is now **one row per player, at most one per category**, so the behaviours worth
+ * pinning have changed: repeated runs stay one row, numbers never go down, a rename adds nothing,
+ * the local record and the upload are separate, nothing shows before consent, the upload has
+ * trigger points, and a hand-edited save is noticed. Each test below pins one of those, over an
+ * injected fake storage.
+ *
+ * 「別人的榜」用 `seal()` 直接寫進假儲存體 —— 本地只有一位玩家，所以多人排序只能這樣造，
+ * 順便也就驗了摘要在正常情況下是通的（同一條路徑的另一半在下面被改壞時會失敗）。
+ * A board of "other players" is written straight into the fake storage with `seal()`: locally
+ * there is only one player, so multi-player ordering has to be staged this way — which doubles as
+ * proof that a well-formed digest passes, while the other half of the same path is shown to fail
+ * once it is corrupted.
  */
 
 import { describe, expect, it } from 'vitest';
+import { seal } from '../src/core/integrity';
 import { createLocalLeaderboard, LEADERBOARD_LIMIT } from '../src/game/leaderboard';
+import type { LeaderboardEntry } from '../src/game/leaderboard';
 import type { ProgressStorage } from '../src/game/progress';
 import {
   NAME_MAX_UNITS,
@@ -18,6 +31,9 @@ import {
   normalizeDisplayName,
   validateDisplayName,
 } from '../src/game/playerName';
+
+/** 測試用的鹽；與正式的那一組不同，正好也證明摘要不是寫死比對。 */
+const TEST_SALT = 'test-salt';
 
 /** 記憶體版的儲存體；可設定在寫入時拋錯，模擬無痕模式。 */
 class FakeStorage implements ProgressStorage {
@@ -39,13 +55,15 @@ class FakeStorage implements ProgressStorage {
   }
 }
 
-/** 讓 id 可預期，排序斷言才不會被隨機 id 影響。 */
-function idSequence(): () => string {
-  let next = 0;
-  return (): string => {
-    next += 1;
-    return `e${String(next)}`;
-  };
+/** 榜上某一列（別人），供排序與裁切的測試用來擺位。 */
+function playerRow(
+  id: string,
+  score: number,
+  maxCombo: number,
+  merges: number,
+  at = 1,
+): LeaderboardEntry {
+  return { id, name: id, score, maxCombo, merges, at };
 }
 
 /** 驗證失敗的原因；通過時字串 'ok'。讓斷言不必先做型別窄化。 */
@@ -116,30 +134,32 @@ describe('validateDisplayName — 名稱規則 / name rules', () => {
   });
 });
 
-describe('createLocalLeaderboard — 紀錄與排序 / recording and ordering', () => {
-  function makeBoard(limit = LEADERBOARD_LIMIT) {
-    const storage = new FakeStorage();
-    const board = createLocalLeaderboard({
-      storage,
-      limit,
-      idFactory: idSequence(),
-      now: (): number => 1_700_000_000_000,
-      keys: { entries: 'e', name: 'n', sharing: 's', prompt: 'p' },
-    });
+/** 建一個榜；`seed` 是「別人的榜」，會在讀取之前寫進去。 */
+function makeBoard(limit = LEADERBOARD_LIMIT, seed?: readonly LeaderboardEntry[]) {
+  const storage = new FakeStorage();
+  if (seed !== undefined) storage.seed('e', seal(seed, TEST_SALT));
 
-    return { storage, board };
-  }
-
-  it('starts empty: nothing is recorded until a run ends', () => {
-    const { board } = makeBoard();
-
-    for (const category of ['score', 'combo', 'merges'] as const) {
-      expect(board.snapshot(category).entries).toHaveLength(0);
-      expect(board.snapshot(category).self).toBeNull();
-    }
+  const board = createLocalLeaderboard({
+    storage,
+    limit,
+    playerId: 'me',
+    salt: TEST_SALT,
+    now: (): number => 1_700_000_000_000,
+    keys: { entries: 'e', name: 'n', sharing: 's', prompt: 'p', profile: 'pr', device: 'd' },
   });
 
-  it('keeps every run out of the board until sharing is on', () => {
+  return { storage, board };
+}
+
+describe('createLocalLeaderboard — 一位玩家一筆 / one row per player', () => {
+  it('starts empty: nothing is on the board before the first run', () => {
+    const { board } = makeBoard();
+
+    expect(board.snapshot('score').entries).toHaveLength(0);
+    expect(board.snapshot('score').self).toBeNull();
+  });
+
+  it('shows nothing at all until consent is given', () => {
     const { board } = makeBoard();
 
     board.record({ score: 500, maxCombo: 3, merges: 4 });
@@ -149,199 +169,424 @@ describe('createLocalLeaderboard — 紀錄與排序 / recording and ordering', 
     expect(board.snapshot('score').entries).toHaveLength(1);
   });
 
-  it('sorts each category by its own value, not by score', () => {
+  it('folds every run into one row instead of adding one per run', () => {
     const { board } = makeBoard();
     board.setSharing(true);
 
-    board.record({ score: 900, maxCombo: 1, merges: 2, at: 1 });
-    board.record({ score: 100, maxCombo: 40, merges: 3, at: 2 });
-    board.record({ score: 300, maxCombo: 5, merges: 60, at: 3 });
-
-    expect(board.snapshot('score').entries.map((e) => e.score)).toEqual([900, 300, 100]);
-    expect(board.snapshot('combo').entries.map((e) => e.maxCombo)).toEqual([40, 5, 1]);
-    expect(board.snapshot('merges').entries.map((e) => e.merges)).toEqual([60, 3, 2]);
-  });
-
-  it('caps the board at the limit', () => {
-    const { board } = makeBoard(3);
-    board.setSharing(true);
-
-    for (let i = 1; i <= 8; i += 1) {
-      board.record({ score: i * 10, maxCombo: i, merges: i });
-    }
-
-    expect(board.snapshot('score').entries).toHaveLength(3);
-    expect(board.snapshot('score').entries.map((e) => e.score)).toEqual([80, 70, 60]);
-  });
-
-  it(`shows ${String(LEADERBOARD_LIMIT)} rows by default`, () => {
-    /*
-     * 使用者的定案（Top 10 → Top 100）改變的是**預設上限**，而預設值同時決定「儲存時保留
-     * 每類前 N 名的聯集」要保留多少 —— 所以這裡一併釘住，避免哪天有人只改一半。
-     * The user's decision (Top 10 → Top 100) changed the **default cap**, and that same cap
-     * decides how many rows the per-category union keeps on disk — so both are pinned here.
-     */
-    const { board } = makeBoard();
-    board.setSharing(true);
-
-    for (let i = 1; i <= LEADERBOARD_LIMIT + 5; i += 1) {
-      board.record({ score: i, maxCombo: i, merges: i });
-    }
-
-    const entries = board.snapshot('score').entries;
-    expect(entries).toHaveLength(LEADERBOARD_LIMIT);
-    expect(entries[0]?.score).toBe(LEADERBOARD_LIMIT + 5);
-  });
-
-  it('keeps each category\'s top N correct even after many runs', () => {
-    /*
-     * 這條是「三個分頁都要正確」的核心：儲存時保留的是**每個分類各自前十的聯集**，
-     * 所以任何一個分類查出來的 Top N 都必須等於「全部紀錄中該分類的前 N 名」。
-     * 若哪天為了省空間改成只留分數前 N，這條會先壞在 COMBO／合成分頁上。
-     * The core of "all three tabs must be right": storage keeps the **union of each category's
-     * top N**, so any category's snapshot must equal the true top N of every recorded run. If
-     * someone trims by score alone to save space, this fails on the COMBO / merges tabs first.
-     */
-    const limit = 3;
-    const { board } = makeBoard(limit);
-    board.setSharing(true);
-
-    const runs = [
-      { score: 10, maxCombo: 50, merges: 1 },
-      { score: 90, maxCombo: 2, merges: 5 },
-      { score: 40, maxCombo: 30, merges: 2 },
-      { score: 70, maxCombo: 1, merges: 9 },
-      { score: 20, maxCombo: 40, merges: 3 },
-      { score: 60, maxCombo: 4, merges: 20 },
-      { score: 30, maxCombo: 10, merges: 40 },
-    ];
-    for (const run of runs) board.record(run);
-
-    for (const [category, key] of [
-      ['score', 'score'],
-      ['combo', 'maxCombo'],
-      ['merges', 'merges'],
-    ] as const) {
-      const expected = runs
-        .map((run) => run[key])
-        .sort((a, b) => b - a)
-        .slice(0, limit);
-      const actual = board.snapshot(category).entries.map((entry) => entry[key]);
-
-      expect(actual, category).toEqual(expected);
-    }
-  });
-
-  it('reports a percentile over the player\'s own runs', () => {
-    /*
-     * 本地沒有其他玩家，所以百分位是「超越你自己多少 % 的場次」；最高的一筆只計嚴格低於
-     * 自己的場次，所以永遠不會是 100。
-     * Locally there are no other players, so this is "beats X% of your own runs"; the top run
-     * counts only strictly-lower runs and therefore never reads 100.
-     */
-    const { board } = makeBoard();
-    board.setSharing(true);
-
-    for (const score of [10, 20, 30, 40]) board.record({ score, maxCombo: 0, merges: 0 });
-
-    const snapshot = board.snapshot('score');
-
-    expect(snapshot.self?.rank).toBe(1);
-    expect(snapshot.self?.entry.score).toBe(40);
-    expect(snapshot.self?.total).toBe(4);
-    expect(snapshot.self?.percentile).toBe(75);
-  });
-
-  it('gives a single recorded run a percentile of 0, not 100', () => {
-    const { board } = makeBoard();
-    board.setSharing(true);
-    board.record({ score: 10, maxCombo: 0, merges: 0 });
-
-    expect(board.snapshot('score').self?.percentile).toBe(0);
-  });
-
-  it('defaults the recorded name to whatever is set at the time', () => {
-    const { board } = makeBoard();
-    board.setSharing(true);
-    board.setDisplayName('阿爺');
-    board.record({ score: 1, maxCombo: 0, merges: 0 });
-
-    expect(board.snapshot('score').entries[0]?.name).toBe('阿爺');
-  });
-
-  it('upserts one row per run when the same runId is recorded again', () => {
-    /*
-     * 一局會在多處被記錄（自然結束、重新開始、分頁被隱藏、按儲存），全部都帶同一個 `runId`。
-     * 少了 upsert，同一局會變成好幾筆；有了它，後面記的成績只會覆蓋同一筆。
-     * A run is recorded from several places (game over, restart, page hidden, save pressed) and
-     * they all carry the same `runId`. Without the upsert the run turns into several rows; with
-     * it, a later recording just overwrites the same row.
-     */
-    const { board } = makeBoard();
-    board.setSharing(true);
-
-    board.record({ runId: 'run-1', score: 300, maxCombo: 2, merges: 3 });
-    board.record({ runId: 'run-1', score: 900, maxCombo: 5, merges: 7 });
+    board.record({ score: 100, maxCombo: 1, merges: 1 });
+    board.record({ score: 900, maxCombo: 2, merges: 2 });
+    board.record({ score: 300, maxCombo: 3, merges: 3 });
+    board.sync();
 
     const entries = board.snapshot('score').entries;
     expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({ id: 'run-1', score: 900, maxCombo: 5, merges: 7 });
+    expect(entries[0]).toMatchObject({ id: 'me', score: 900, maxCombo: 3, merges: 3 });
   });
 
-  it('keeps different runIds apart', () => {
+  it('never downgrades, and says so', () => {
+    const { board } = makeBoard();
+
+    expect(board.record({ score: 900, maxCombo: 40, merges: 60 })).toBe(true);
+    expect(board.record({ score: 100, maxCombo: 1, merges: 1 })).toBe(false);
+    expect(board.record({ score: 900, maxCombo: 40, merges: 60 })).toBe(false);
+
+    board.setSharing(true);
+    expect(board.snapshot('score').entries[0]).toMatchObject({
+      score: 900,
+      maxCombo: 40,
+      merges: 60,
+    });
+  });
+
+  it('takes the maximum of each of the three values independently', () => {
     const { board } = makeBoard();
     board.setSharing(true);
 
-    board.record({ runId: 'run-1', score: 100, maxCombo: 1, merges: 1 });
-    board.record({ runId: 'run-2', score: 200, maxCombo: 2, merges: 2 });
+    /* 高分局、低連擊。 */
+    board.record({ score: 900, maxCombo: 1, merges: 2 });
+    /* 低分但連擊很長的一局，會刷新 COMBO 與合成，卻不會碰到分數。 */
+    board.record({ score: 100, maxCombo: 40, merges: 60 });
+    board.sync();
 
-    expect(board.snapshot('score').entries.map((entry) => entry.id)).toEqual(['run-2', 'run-1']);
-  });
-
-  it('claims previously unnamed records when a name is set later', () => {
     /*
-     * 名稱是在排行榜彈窗裡才問的，所以玩家多半先玩、後命名 —— 那些場次記下時是無名的。
-     * 命名後它們必須歸到他名下，否則他會以為「自己的紀錄不見了」。
-     * The name is only asked for inside the popup, so the player usually plays first and names
-     * himself later — those runs were stored nameless. Naming must claim them, or he concludes
-     * his records are missing.
+     * 同一行的三個數字來自不同的局 —— 這是刻意的，否則 COMBO 分頁只會看到高分局。
+     * The three numbers on one row come from different runs, which is the point: tied to a single
+     * run, the COMBO tab would only ever show high-score games.
      */
-    const { board } = makeBoard();
-    board.setSharing(true);
-
-    board.record({ runId: 'r1', score: 100, maxCombo: 0, merges: 0 });
-    board.record({ runId: 'r2', score: 200, maxCombo: 0, merges: 0 });
-    expect(board.snapshot('score').entries.map((entry) => entry.name)).toEqual(['', '']);
-
-    board.setDisplayName('阿爺');
-
-    expect(board.snapshot('score').entries.map((entry) => entry.name)).toEqual(['阿爺', '阿爺']);
+    expect(board.snapshot('score').entries[0]).toMatchObject({
+      score: 900,
+      maxCombo: 40,
+      merges: 60,
+    });
   });
 
-  it('does not rename records that already carry a name', () => {
-    const { board } = makeBoard();
-    board.setSharing(true);
-
-    board.setDisplayName('阿爺');
-    board.record({ runId: 'r1', score: 100, maxCombo: 0, merges: 0 });
-    board.setDisplayName('阿嬤');
-    board.record({ runId: 'r2', score: 50, maxCombo: 0, merges: 0 });
-
-    expect(board.snapshot('score').entries.map((entry) => entry.name)).toEqual(['阿爺', '阿嬤']);
-  });
-
-  it('persists the claimed names through storage', () => {
+  it('leaves the timestamp alone when nothing improved', () => {
+    let clock = 1_000;
     const storage = new FakeStorage();
-    const keys = { entries: 'e', name: 'n', sharing: 's', prompt: 'p' };
-    const first = createLocalLeaderboard({ storage, keys, now: () => 5, idFactory: idSequence() });
-    first.setSharing(true);
-    first.record({ score: 77, maxCombo: 1, merges: 1 });
-    first.setDisplayName('阿爺');
+    const board = createLocalLeaderboard({
+      storage,
+      playerId: 'me',
+      salt: TEST_SALT,
+      now: () => clock,
+      keys: { entries: 'e', name: 'n', sharing: 's', prompt: 'p', profile: 'pr', device: 'd' },
+    });
 
-    const second = createLocalLeaderboard({ storage, keys, now: () => 5 });
-    expect(second.snapshot('score').entries[0]?.name).toBe('阿爺');
+    board.record({ score: 500, maxCombo: 1, merges: 1 });
+    clock = 9_000;
+    board.record({ score: 10, maxCombo: 1, merges: 1 });
+    board.setSharing(true);
+
+    /*
+     * 「關分頁前又記了一次中途成績」不該把那筆紀錄的時間改成現在 —— 那會讓榜上的日期變成
+     * 「最後一次離開」而不是「最後一次刷新」。
+     * Recording a mid-run score on the way out must not restamp the record, or the board's date
+     * becomes "when you last left" rather than "when you last improved".
+     */
+    expect(board.snapshot('score').entries[0]?.at).toBe(1_000);
   });
 
+  it('sorts each category by its own value, not by score', () => {
+    const { board } = makeBoard(LEADERBOARD_LIMIT, [
+      playerRow('a', 900, 1, 1),
+      playerRow('b', 500, 40, 2),
+      playerRow('c', 100, 5, 60),
+    ]);
+    board.setSharing(true);
+
+    expect(board.snapshot('score').entries.map((entry) => entry.id)).toEqual(['a', 'b', 'c']);
+    expect(board.snapshot('combo').entries.map((entry) => entry.id)).toEqual(['b', 'c', 'a']);
+    expect(board.snapshot('merges').entries.map((entry) => entry.id)).toEqual(['c', 'b', 'a']);
+  });
+
+  it('caps the board at the limit', () => {
+    const { board } = makeBoard(3, [
+      playerRow('a', 10, 1, 1),
+      playerRow('b', 20, 1, 1),
+      playerRow('c', 30, 1, 1),
+      playerRow('d', 40, 1, 1),
+    ]);
+    board.setSharing(true);
+
+    expect(board.snapshot('score').entries).toHaveLength(3);
+    expect(board.snapshot('score').entries.map((entry) => entry.id)).toEqual(['d', 'c', 'b']);
+  });
+
+  it(`shows ${String(LEADERBOARD_LIMIT)} rows by default`, () => {
+    const many = Array.from({ length: LEADERBOARD_LIMIT + 5 }, (_, index) =>
+      playerRow(`p${String(index)}`, index, index, index),
+    );
+    const { board } = makeBoard(LEADERBOARD_LIMIT, many);
+    board.setSharing(true);
+
+    const entries = board.snapshot('score').entries;
+    expect(entries).toHaveLength(LEADERBOARD_LIMIT);
+    expect(entries[0]?.id).toBe(`p${String(LEADERBOARD_LIMIT + 4)}`);
+  });
+
+  it("keeps each category's top N correct even after many players", () => {
+    /*
+     * 「分數最高」與「連擊最高」刻意不是同一個人：只按分數裁切會讓 COMBO 分頁一開始就偏斜。
+     * The top scorer and the top combo are deliberately different players: trimming by score alone
+     * would bias the COMBO tab from the start.
+     */
+    const many = Array.from({ length: 20 }, (_, index) => playerRow(`q${String(index)}`, index, 100 - index, 1));
+
+    const { board } = makeBoard(5, many);
+    board.setSharing(true);
+
+    expect(board.snapshot('score').entries.map((entry) => entry.score)).toEqual([19, 18, 17, 16, 15]);
+    expect(board.snapshot('combo').entries.map((entry) => entry.maxCombo)).toEqual([
+      100, 99, 98, 97, 96,
+    ]);
+  });
+
+  it("reports the player's own rank and the player count", () => {
+    const { board } = makeBoard(LEADERBOARD_LIMIT, [
+      playerRow('a', 900, 1, 1),
+      playerRow('b', 500, 1, 1),
+    ]);
+    board.setSharing(true);
+    board.record({ score: 600, maxCombo: 1, merges: 1 });
+    board.sync();
+
+    const self = board.snapshot('score').self;
+    expect(self?.rank).toBe(2);
+    expect(self?.total).toBe(3);
+    expect(self?.entry.id).toBe('me');
+  });
+
+  it('has no self row while the player is not on the board', () => {
+    const { board } = makeBoard(LEADERBOARD_LIMIT, [playerRow('a', 900, 1, 1)]);
+    board.setSharing(true);
+
+    expect(board.snapshot('score').self).toBeNull();
+  });
+});
+
+describe('createLocalLeaderboard — 改名 / renaming', () => {
+  it('renames the existing row instead of adding one', () => {
+    const { board } = makeBoard();
+    board.setSharing(true);
+
+    board.setDisplayName('阿爺');
+    board.record({ score: 300, maxCombo: 1, merges: 1 });
+    board.sync();
+
+    board.setDisplayName('阿嬤');
+    board.sync();
+
+    const entries = board.snapshot('score').entries;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.name).toBe('阿嬤');
+    expect(entries[0]?.score).toBe(300);
+  });
+
+  it('keeps the identity, so the record is not orphaned under the old name', () => {
+    const storage = new FakeStorage();
+    const keys = {
+      entries: 'e',
+      name: 'n',
+      sharing: 's',
+      prompt: 'p',
+      profile: 'pr',
+      device: 'd',
+    };
+
+    const first = createLocalLeaderboard({
+      storage,
+      keys,
+      salt: TEST_SALT,
+      playerId: 'me',
+      now: () => 5,
+    });
+    first.setSharing(true);
+    first.setDisplayName('阿爺');
+    first.record({ score: 77, maxCombo: 1, merges: 1 });
+    first.sync();
+
+    /*
+     * 重開一個「新工作階段」再改名。舊版就是在這裡出事的：只有「沒有名字」的紀錄會被認領，
+     * 所以改名之後那些記錄留在舊名底下，玩家看到的就是「我的紀錄不見了」。
+     * Reopen a "new session" and rename. This is exactly where the previous version failed: only
+     * nameless records were claimed, so after a rename the records stayed under the old name and
+     * the player concluded his record was gone.
+     */
+    const second = createLocalLeaderboard({ storage, keys, salt: TEST_SALT, now: () => 5 });
+    second.setDisplayName('阿嬤');
+
+    const entries = second.snapshot('score').entries;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ id: 'me', name: '阿嬤', score: 77 });
+  });
+
+  it('does nothing when the name is unchanged', () => {
+    const { board } = makeBoard();
+    let calls = 0;
+    board.subscribe(() => {
+      calls += 1;
+    });
+
+    board.setDisplayName('阿爺');
+    board.setDisplayName('阿爺');
+
+    expect(calls).toBe(1);
+  });
+});
+
+describe('createLocalLeaderboard — 上載 / uploading', () => {
+  it('does not upload without consent', () => {
+    const { storage, board } = makeBoard();
+
+    board.record({ score: 500, maxCombo: 1, merges: 1 });
+    expect(board.sync()).toBe(false);
+    expect(storage.getItem('e')).toBeNull();
+  });
+
+  it('uploads only when there is something new', () => {
+    const { board } = makeBoard();
+
+    board.record({ score: 500, maxCombo: 1, merges: 1 });
+    board.setSharing(true);
+    /* 剛才那一次 push 已經把 `uploaded` 追上 `revision`，所以再叫一次是空轉。 */
+    expect(board.sync()).toBe(false);
+
+    board.record({ score: 900, maxCombo: 1, merges: 1 });
+    expect(board.sync()).toBe(true);
+  });
+
+  it('uploads the moment consent is given, with no button pressed', () => {
+    const { board } = makeBoard();
+
+    board.record({ score: 500, maxCombo: 1, merges: 1 });
+    /* 「同意」本身就是上載的觸發點（使用者定案）。 */
+    board.setSharing(true);
+
+    expect(board.snapshot('score').entries).toHaveLength(1);
+    expect(board.snapshot('score').entries[0]?.score).toBe(500);
+  });
+
+  it('carries a pending record across a reload and uploads it on the next open', () => {
+    const storage = new FakeStorage();
+    const keys = {
+      entries: 'e',
+      name: 'n',
+      sharing: 's',
+      prompt: 'p',
+      profile: 'pr',
+      device: 'd',
+    };
+
+    /* 第一段：同意之後刷新了一次紀錄，但沒等到任何上載時機就關掉分頁。 */
+    const first = createLocalLeaderboard({
+      storage,
+      keys,
+      salt: TEST_SALT,
+      playerId: 'me',
+      now: () => 5,
+    });
+    first.setSharing(true);
+    first.setDisplayName('阿爺');
+    first.record({ score: 1234, maxCombo: 9, merges: 9 });
+    /* 刻意不 `sync()`：模擬直接關掉分頁。 */
+
+    /* 第二段：下次回來。 */
+    const second = createLocalLeaderboard({ storage, keys, salt: TEST_SALT, now: () => 5 });
+    expect(second.snapshot('score').entries).toHaveLength(0);
+    expect(second.sync()).toBe(true);
+
+    expect(second.snapshot('score').entries[0]).toMatchObject({
+      name: '阿爺',
+      score: 1234,
+      maxCombo: 9,
+    });
+  });
+});
+
+describe('createLocalLeaderboard — 防竄改 / tamper check', () => {
+  it('discards a board whose digest does not match', () => {
+    const storage = new FakeStorage();
+    const text = JSON.stringify([playerRow('cheater', 999_999, 999, 999)]);
+    storage.seed('e', JSON.stringify({ v: text, d: 'not-the-right-digest' }));
+
+    const board = createLocalLeaderboard({
+      storage,
+      salt: TEST_SALT,
+      playerId: 'me',
+      keys: { entries: 'e', name: 'n', sharing: 's', prompt: 'p', profile: 'pr', device: 'd' },
+    });
+    board.setSharing(true);
+
+    expect(board.snapshot('score').entries).toHaveLength(0);
+  });
+
+  it('discards a local record whose digest does not match', () => {
+    const storage = new FakeStorage();
+    const text = JSON.stringify({
+      playerId: 'me',
+      name: '阿爺',
+      score: 999_999,
+      maxCombo: 999,
+      merges: 999,
+      at: 1,
+      revision: 9,
+      uploaded: 9,
+    });
+    storage.seed('pr', JSON.stringify({ v: text, d: 'not-the-right-digest' }));
+
+    const board = createLocalLeaderboard({
+      storage,
+      salt: TEST_SALT,
+      playerId: 'me',
+      keys: { entries: 'e', name: 'n', sharing: 's', prompt: 'p', profile: 'pr', device: 'd' },
+    });
+
+    board.record({ score: 100, maxCombo: 1, merges: 1 });
+    board.setSharing(true);
+
+    /* 被改過的那一筆當作不存在，所以留下來的是真的打出來的分數。 */
+    expect(board.snapshot('score').entries[0]?.score).toBe(100);
+  });
+
+  it('accepts a board that was written by the store itself', () => {
+    const storage = new FakeStorage();
+    const keys = {
+      entries: 'e',
+      name: 'n',
+      sharing: 's',
+      prompt: 'p',
+      profile: 'pr',
+      device: 'd',
+    };
+
+    const first = createLocalLeaderboard({
+      storage,
+      keys,
+      salt: TEST_SALT,
+      playerId: 'me',
+      now: () => 5,
+    });
+    first.setSharing(true);
+    first.record({ score: 321, maxCombo: 2, merges: 3 });
+    first.sync();
+
+    const second = createLocalLeaderboard({ storage, keys, salt: TEST_SALT, now: () => 5 });
+    expect(second.snapshot('score').entries[0]).toMatchObject({ score: 321, maxCombo: 2, merges: 3 });
+  });
+});
+
+describe('createLocalLeaderboard — 舊存檔遷移 / migrating the old save', () => {
+  it('collapses a per-run history into one row holding the maxima', () => {
+    const storage = new FakeStorage();
+    storage.seed(
+      'e',
+      JSON.stringify([
+        { id: 'r1', name: '', score: 100, maxCombo: 2, merges: 30, at: 10 },
+        { id: 'r2', name: '阿爺', score: 900, maxCombo: 5, merges: 1, at: 20 },
+        { id: 'r3', name: '阿爺', score: 400, maxCombo: 9, merges: 3, at: 30 },
+      ]),
+    );
+
+    const board = createLocalLeaderboard({
+      storage,
+      salt: TEST_SALT,
+      playerId: 'me',
+      now: () => 5,
+      keys: { entries: 'e', name: 'n', sharing: 's', prompt: 'p', profile: 'pr', device: 'd' },
+    });
+    board.setSharing(true);
+
+    const entries = board.snapshot('score').entries;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: 'me',
+      name: '阿爺',
+      score: 900,
+      maxCombo: 9,
+      merges: 30,
+      at: 30,
+    });
+  });
+
+  it('writes the migrated save back in the new format', () => {
+    const storage = new FakeStorage();
+    storage.seed('e', JSON.stringify([{ id: 'r1', name: '阿爺', score: 5, maxCombo: 1, merges: 1, at: 1 }]));
+
+    createLocalLeaderboard({
+      storage,
+      salt: TEST_SALT,
+      playerId: 'me',
+      now: () => 5,
+      keys: { entries: 'e', name: 'n', sharing: 's', prompt: 'p', profile: 'pr', device: 'd' },
+    });
+
+    /* 新格式是信封，不再是裸陣列 —— 否則下次開啟會再遷移一次。 */
+    const raw = storage.getItem('e') ?? '';
+    expect(raw.startsWith('{')).toBe(true);
+    expect(JSON.parse(raw)).toHaveProperty('d');
+  });
+});
+
+describe('createLocalLeaderboard — 儲存體的邊界情況 / storage edge cases', () => {
   it('survives a corrupt save instead of throwing', () => {
     const { storage, board } = makeBoard();
     storage.seed('e', '{ not json');
@@ -349,20 +594,29 @@ describe('createLocalLeaderboard — 紀錄與排序 / recording and ordering', 
     expect(board.snapshot('score').entries).toHaveLength(0);
 
     /* 壞資料之後仍然可以正常記錄。 */
-    board.setSharing(true);
     board.record({ score: 5, maxCombo: 0, merges: 0 });
+    board.setSharing(true);
     expect(board.snapshot('score').entries).toHaveLength(1);
   });
 
   it('round-trips entries, name and sharing through storage', () => {
     const storage = new FakeStorage();
-    const keys = { entries: 'e', name: 'n', sharing: 's', prompt: 'p' };
-    const first = createLocalLeaderboard({ storage, keys, now: () => 5, idFactory: idSequence() });
+    const keys = {
+      entries: 'e',
+      name: 'n',
+      sharing: 's',
+      prompt: 'p',
+      profile: 'pr',
+      device: 'd',
+    };
+
+    const first = createLocalLeaderboard({ storage, keys, salt: TEST_SALT, playerId: 'me', now: () => 5 });
     first.setDisplayName('阿爺');
     first.setSharing(true);
     first.record({ score: 123, maxCombo: 7, merges: 8 });
+    first.sync();
 
-    const second = createLocalLeaderboard({ storage, keys, now: () => 5 });
+    const second = createLocalLeaderboard({ storage, keys, salt: TEST_SALT, now: () => 5 });
     expect(second.displayName).toBe('阿爺');
     expect(second.sharing).toBe(true);
     expect(second.snapshot('combo').entries[0]).toMatchObject({ score: 123, maxCombo: 7, merges: 8 });
@@ -371,8 +625,8 @@ describe('createLocalLeaderboard — 紀錄與排序 / recording and ordering', 
   it('falls back to memory when storage is unavailable', () => {
     const board = createLocalLeaderboard({ storage: null });
     board.setDisplayName('阿爺');
-    board.setSharing(true);
     board.record({ score: 42, maxCombo: 1, merges: 1 });
+    board.setSharing(true);
 
     expect(board.displayName).toBe('阿爺');
     expect(board.snapshot('score').entries[0]?.score).toBe(42);
@@ -381,11 +635,11 @@ describe('createLocalLeaderboard — 紀錄與排序 / recording and ordering', 
   it('does not crash when the storage refuses to write', () => {
     const storage = new FakeStorage();
     storage.failOnWrite = true;
-    const board = createLocalLeaderboard({ storage, idFactory: idSequence() });
+
+    const board = createLocalLeaderboard({ storage, salt: TEST_SALT, playerId: 'me' });
     board.setSharing(true);
 
     expect(() => board.record({ score: 1, maxCombo: 1, merges: 1 })).not.toThrow();
-    expect(board.snapshot('score').entries).toHaveLength(1);
   });
 
   it('notifies subscribers on record, rename and sharing changes', () => {
@@ -404,25 +658,43 @@ describe('createLocalLeaderboard — 紀錄與排序 / recording and ordering', 
     board.record({ score: 2, maxCombo: 2, merges: 2 });
     expect(calls).toBe(3);
   });
+
+  it('stays quiet when a recording improves nothing', () => {
+    const { board } = makeBoard();
+    let calls = 0;
+    board.subscribe((): void => {
+      calls += 1;
+    });
+
+    board.record({ score: 500, maxCombo: 5, merges: 5 });
+    expect(calls).toBe(1);
+
+    /* 每幀都會呼叫 `record()`，所以「沒有刷新就什麼都不做」是它便宜的原因。 */
+    for (let frame = 0; frame < 100; frame += 1) {
+      board.record({ score: 100, maxCombo: 1, merges: 1 });
+    }
+    expect(calls).toBe(1);
+  });
 });
 
 describe('createLocalLeaderboard — 首次的發布詢問 / the one-off publish prompt', () => {
-  function makeBoard(storage: FakeStorage | null) {
+  function makePromptBoard(storage: FakeStorage | null) {
     return createLocalLeaderboard({
       storage,
       now: (): number => 1_700_000_000_000,
-      idFactory: idSequence(),
-      keys: { entries: 'e', name: 'n', sharing: 's', prompt: 'p' },
+      salt: TEST_SALT,
+      playerId: 'me',
+      keys: { entries: 'e', name: 'n', sharing: 's', prompt: 'p', profile: 'pr', device: 'd' },
     });
   }
 
   it('starts un-asked, so the prompt shows on the first leaderboard open', () => {
-    expect(makeBoard(new FakeStorage()).publishPromptDone).toBe(false);
+    expect(makePromptBoard(new FakeStorage()).publishPromptDone).toBe(false);
   });
 
   it('remembers that the prompt has been dealt with, and stays idempotent', () => {
     const storage = new FakeStorage();
-    const board = makeBoard(storage);
+    const board = makePromptBoard(storage);
     let calls = 0;
     board.subscribe((): void => {
       calls += 1;
@@ -439,13 +711,13 @@ describe('createLocalLeaderboard — 首次的發布詢問 / the one-off publish
 
   it('survives a reload, so the prompt really is asked once', () => {
     const storage = new FakeStorage();
-    makeBoard(storage).finishPublishPrompt();
+    makePromptBoard(storage).finishPublishPrompt();
 
-    expect(makeBoard(storage).publishPromptDone).toBe(true);
+    expect(makePromptBoard(storage).publishPromptDone).toBe(true);
   });
 
   it('keeps the prompt state in memory when storage is unavailable', () => {
-    const board = makeBoard(null);
+    const board = makePromptBoard(null);
     board.finishPublishPrompt();
 
     expect(board.publishPromptDone).toBe(true);

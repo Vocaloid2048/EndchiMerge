@@ -64,7 +64,7 @@ export const ja: Messages = {
   'leaderboard.comboValue': '{value} コンボ',
   'leaderboard.mergesValue': '{value} 回合成',
   'leaderboard.self':
-    'あなたのベスト：{value}（{score} 点）· 自分のこれまでの {percentile}% のプレイを上回っています（全 {total} 回）',
+    'あなたのベスト：{value}（{score} 点）· {total} 人中 {rank} 位',
   'leaderboard.tab.score': '最高スコア',
   'leaderboard.tab.combo': 'COMBO 数',
   'leaderboard.tab.merges': '合成数',
@@ -111,7 +111,7 @@ export const ja: Messages = {
   'settings.leaderboard.heading': 'ランキング',
   'settings.leaderboard.subtitle': '表示名と共有の設定',
   'settings.leaderboard.note':
-    '共有がオフのときはスコアがランキングに表示されません。いつでも変更できます。',
+    '共有がオフのときはスコアがランキングに表示されません。同意すると、以降のスコアは自動でアップロードされ、手動で押すボタンはありません。いつでも変更できます。',
 
   'help.title': '遊び方',
   'help.close': '説明を閉じる',

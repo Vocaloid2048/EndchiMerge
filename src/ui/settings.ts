@@ -42,13 +42,6 @@ export interface SettingsOptions {
   preferences: PreferencesStore;
   /** 排行榜來源（顯示名稱與分享意願）。 */
   leaderboard: LeaderboardSource;
-  /**
-   * 在設定裡按下儲存、且同意分享之後呼叫。`main.ts` 用它把**正在進行的一局**交出去，玩家改完
-   * 名字就立刻在榜上看到自己。
-   * Called when save is pressed in settings **with sharing on**. `main.ts` uses it to hand over
-   * the **run in progress**, so a rename shows up on the board immediately.
-   */
-  onPublish?: () => void;
 }
 
 export interface SettingsView {
@@ -212,10 +205,7 @@ export function createSettings(options: SettingsOptions): SettingsView {
 
   /* ── ③ 排行榜 ────────────────────────────────────────────────────── */
 
-  const fields: PublishFields = createPublishFields({
-    source: leaderboard,
-    ...(options.onPublish === undefined ? {} : { onPublish: options.onPublish }),
-  });
+  const fields: PublishFields = createPublishFields({ source: leaderboard });
 
   const leaderboardPanel = el('div', 'settings__panel');
   const leaderboardSubtitle = el('p', 'settings__subtitle');
