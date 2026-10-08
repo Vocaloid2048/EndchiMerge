@@ -131,7 +131,7 @@ describe('createLocalLeaderboard — 紀錄與排序 / recording and ordering', 
       limit,
       idFactory: idSequence(),
       now: (): number => 1_700_000_000_000,
-      keys: { entries: 'e', name: 'n', sharing: 's' },
+      keys: { entries: 'e', name: 'n', sharing: 's', prompt: 'p' },
     });
 
     return { storage, board };
@@ -179,6 +179,25 @@ describe('createLocalLeaderboard — 紀錄與排序 / recording and ordering', 
 
     expect(board.snapshot('score').entries).toHaveLength(3);
     expect(board.snapshot('score').entries.map((e) => e.score)).toEqual([80, 70, 60]);
+  });
+
+  it(`shows ${String(LEADERBOARD_LIMIT)} rows by default`, () => {
+    /*
+     * 使用者的定案（Top 10 → Top 100）改變的是**預設上限**，而預設值同時決定「儲存時保留
+     * 每類前 N 名的聯集」要保留多少 —— 所以這裡一併釘住，避免哪天有人只改一半。
+     * The user's decision (Top 10 → Top 100) changed the **default cap**, and that same cap
+     * decides how many rows the per-category union keeps on disk — so both are pinned here.
+     */
+    const { board } = makeBoard();
+    board.setSharing(true);
+
+    for (let i = 1; i <= LEADERBOARD_LIMIT + 5; i += 1) {
+      board.record({ score: i, maxCombo: i, merges: i });
+    }
+
+    const entries = board.snapshot('score').entries;
+    expect(entries).toHaveLength(LEADERBOARD_LIMIT);
+    expect(entries[0]?.score).toBe(LEADERBOARD_LIMIT + 5);
   });
 
   it('keeps each category\'s top N correct even after many runs', () => {
@@ -320,7 +339,7 @@ describe('createLocalLeaderboard — 紀錄與排序 / recording and ordering', 
 
   it('persists the claimed names through storage', () => {
     const storage = new FakeStorage();
-    const keys = { entries: 'e', name: 'n', sharing: 's' };
+    const keys = { entries: 'e', name: 'n', sharing: 's', prompt: 'p' };
     const first = createLocalLeaderboard({ storage, keys, now: () => 5, idFactory: idSequence() });
     first.setSharing(true);
     first.record({ score: 77, maxCombo: 1, merges: 1 });
@@ -344,7 +363,7 @@ describe('createLocalLeaderboard — 紀錄與排序 / recording and ordering', 
 
   it('round-trips entries, name and sharing through storage', () => {
     const storage = new FakeStorage();
-    const keys = { entries: 'e', name: 'n', sharing: 's' };
+    const keys = { entries: 'e', name: 'n', sharing: 's', prompt: 'p' };
     const first = createLocalLeaderboard({ storage, keys, now: () => 5, idFactory: idSequence() });
     first.setDisplayName('阿爺');
     first.setSharing(true);
@@ -391,5 +410,51 @@ describe('createLocalLeaderboard — 紀錄與排序 / recording and ordering', 
     unsubscribe();
     board.record({ score: 2, maxCombo: 2, merges: 2 });
     expect(calls).toBe(3);
+  });
+});
+
+describe('createLocalLeaderboard — 首次的發布詢問 / the one-off publish prompt', () => {
+  function makeBoard(storage: FakeStorage | null) {
+    return createLocalLeaderboard({
+      storage,
+      now: (): number => 1_700_000_000_000,
+      idFactory: idSequence(),
+      keys: { entries: 'e', name: 'n', sharing: 's', prompt: 'p' },
+    });
+  }
+
+  it('starts un-asked, so the prompt shows on the first leaderboard open', () => {
+    expect(makeBoard(new FakeStorage()).publishPromptDone).toBe(false);
+  });
+
+  it('remembers that the prompt has been dealt with, and stays idempotent', () => {
+    const storage = new FakeStorage();
+    const board = makeBoard(storage);
+    let calls = 0;
+    board.subscribe((): void => {
+      calls += 1;
+    });
+
+    board.finishPublishPrompt();
+    expect(board.publishPromptDone).toBe(true);
+    expect(calls).toBe(1);
+
+    /* 第二次不該再通知 —— 那會讓已開著的榜白白重繪。 */
+    board.finishPublishPrompt();
+    expect(calls).toBe(1);
+  });
+
+  it('survives a reload, so the prompt really is asked once', () => {
+    const storage = new FakeStorage();
+    makeBoard(storage).finishPublishPrompt();
+
+    expect(makeBoard(storage).publishPromptDone).toBe(true);
+  });
+
+  it('keeps the prompt state in memory when storage is unavailable', () => {
+    const board = makeBoard(null);
+    board.finishPublishPrompt();
+
+    expect(board.publishPromptDone).toBe(true);
   });
 });

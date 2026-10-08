@@ -1,0 +1,112 @@
+/*
+ * 發布設定欄位（`ui/publishFields.ts`）。
+ * The publish-settings fields.
+ *
+ * 兩處宿主：首次的發布詢問彈窗與日後的設定 popup，所以這一組樣式**不掛在**任何宿主上。
+ * 尺寸都是**設計稿像素**（宿主在 `.stage-scale` 內，跟著畫布被 `ui/scale.ts` 等比縮放）。
+ * Two hosts — the one-off publish prompt and the future settings popup — so none of this is
+ * scoped to a host. Sizes are **design pixels** (hosts live inside `.stage-scale` and scale with
+ * the canvas).
+ */
+
+.publish-fields {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.publish-fields__label {
+  color: var(--color-fg-muted);
+  font-size: 20px;
+  letter-spacing: 0.06em;
+}
+
+/* 名稱欄：儲存鍵浮在它裏面、貼齊右緣（使用者定案）。 */
+.publish-fields__box {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.publish-fields__name {
+  width: 100%;
+  min-width: 0;
+  /* 右內距要留得下浮在上面的儲存鍵，否則長名字的尾巴會滑到按鈕底下。 */
+  padding: 12px 124px 12px 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--color-fg);
+  font-family: inherit;
+  font-size: 24px;
+}
+
+.publish-fields__name:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* 儲存鍵：貼合文字（wrap-content）、貼緊輸入框右緣。 */
+.publish-fields__save {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: auto;
+  white-space: nowrap;
+  padding: 10px 24px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+  font-family: inherit;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  cursor: pointer;
+  transition: filter var(--transition-fast);
+}
+
+.publish-fields__save:hover {
+  filter: brightness(1.06);
+}
+
+.publish-fields__save:focus-visible {
+  outline: 3px solid var(--color-fg);
+  outline-offset: 3px;
+}
+
+.publish-fields__units {
+  margin: 0;
+  color: var(--color-fg-dim);
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.publish-fields__share {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+  color: var(--color-fg-muted);
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.publish-fields__share-input {
+  width: 26px;
+  height: 26px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.publish-fields__error {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: 21px;
+}
+
+.publish-fields__error[hidden] {
+  display: none;
+}

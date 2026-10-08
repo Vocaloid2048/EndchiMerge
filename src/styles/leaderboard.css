@@ -6,6 +6,11 @@
  * 等比縮放 —— 與結算覆蓋層、確認對話框同一套座標語言。
  * It covers the whole design canvas (1920×1080), so its sizes are **design pixels** scaled with
  * the canvas by `ui/scale.ts` — the same coordinate language as the overlay and the dialog.
+ *
+ * 發布設定（名稱／分享）的樣式不在這裡：那組欄位住在 `publish-fields.css`，由首次的發布
+ * 詢問彈窗與日後的設定 popup 共用。
+ * The publish-settings styles are not here: those fields live in `publish-fields.css` and are
+ * shared by the one-off publish prompt and the settings popup.
  */
 
 .leaderboard {
@@ -84,121 +89,6 @@
   outline-offset: 3px;
 }
 
-/* ── 發布列：名稱 ＋ 分享意願 ────────────────────────────────────────── */
-
-.leaderboard__publish {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px 28px;
-  padding: 20px 24px;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--color-border);
-}
-
-.leaderboard__field {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-}
-
-.leaderboard__field-label {
-  color: var(--color-fg-muted);
-  font-size: 20px;
-  letter-spacing: 0.06em;
-}
-
-/* 名稱欄：儲存鍵浮在它裏面、貼齊右緣（使用者定案）。 */
-.leaderboard__name-box {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.leaderboard__name {
-  width: 100%;
-  min-width: 0;
-  /* 右內距要留得下浮在上面的儲存鍵，否則長名字的尾巴會滑到按鈕底下。 */
-  padding: 12px 124px 12px 18px;
-  border: 1px solid var(--color-border);
-  border-radius: 14px;
-  background: rgba(0, 0, 0, 0.28);
-  color: var(--color-fg);
-  font-family: inherit;
-  font-size: 24px;
-}
-
-.leaderboard__name:focus-visible {
-  outline: 3px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-.leaderboard__units {
-  margin: 0;
-  color: var(--color-fg-dim);
-  font-size: 20px;
-  font-variant-numeric: tabular-nums;
-}
-
-.leaderboard__share {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: var(--color-fg-muted);
-  font-size: 22px;
-  cursor: pointer;
-}
-
-.leaderboard__share-input {
-  width: 26px;
-  height: 26px;
-  accent-color: var(--color-accent);
-  cursor: pointer;
-}
-
-/* 儲存鍵：貼合文字（wrap-content）、貼緊輸入框右緣。 */
-.leaderboard__save {
-  position: absolute;
-  top: 50%;
-  right: 6px;
-  transform: translateY(-50%);
-  width: auto;
-  white-space: nowrap;
-  padding: 10px 24px;
-  border: 0;
-  border-radius: 10px;
-  background: var(--color-accent);
-  color: var(--color-accent-ink);
-  font-family: inherit;
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  line-height: 1;
-  cursor: pointer;
-  transition: filter var(--transition-fast);
-}
-
-.leaderboard__save:hover {
-  filter: brightness(1.06);
-}
-
-.leaderboard__save:focus-visible {
-  outline: 3px solid var(--color-fg);
-  outline-offset: 3px;
-}
-
-.leaderboard__error {
-  grid-column: 1 / -1;
-  margin: 0;
-  color: var(--color-danger);
-  font-size: 21px;
-}
-
-.leaderboard__error[hidden] {
-  display: none;
-}
-
 /* ── 分頁 ──────────────────────────────────────────────────────────── */
 
 .leaderboard__tabs {
@@ -232,9 +122,18 @@
 
 /* ── 榜身 ──────────────────────────────────────────────────────────── */
 
+/*
+ * 榜身自己帶 `max-height`（而不是靠卡片的 `max-height`）才會滾動：卡片的 `max-height` 只
+ * 裁掉溢出，不會叫內容變矮。榜現在有 100 行，一眼看不完，所以這裡明確定一個可視高度。
+ * The list carries its own `max-height` instead of leaning on the card's: a card `max-height`
+ * only clips the overflow, it never makes the content shorter. The board now holds 100 rows, so
+ * the visible height has to be stated here.
+ */
 .leaderboard__body {
   overflow-y: auto;
   min-height: 300px;
+  max-height: 520px;
+  overscroll-behavior: contain;
 }
 
 .leaderboard__list {
@@ -245,9 +144,10 @@
   list-style: none;
 }
 
+/* 名次／名稱／該分類數值／時間；刻意沒有第二個分數欄（見 `ui/leaderboard.ts`）。 */
 .leaderboard__row {
   display: grid;
-  grid-template-columns: 90px 1fr 200px 180px 170px;
+  grid-template-columns: 96px minmax(0, 1fr) 190px 210px;
   align-items: center;
   gap: 16px;
   padding: 14px 20px;
@@ -280,7 +180,6 @@
   text-align: right;
 }
 
-.leaderboard__score,
 .leaderboard__when {
   color: var(--color-fg-muted);
   font-size: 22px;

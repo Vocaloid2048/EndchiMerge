@@ -18,14 +18,21 @@
  *    排序鍵**，不是三份不同的資料。
  *    One all-time board with **three categories** (best score / COMBO / merges). The three tabs
  *    are three sort keys over the *same* records, not three separate datasets.
- * 2. **Top 10，每局都記**。因為三個分類各自要有正確的 Top 10，儲存時保留**每個分類各自
- *    前十名的聯集**（最多 30 筆）—— 只按分數裁切會讓 COMBO 分頁從一開始就偏斜。
- *    **Top 10, every run recorded.** Each category needs its own correct top 10, so storage keeps
- *    the **union of each category's top ten** (at most 30). Trimming by score alone would bias
- *    the COMBO tab from the start.
+ * 2. **Top `LEADERBOARD_LIMIT`，每局都記**。因為三個分類各自要有正確的 Top N，儲存時保留
+ *    **每個分類各自前 N 名的聯集**（現為 3×100 ＝ 最多 300 筆）—— 只按分數裁切會讓 COMBO
+ *    分頁從一開始就偏斜。
+ *    **Top `LEADERBOARD_LIMIT`, every run recorded.** Each category needs its own correct top N,
+ *    so storage keeps the **union of each category's top N** (3×100 = at most 300 rows).
+ *    Trimming by score alone would bias the COMBO tab from the start.
  * 3. **同意分享才上榜**：未同意時榜是空的（唯讀），紀錄本身仍然照記 —— 之後同意就一併出現。
  *    **Opt-in to appear.** While sharing is off the board reads empty; runs are still recorded,
  *    and turning sharing on reveals them all (a global switch, the user's decision).
+ * 4. **名稱與分享意願是「玩家設定」，會單獨被問一次**：首次開啟排行榜時彈出一次發布詢問
+ *    （見 `publishPromptDone`），之後要改就到設定。這個事實狀態也住在這裡，因為它與名稱、
+ *    分享意願是同一組設定。
+ *    **The name and the sharing preference are player settings, asked once**: the first time the
+ *    leaderboard opens, a publish prompt appears (see `publishPromptDone`); after that they are
+ *    edited in settings. That fact lives here too, beside the two settings it belongs to.
  * 4. **百分位**：跨玩家的百分位需要伺服器，本地做不到，所以現階段以**你自己的歷史場次**計算
  *    （「超越你自己 X% 的場次」），並由 `LeaderboardRank.percentile` 這個欄位承載 —— 接上
  *    真後端後，同一個欄位改由伺服器回傳真·跨玩家百分位。
@@ -68,8 +75,11 @@ export const LEADERBOARD_CATEGORIES: readonly {
   { id: 'merges', label: '合成數', column: '合成' },
 ];
 
-/** 榜上顯示的名次數（使用者定案：Top 10）。 */
-export const LEADERBOARD_LIMIT = 10;
+/**
+ * 榜上顯示的名次數（使用者定案：Top 100）。
+ * Rows shown on the board (the user's decision: Top 100).
+ */
+export const LEADERBOARD_LIMIT = 100;
 
 /** 一筆紀錄。 */
 export interface LeaderboardEntry {
@@ -167,6 +177,19 @@ export interface LeaderboardSource {
   /** 切換分享意願。 */
   setSharing(on: boolean): void;
   /**
+   * 首次的「發布成績」詢問是否已經處理過。
+   * Whether the one-off "publish your score" prompt has already been dealt with.
+   *
+   * 使用者定案：名稱與分享意願**只在首次按下排行榜時問一次**（之後改到設定裡改），所以需要
+   * 一個「問過了沒」的事實。按了儲存或選擇稍後都算處理過 —— 否則每次開榜都會再彈一次。
+   * The user's decision: the name and the sharing preference are **asked only once, on the first
+   * leaderboard open** (later changes happen in settings), which needs a "already asked" fact.
+   * Saving and declining both count — otherwise the prompt would reappear on every open.
+   */
+  readonly publishPromptDone: boolean;
+  /** 記下首次的發布詢問已經處理過。 */
+  finishPublishPrompt(): void;
+  /**
    * 記錄一局。每局都記（使用者定案），與是否同意分享無關；帶 `runId` 時是 upsert（同一局
    * 只會有一筆，重複記錄更新數值）。
    * Record a run. Every run is recorded (the user's decision) regardless of sharing; with a
@@ -183,7 +206,7 @@ export interface LocalLeaderboardOptions {
   /** 注入儲存體；未提供時用 `localStorage`，不可用時退回記憶體。 */
   storage?: ProgressStorage | null;
   /** 覆寫儲存鍵；測試用。 */
-  keys?: { entries?: string; name?: string; sharing?: string };
+  keys?: { entries?: string; name?: string; sharing?: string; prompt?: string };
   /** 顯示名次數；預設 `LEADERBOARD_LIMIT`。 */
   limit?: number;
   /** 時鐘；測試用。 */
@@ -312,10 +335,12 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
   const entriesKey = options.keys?.entries ?? STORAGE_KEYS.leaderboard;
   const nameKey = options.keys?.name ?? STORAGE_KEYS.playerName;
   const sharingKey = options.keys?.sharing ?? STORAGE_KEYS.shareScore;
+  const promptKey = options.keys?.prompt ?? STORAGE_KEYS.publishPrompt;
 
   let entries = storage === null ? [] : parseEntries(readItem(storage, entriesKey));
   let displayName = storage === null ? '' : (readItem(storage, nameKey) ?? '');
   let sharing = storage === null ? false : readItem(storage, sharingKey) === 'true';
+  let publishPromptDone = storage === null ? false : readItem(storage, promptKey) === 'true';
 
   const listeners = new Set<() => void>();
 
@@ -359,6 +384,18 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
     setSharing(on: boolean): void {
       sharing = on;
       if (storage !== null) writeItem(storage, sharingKey, on ? 'true' : 'false');
+      notify();
+    },
+
+    get publishPromptDone(): boolean {
+      return publishPromptDone;
+    },
+
+    finishPublishPrompt(): void {
+      if (publishPromptDone) return;
+
+      publishPromptDone = true;
+      if (storage !== null) writeItem(storage, promptKey, 'true');
       notify();
     },
 

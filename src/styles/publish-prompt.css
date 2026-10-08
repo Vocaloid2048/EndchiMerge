@@ -1,0 +1,86 @@
+/*
+ * 首次的發布詢問彈窗（`ui/publishPrompt.ts`）。
+ * The one-off publish prompt.
+ *
+ * 蓋在整個設計畫布上（1920×1080），所以裡面的尺寸都是**設計稿像素**，會跟著畫布一起被
+ * `ui/scale.ts` 等比縮放 —— 與結算覆蓋層、確認對話框、排行榜同一套座標語言。
+ * It covers the whole design canvas (1920×1080), so its sizes are **design pixels** scaled with
+ * the canvas by `ui/scale.ts` — the same coordinate language as the overlay, the dialog and the
+ * leaderboard.
+ */
+
+.publish-prompt {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(12, 13, 18, 0.66);
+  backdrop-filter: blur(6px);
+  /* 比排行榜高一層：它是在開榜之前出現的一步。 */
+  z-index: 28;
+}
+
+/* `[hidden]` 一定要蓋掉上面的 `display: grid`，否則彈窗會永遠顯示。 */
+.publish-prompt[hidden] {
+  display: none;
+}
+
+.publish-prompt__card {
+  display: grid;
+  gap: 22px;
+  width: 760px;
+  padding: 48px 56px 44px;
+  border-radius: 32px;
+  background: var(--glass-fill);
+  border: 1px solid var(--glass-stroke);
+  box-shadow: var(--glass-shadow);
+}
+
+.publish-prompt__title {
+  margin: 0;
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.publish-prompt__message {
+  margin: 0;
+  color: var(--color-fg-muted);
+  font-size: 24px;
+  line-height: 1.5;
+}
+
+.publish-prompt__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/*
+ * 「之後再說」：透明玻璃、低調。這一顆存在是為了讓「首次只問一次」成立 —— 玩家必須有一個
+ * 一按就結束詢問的出口，否則關掉之後每次都還要再看到它。
+ * The quiet glass "之後再說": it exists so that "asked once" can hold — the player needs one press
+ * that ends the prompt for good, or dismissing it would bring it back every time.
+ */
+.publish-prompt__skip {
+  padding: 16px 44px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-fg);
+  box-shadow: inset 0 0 0 2px var(--color-border);
+  font-family: inherit;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: filter var(--transition-fast);
+}
+
+.publish-prompt__skip:hover {
+  filter: brightness(1.15);
+}
+
+.publish-prompt__skip:focus-visible {
+  outline: 3px solid var(--color-fg);
+  outline-offset: 3px;
+}

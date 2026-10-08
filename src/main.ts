@@ -16,6 +16,7 @@ import { createLayout, type Layout } from './ui/layout';
 import { createLeaderboard, type LeaderboardView } from './ui/leaderboard';
 import { createMeltingList, type MeltingList } from './ui/meltingList';
 import { createNotice } from './ui/notice';
+import { createPublishPrompt, type PublishPromptView } from './ui/publishPrompt';
 import { attachRestartConfirm } from './ui/restartButton';
 import { attachStageScale } from './ui/scale';
 import { createSkillBar, type SkillBar } from './ui/skillBar';
@@ -51,6 +52,8 @@ export interface AppContext {
   leaderboardSource: LeaderboardSource;
   /** 排行榜彈窗。 */
   leaderboard: LeaderboardView;
+  /** 首次的發布詢問彈窗（名稱＋分享意願）。 */
+  publishPrompt: PublishPromptView;
   /** 卸下投放輸入的事件綁定。 */
   detachInput: () => void;
   /** 停止監看視窗尺寸與名冊尺寸。 */
@@ -305,24 +308,35 @@ async function bootstrap(): Promise<void> {
    * separate page). It mounts on `layout.root` so it scales with the canvas, and every row and
    * rank comes from `leaderboardSource`.
    */
-  const leaderboard = createLeaderboard({
+  const leaderboard = createLeaderboard({ host: layout.root, source: leaderboardSource });
+
+  /*
+   * 首次的發布詢問。顯示名稱與同意分享是**玩家設定**，不是榜單內容，所以只在第一次開榜之前
+   * 單獨問一次（見 `ui/publishPrompt.ts`）；之後要改就到設定。
+   * The one-off publish prompt. The display name and the sharing consent are **player settings**
+   * rather than board content, so they are asked on their own once, before the board opens for
+   * the first time (see `ui/publishPrompt.ts`) and edited in settings afterwards.
+   *
+   * `onPublish` 把**正在進行**的這一局一併交出去：玩家按完儲存就預期看到自己的紀錄，而不是
+   * 等這一局結束。`onSaved` 接著開榜，讓那一筆立刻出現在眼前。
+   * `onPublish` hands over the run **in progress**, because the player expects to see his record
+   * as soon as save is pressed; `onSaved` then opens the board so it is right there.
+   */
+  const publishPrompt = createPublishPrompt({
     host: layout.root,
     source: leaderboardSource,
-    /*
-     * 玩家在發布列按下儲存（且同意分享）時，把**正在進行**的這一局也交出去：他的預期是
-     * 「按完就看到自己的紀錄」，而不是「等這一局結束再說」。upsert 保證之後這一局真的結束
-     * 時只是把同一筆更新成最終成績。
-     * Pressing save in the publish bar (with sharing on) also hands over the run **in progress**:
-     * the player expects to see his record right away rather than after the run ends. The upsert
-     * means finishing the run later just updates that same row with the final numbers.
-     */
     onPublish: recordCurrentRun,
+    onSaved: (): void => leaderboard.open(),
   });
+
   const leaderboardButton = layout.regions.toolbar.querySelector<HTMLButtonElement>(
     'button[data-action="leaderboard"]',
   );
   if (leaderboardButton !== null) {
-    leaderboardButton.addEventListener('click', (): void => leaderboard.open());
+    leaderboardButton.addEventListener('click', (): void => {
+      if (leaderboardSource.publishPromptDone) leaderboard.open();
+      else publishPrompt.open();
+    });
   }
 
   /*
@@ -435,6 +449,7 @@ async function bootstrap(): Promise<void> {
     gameOver,
     leaderboardSource,
     leaderboard,
+    publishPrompt,
     detachInput,
     detachScale,
   };
