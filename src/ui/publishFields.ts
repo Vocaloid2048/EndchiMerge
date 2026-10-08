@@ -18,10 +18,25 @@
  * **No storage logic lives here**: where and whether things persist is the `LeaderboardSource`'s
  * business; this only validates, hands values to the source and shows errors.
  *
+ * **沒有儲存鍵了 —— 改完就套用**（使用者定案）：
+ * - **名稱欄**在離開欄位時（失焦、或按 Enter）驗證並寫入來源；不合法就只顯示原因，不寫入。
+ * - **同意勾選框**一勾／一撤就立刻套用 —— `setSharing(true)` 本身就會把本機紀錄推上榜，所以
+ *   同意之後不必再按任何鍵。
+ * 兩者都是「即時、可逆」的設定（名字只是那一筆的欄位、分享只是一個開關），按下一個確認鍵
+ * 換不到任何保障，只是多一步。儲存鍵從前存在的理由 —— 避免重繪把剛勾好的同意蓋回去 ——
+ * 已經由「先把值抓成區域變數，再動來源」解決掉了。
+ * **There is no save key any more — an edit applies on its own** (the user's decision): the
+ * **name field** validates and writes on the way out (blur, or Enter), and the **consent box**
+ * applies the moment it is ticked or unticked — `setSharing(true)` already pushes the local record
+ * itself, so consent needs no second press. Both are instant, reversible settings (a name is one
+ * field of one row; sharing is one switch), so a confirm key buys nothing and costs a step. The
+ * reason the key existed — a re-render stamping a freshly ticked consent back to unchecked — is
+ * handled by capturing values into locals before touching the source.
+ *
  * 文字全部走 `src/i18n`：靜態的用 `data-i18n` 標記（換語系由 `applyTo()` 一次改掉），帶數字
- * 的（單位計數、錯誤訊息）自己重畫並訂閱語系變更。
+ * 的（字元計數、錯誤訊息）自己重畫並訂閱語系變更。
  * All copy goes through `src/i18n`: static strings are tagged with `data-i18n` (rewritten in one
- * `applyTo()` pass), and the ones carrying numbers (the unit counter, error messages) redraw
+ * `applyTo()` pass), and the ones carrying numbers (the character counter, error messages) redraw
  * themselves and subscribe to locale changes.
  *
  * 尺寸是**設計稿像素**，與其他面板同一套座標語言。
@@ -33,30 +48,43 @@ import { NAME_MAX_UNITS, nameUnits, validateDisplayName, type NameError } from '
 import { i18n, i18nPlaceholder, i18nText, t, type MessageKey } from '../i18n';
 import { appendChildren, el } from './dom';
 
+/** 一次成功套用：來自哪個欄位、套用之後的分享狀態。 */
+export interface PublishChange {
+  /** 這次套用來自哪一個欄位。 */
+  field: 'name' | 'sharing';
+  /** 套用之後的分享狀態。 */
+  sharing: boolean;
+}
+
 export interface PublishFieldsOptions {
   /** 設定來源。 */
   source: LeaderboardSource;
   /**
-   * 內嵌儲存鍵按下且驗證通過之後呼叫。宿主用它收尾（關窗、開榜），不必自己去找那顆按鈕。
-   * Called when the inset save key is pressed and validation passes. The host uses it to finish
-   * up (close, open the board) without having to reach for the button itself.
+   * 每次**成功套用**之後呼叫（改完名字、或勾選／撤銷同意）。驗證失敗不會呼叫。
+   * Called after every successful apply (a rename, or a consent toggle). A failed validation does
+   * not call it.
+   *
+   * 首次的發布詢問用它把「把同意打開」當成回答（見 `ui/publishPrompt.ts`）—— 那個彈窗需要
+   * 知道玩家答了沒有；設定 popup 不需要它，那裡改了就是改了。
+   * The one-off publish prompt treats "consent switched on" as the answer (see
+   * `ui/publishPrompt.ts`), because that popup has to know whether the player replied. Settings
+   * does not need it: there, an edit *is* the answer.
    */
-  onCommitted?: () => void;
+  onApply?: (change: PublishChange) => void;
 }
 
 export interface PublishFields {
   /** 可直接 append 的根節點。 */
   readonly element: HTMLElement;
   /**
-   * 把兩個輸入框同步回來源。**只在宿主開啟時呼叫**：由來源變更引發的重繪若也同步，會把
-   * 玩家剛勾好的「同意」蓋回未勾選（曾因此讓分享永遠開不起來）。
-   * Sync both inputs back from the source. **Only call this when the host opens**: syncing on a
-   * re-render caused by a source change would stamp the player's freshly ticked consent back to
-   * unchecked — the bug that once left sharing permanently off.
+   * 把兩個控制項同步回來源。**只在宿主開啟時、或來源被別處改動時呼叫**：由來源變更引發的重繪
+   * 若也同步，會把玩家剛勾好的「同意」蓋回未勾選（曾因此讓分享永遠開不起來）。
+   * Sync both controls back from the source. **Only call this when the host opens, or when the
+   * source changed elsewhere**: syncing on a re-render caused by a source change would stamp the
+   * player's freshly ticked consent back to unchecked — the bug that once left sharing
+   * permanently off.
    */
   sync(): void;
-  /** 驗證並儲存；成功回傳 `true`，失敗會顯示錯誤訊息並回傳 `false`。 */
-  commit(): boolean;
   /** 把游標放進名稱欄。 */
   focus(): void;
   /** 取消語系訂閱；宿主 teardown 用。 */
@@ -79,7 +107,7 @@ const NAME_ERROR_KEYS: Readonly<Record<NameError, MessageKey>> = {
 let instanceCount = 0;
 
 export function createPublishFields(options: PublishFieldsOptions): PublishFields {
-  const { source, onCommitted } = options;
+  const { source, onApply } = options;
 
   instanceCount += 1;
   const nameId = `publish-fields-name-${String(instanceCount)}`;
@@ -94,21 +122,6 @@ export function createPublishFields(options: PublishFieldsOptions): PublishField
   nameInput.autocomplete = 'off';
   nameInput.spellcheck = false;
   i18nPlaceholder(nameInput, 'publish.namePlaceholder');
-
-  const saveButton = el('button', 'publish-fields__save');
-  saveButton.type = 'button';
-  i18nText(saveButton, 'common.save');
-
-  /*
-   * 儲存鍵放在名稱欄**裡面**、貼齊右緣（使用者定案）：對輸入框而言它是浮在右側的一顆小鍵，
-   * 寬度隨文字（`width: auto`），所以欄位的右內距要留得下它 —— 否則打到後面的字會滑到
-   * 按鈕底下。
-   * The save key sits **inside** the name field pinned to the right edge (the user's decision):
-   * it floats over the input, sized to its own text (`width: auto`), so the field keeps a right
-   * inset large enough for it — otherwise the tail of a long name slides under the button.
-   */
-  const nameBox = el('div', 'publish-fields__box');
-  appendChildren(nameBox, nameInput, saveButton);
 
   const units = el('p', 'publish-fields__units');
 
@@ -131,13 +144,24 @@ export function createPublishFields(options: PublishFieldsOptions): PublishField
   error.hidden = true;
 
   const element = el('div', 'publish-fields');
-  appendChildren(element, nameLabel, nameBox, units, shareLabel, error);
+  appendChildren(element, nameLabel, nameInput, units, shareLabel, error);
 
   /** 目前顯示中的錯誤原因；換語系時用它把訊息重寫一遍。 */
   let lastError: NameError | null = null;
 
   function errorTextFor(reason: NameError): string {
     return t(NAME_ERROR_KEYS[reason], { max: NAME_MAX_UNITS });
+  }
+
+  function showError(reason: NameError): void {
+    lastError = reason;
+    error.textContent = errorTextFor(reason);
+    error.hidden = false;
+  }
+
+  function clearError(): void {
+    lastError = null;
+    error.hidden = true;
   }
 
   function refreshUnits(): void {
@@ -158,58 +182,83 @@ export function createPublishFields(options: PublishFieldsOptions): PublishField
     nameInput.focus();
   }
 
-  function commit(): boolean {
+  /**
+   * 套用名稱欄。回傳是否寫入了來源。
+   * Apply the name field. Returns whether the source was written.
+   */
+  function applyName(): boolean {
     const result = validateDisplayName(nameInput.value);
 
-    /*
-     * 先把兩個輸入框的值抓成區域變數**再**動來源。`setDisplayName()` 會同步觸發重繪，
-     * 若之後才讀 `shareInput.checked`，讀到的可能是已經被重繪蓋掉的值。
-     * Capture both inputs into locals **before** touching the source. `setDisplayName()`
-     * re-renders synchronously, so reading `shareInput.checked` afterwards could pick up a
-     * clobbered value.
-     */
-    const wantSharing = shareInput.checked;
-
     if (!result.ok) {
-      /* 只想瀏覽、不想分享的人可以留空；但一旦要上榜，名稱就是必要的。 */
-      const browseOnly = result.reason === 'empty' && !wantSharing;
+      /*
+       * 只想看榜、不急著上榜的人可以留空；但一旦勾了同意，名字就是必要的。
+       * Leaving it blank is fine for someone who only wants to look — but once consent is on, a
+       * name is required.
+       */
+      const browseOnly = result.reason === 'empty' && !shareInput.checked;
 
       if (!browseOnly) {
-        lastError = result.reason;
-        error.textContent = errorTextFor(result.reason);
-        error.hidden = false;
-        focus();
+        showError(result.reason);
         return false;
       }
-
-      source.setDisplayName('');
-      source.setSharing(false);
-      lastError = null;
-      error.hidden = true;
-      return true;
     }
 
-    source.setDisplayName(result.value);
+    const value = result.ok ? result.value : '';
 
     /*
-     * 先寫名字再寫分享意願，順序不能顛倒：`setSharing(true)` 會**順手把本機紀錄推上榜**，
-     * 而那筆紀錄的名字取自來源，所以名字必須已經在裡面了。
-     * The name goes in before the consent, and the order matters: `setSharing(true)` **uploads the
-     * local record** as a side effect, and that record's name comes from the source — so the name
-     * has to be there first.
-     *
-     * 這裡**不再需要**任何「把這一局交出去」的呼叫：同意本身就是上載的觸發點（使用者定案：
-     * 同意分享的玩家不必再手動按上載）。
-     * No "hand over the run" call is needed any more: consent is itself the trigger (the user's
-     * decision: a player who has agreed should never have to press upload).
+     * 值沒變就不再寫一次：每一次寫入都會推高 `revision`，因而多觸發一次上載。
+     * Skip the write when nothing changed: every write bumps the `revision`, which triggers one
+     * more upload.
      */
-    source.setSharing(wantSharing);
-    nameInput.value = result.value;
-    lastError = null;
-    error.hidden = true;
-    refreshUnits();
+    if (value !== source.displayName) {
+      source.setDisplayName(value);
+      onApply?.({ field: 'name', sharing: source.sharing });
+    }
+
+    nameInput.value = value;
+    clearError();
 
     return true;
+  }
+
+  /** 套用同意勾選框。 */
+  function applySharing(): void {
+    /*
+     * 先把勾選狀態抓成區域變數**再**動來源：`setSharing()` 會同步觸發重繪，之後才讀
+     * `shareInput.checked` 可能讀到已經被重繪蓋掉的值。
+     * Capture the tick into a local **before** touching the source: `setSharing()` re-renders
+     * synchronously, so reading `shareInput.checked` afterwards could pick up a clobbered value.
+     */
+    const want = shareInput.checked;
+
+    if (!want) {
+      source.setSharing(false);
+      onApply?.({ field: 'sharing', sharing: false });
+      return;
+    }
+
+    /*
+     * 要上榜就得有名字：名稱不合法時把勾選**退回**、說明原因、游標放回名稱欄，而不是讓一個
+     * 沒有名字的人上了榜。
+     * Publishing needs a name: if it is not valid the tick is **rolled back**, the reason is shown
+     * and the caret goes back to the name field — rather than putting a nameless player on the
+     * board.
+     *
+     * 順序不能顛倒：`setSharing(true)` 會**順手把本機紀錄推上榜**，而那筆的名字取自來源，
+     * 所以名字必須已經在裡面了。這裡也**不需要**任何「把這一局交出去」的呼叫 —— 同意本身就是
+     * 上載的觸發點。
+     * The order matters: `setSharing(true)` **uploads the local record** as a side effect, and that
+     * record's name comes from the source, so the name has to be in there first. No "hand over the
+     * run" call is needed either: consent is itself the trigger.
+     */
+    if (!applyName()) {
+      shareInput.checked = false;
+      focus();
+      return;
+    }
+
+    source.setSharing(true);
+    onApply?.({ field: 'sharing', sharing: true });
   }
 
   const unsubscribeLocale = i18n.subscribe((): void => {
@@ -219,17 +268,22 @@ export function createPublishFields(options: PublishFieldsOptions): PublishField
 
   nameInput.addEventListener('input', (): void => {
     refreshUnits();
-    lastError = null;
-    error.hidden = true;
+    clearError();
+  });
+
+  /*
+   * `change` 對文字欄而言就是「改完了」：失焦或按 Enter 都會觸發。**不在 `input` 上套用**，
+   * 否則玩家打到一半就會不斷寫入來源（每一筆都是一次上載）。
+   * For a text field `change` literally means "done editing": it fires on blur and on Enter. It is
+   * deliberately not applied on `input`, which would write to the source on every keystroke — and
+   * each write is an upload.
+   */
+  nameInput.addEventListener('change', (): void => {
+    applyName();
   });
 
   shareInput.addEventListener('change', (): void => {
-    lastError = null;
-    error.hidden = true;
-  });
-
-  saveButton.addEventListener('click', (): void => {
-    if (commit()) onCommitted?.();
+    applySharing();
   });
 
   refreshUnits();
@@ -237,7 +291,6 @@ export function createPublishFields(options: PublishFieldsOptions): PublishField
   return {
     element,
     sync,
-    commit,
     focus,
     dispose: (): void => {
       unsubscribeLocale();

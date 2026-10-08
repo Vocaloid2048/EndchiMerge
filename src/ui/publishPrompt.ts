@@ -10,14 +10,22 @@
  * and edited in settings afterwards. The board itself carries no input field — looking at the
  * board is just looking at the board.
  *
- * 「問過一次」的判定很寬鬆：**按儲存、按「之後再說」、按 Esc、點背景，四者都算問過了**。
+ * 「問過一次」的判定很寬鬆：**勾了同意、按「之後再說」、按 Esc、點背景，四者都算問過了**。
  * 不這樣做的話，只要玩家關掉一次，下次開榜又會再彈一次 —— 那就不是「首次」了。
- * "Asked once" is deliberately lenient: **saving, "之後再說", Esc and a backdrop click all count
- * as asked.** Otherwise a single dismissal would make the prompt reappear on every later open,
- * which is exactly what "once" is meant to avoid.
+ * "Asked once" is deliberately lenient: **ticking consent, "之後再說", Esc and a backdrop click all
+ * count as asked.** Otherwise a single dismissal would make the prompt reappear on every later
+ * open, which is exactly what "once" is meant to avoid.
  *
- * 欄位本身（名稱、同意、內嵌儲存鍵、驗證）在 `ui/publishFields.ts`；這裡只管彈窗的開關、
- * 鍵盤與焦點，分工與 `ui/confirmDialog.ts` 相同。
+ * **這個彈窗沒有儲存鍵**（使用者定案，與設定同步）：欄位改完就套用，所以「回答」的方式是
+ * **把同意打開** —— 那一刻`setSharing(true)` 已經把本機紀錄推上榜了，這裡只負責收窗、開榜，
+ * 讓玩家立刻看到自己那一筆。「之後再說」不勾同意，榜便維持空的。
+ * **This popup has no save key** (the user's decision, matching settings): fields apply on their
+ * own, so the way to answer is **to turn consent on** — at which point `setSharing(true)` has
+ * already uploaded the local record, leaving this popup to close itself and open the board so the
+ * player sees his own row. "之後再說" leaves consent off and the board empty.
+ *
+ * 欄位本身（名稱、同意、驗證）在 `ui/publishFields.ts`；這裡只管彈窗的開關、鍵盤與焦點，
+ * 分工與 `ui/confirmDialog.ts` 相同。
  * The fields themselves live in `ui/publishFields.ts`; this owns only the modal's open/close,
  * keyboard and focus — the same split as `ui/confirmDialog.ts`.
  *
@@ -69,20 +77,17 @@ export function createPublishPrompt(options: PublishPromptOptions): PublishPromp
   i18nText(message, 'publishPrompt.message');
 
   /*
-   * 欄位的儲存鍵由 `onCommitted` 交回來，宿主不必自己去 DOM 裡找那顆按鈕。
-   * The fields hand their save key back through `onCommitted`, so the host never has to hunt for
-   * the button in the DOM.
+   * 這個彈窗的「回答」就是**把同意打開**：欄位改完即套用，所以第二次按鍵是多餘的。同意的那一刻
+   * `setSharing(true)` 已經上載過了（見 `game/leaderboard.ts`），這裡只負責收窗與開榜。
+   * The answer to this popup is **turning consent on**: the fields apply on their own, so a second
+   * press would be redundant. `setSharing(true)` has already uploaded by then (see
+   * `game/leaderboard.ts`); this only closes the popup and opens the board.
    */
   const fields = createPublishFields({
     source,
-    onCommitted: (): void => {
-      /*
-       * 儲存即回答。上載不必在這裡做 —— 勾了同意之後，`setSharing(true)` 已經把本機紀錄推上
-       * 榜了（見 `game/leaderboard.ts`）。這裡只負責開榜，讓玩家立刻看到剛上榜的那一筆。
-       * Saving is the answer. No upload belongs here: ticking consent already pushed the local
-       * record (see `game/leaderboard.ts`). This only opens the board so the player sees the row
-       * that just went up.
-       */
+    onApply: (change): void => {
+      if (change.field !== 'sharing' || !change.sharing) return;
+
       source.finishPublishPrompt();
       close();
       onSaved?.();

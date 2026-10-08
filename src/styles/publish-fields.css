@@ -2,11 +2,10 @@
  * 發布設定欄位（`ui/publishFields.ts`）。
  * The publish-settings fields.
  *
- * 兩處宿主：首次的發布詢問彈窗與日後的設定 popup，所以這一組樣式**不掛在**任何宿主上。
+ * 兩處宿主：首次的發布詢問彈窗與設定 popup，所以這一組樣式**不掛在**任何宿主上。
  * 尺寸都是**設計稿像素**（宿主在 `.stage-scale` 內，跟著畫布被 `ui/scale.ts` 等比縮放）。
- * Two hosts — the one-off publish prompt and the future settings popup — so none of this is
- * scoped to a host. Sizes are **design pixels** (hosts live inside `.stage-scale` and scale with
- * the canvas).
+ * Two hosts — the one-off publish prompt and the settings popup — so none of this is scoped to a
+ * host. Sizes are **design pixels** (hosts live inside `.stage-scale` and scale with the canvas).
  */
 
 .publish-fields {
@@ -21,18 +20,17 @@
   letter-spacing: 0.06em;
 }
 
-/* 名稱欄：儲存鍵浮在它裏面、貼齊右緣（使用者定案）。 */
-.publish-fields__box {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
+/*
+ * 名稱欄。**右內距已經回到對稱的 18px** —— 它原本留了 124px 給浮在框內、貼齊右緣的儲存鍵；
+ * 儲存鍵已經移除（使用者定案：改完就套用，不必再按一下），那段留白也該跟著還給文字。
+ * The name field. Its right inset is back to a symmetric 18px: it used to reserve 124px for the
+ * save key that floated inside the field pinned to the right edge. That key is gone — the user's
+ * decision is that an edit applies on its own — so the reserved space goes back to the text.
+ */
 .publish-fields__name {
   width: 100%;
   min-width: 0;
-  /* 右內距要留得下浮在上面的儲存鍵，否則長名字的尾巴會滑到按鈕底下。 */
-  padding: 12px 124px 12px 18px;
+  padding: 12px 18px;
   border: 1px solid var(--color-border);
   border-radius: 14px;
   background: rgba(0, 0, 0, 0.28);
@@ -44,37 +42,6 @@
 .publish-fields__name:focus-visible {
   outline: 3px solid var(--color-accent);
   outline-offset: 2px;
-}
-
-/* 儲存鍵：貼合文字（wrap-content）、貼緊輸入框右緣。 */
-.publish-fields__save {
-  position: absolute;
-  top: 50%;
-  right: 6px;
-  transform: translateY(-50%);
-  width: auto;
-  white-space: nowrap;
-  padding: 10px 24px;
-  border: 0;
-  border-radius: 10px;
-  background: var(--color-accent);
-  color: var(--color-accent-ink);
-  font-family: inherit;
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  line-height: 1;
-  cursor: pointer;
-  transition: filter var(--transition-fast);
-}
-
-.publish-fields__save:hover {
-  filter: brightness(1.06);
-}
-
-.publish-fields__save:focus-visible {
-  outline: 3px solid var(--color-fg);
-  outline-offset: 3px;
 }
 
 .publish-fields__units {

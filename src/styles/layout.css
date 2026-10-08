@@ -358,10 +358,23 @@
   touch-action: none;
 }
 
-/* 畫布可聚焦（鍵盤瞄準與投放），所以需要一個看得見的焦點框。 */
+/*
+ * 畫布是鍵盤操作的宿主（方向鍵瞄準、空白／↓ 投放），所以開局會**程式化聚焦**它
+ * （見 `main.ts`）。聚焦就會讓瀏覽器畫一圈焦點框 —— 玩家看到的就是它，而且 dev 與 release
+ * 都一樣（那是瀏覽器預設行為，不是開發工具）。使用者定案：**不要這一圈**。畫面上的瞄準標記
+ * 本身就是「鍵盤正在控制」的可見回饋，多一個外框只是雜訊。
+ * **只關畫布**：其餘可聚焦元件（技能卡、名稱欄、各顆按鈕）仍保有自己的焦點框。
+ * The canvas hosts keyboard play (arrows aim, Space/↓ drops), so it is **focused
+ * programmatically** at startup (see `main.ts`), and focusing paints a ring — the one the player
+ * reported, identical in dev and release, because it is browser default behaviour rather than a
+ * dev-only artefact. The user's decision is **no ring here**: the aim marker on the canvas is
+ * already the visible proof that the keyboard is in control, and the extra frame is noise. It is
+ * switched off **for the canvas only** — every other focusable element (skill cards, the name
+ * field, the buttons) keeps its own ring.
+ */
+.stage__canvas:focus,
 .stage__canvas:focus-visible {
-  outline: 3px solid var(--color-accent);
-  outline-offset: 3px;
+  outline: none;
 }
 
 /*
