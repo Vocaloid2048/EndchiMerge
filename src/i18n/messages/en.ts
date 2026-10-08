@@ -32,7 +32,16 @@ export const en: Messages = {
   'label.next': 'NEXT',
   'label.combo': 'COMBO',
   'label.skillList': 'SKILL LIST',
-  'label.meltingList': 'MELTING LIST',
+  /*
+   * 使用者定案：這個標籤在英文也照「圖鑑」的意思走，不再沿用設計稿的 `MELTING LIST`
+   * （`MELTING` 仍留在程式內部的識別名，改的只有顯示文字）。英文用 `COMPENDIUM`；
+   * 想換成 `CODEX` / `ARCHIVE` 這類同義詞只動這一行。
+   * The user's decision: this label follows the meaning of 圖鑑 in English too, rather than
+   * keeping the mock's `MELTING LIST`. (`MELTING` survives as an internal identifier — only the
+   * displayed text changed.) `COMPENDIUM` is the pick; swapping in `CODEX` / `ARCHIVE` is a
+   * one-line change.
+   */
+  'label.meltingList': 'COMPENDIUM',
   'label.gameOver': 'GAME OVER',
   'label.newBest': 'NEW BEST',
   'label.best': 'BEST',
@@ -68,6 +77,9 @@ export const en: Messages = {
   'leaderboard.mergesValue': '{value} merges',
   'leaderboard.self':
     'Your best: {value} ({score} pts) · #{rank} of {total} players',
+  /* Past #100 the rank is not reported, only the share of players beaten (the user's decision). */
+  'leaderboard.selfBeats':
+    'Your best: {value} ({score} pts) · beats {beats}% of players ({total} total)',
   'leaderboard.tab.score': 'Best score',
   'leaderboard.tab.combo': 'COMBO',
   'leaderboard.tab.merges': 'Merges',

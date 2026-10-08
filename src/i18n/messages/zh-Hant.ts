@@ -82,6 +82,14 @@ export const zhHant = {
   'leaderboard.comboValue': '{value} 連',
   'leaderboard.mergesValue': '{value} 次',
   'leaderboard.self': '你的最佳：{value}（{score} 分）· 第 {rank} 名，共 {total} 位玩家',
+  /*
+   * 100 名之後不報名次（使用者定案）：榜只列前 100，第 101 名起的名次沒有對應的列可以看，
+   * 報一個玩家找不到的名字只是為難他，改成報「超越了百分之多少的玩家」。
+   * Past #100 no rank is reported (the user's decision): the board only lists the top 100, so a
+   * rank beyond that has no visible row to match, and quoting a number the player cannot find
+   * helps nobody. It reports the share of players beaten instead.
+   */
+  'leaderboard.selfBeats': '你的最佳：{value}（{score} 分）· 超越 {beats}% 的玩家（共 {total} 位）',
   'leaderboard.tab.score': '最高分數',
   'leaderboard.tab.combo': 'COMBO 數',
   'leaderboard.tab.merges': '合成數',
@@ -89,12 +97,12 @@ export const zhHant = {
   /* ── 發布欄位 / Publish fields ─────────────────────────────────── */
   'publish.name': '顯示名稱',
   'publish.namePlaceholder': '輸入你的名稱',
-  'publish.units': '{used} / {max} 單位',
+  'publish.units': '{used} / {max} 字元',
   'publish.consent': '同意將我的成績顯示在排行榜上',
 
   'nameError.empty': '請輸入名稱（至少 1 個字）',
   'nameError.charset': '只能使用中英文、數字、空白與 _ - .',
-  'nameError.tooLong': '名稱太長（上限 {max} 單位；中文 1 字算 2 單位）',
+  'nameError.tooLong': '名稱太長（上限 {max} 字元；中文 1 字算 2 字元）',
 
   /* ── 首次發布詢問 / One-off publish prompt ─────────────────────── */
   'publishPrompt.title': '發布你的成績',

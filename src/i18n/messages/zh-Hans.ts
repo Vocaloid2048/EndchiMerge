@@ -53,18 +53,20 @@ export const zhHans: Messages = {
   'leaderboard.comboValue': '{value} 连',
   'leaderboard.mergesValue': '{value} 次',
   'leaderboard.self': '你的最佳：{value}（{score} 分）· 第 {rank} 名，共 {total} 位玩家',
+  /* 100 名之后不报名次，改报超越了百分之多少的玩家（使用者定案）。 */
+  'leaderboard.selfBeats': '你的最佳：{value}（{score} 分）· 超越 {beats}% 的玩家（共 {total} 位）',
   'leaderboard.tab.score': '最高分数',
   'leaderboard.tab.combo': 'COMBO 数',
   'leaderboard.tab.merges': '合成数',
 
   'publish.name': '显示名称',
   'publish.namePlaceholder': '输入你的名字',
-  'publish.units': '{used} / {max} 单位',
+  'publish.units': '{used} / {max} 字符',
   'publish.consent': '同意将我的成绩显示在排行榜上',
 
   'nameError.empty': '请输入名称（至少 1 个字）',
   'nameError.charset': '只能使用中英文、数字、空格与 _ - .',
-  'nameError.tooLong': '名称太长（上限 {max} 单位；中文 1 字算 2 单位）',
+  'nameError.tooLong': '名称太长（上限 {max} 字符；中文 1 字算 2 字符）',
 
   'publishPrompt.title': '发布你的成绩',
   'publishPrompt.message': '输入显示名称并同意分享，你的成绩才会出现在排行榜上；之后要修改可以到设置。',

@@ -60,6 +60,9 @@ export const yue: Messages = {
   'leaderboard.mergesValue': '{value} 次',
   'leaderboard.self':
     '你嘅最佳：{value}（{score} 分）· 第 {rank} 名，共 {total} 位玩家',
+  /* 100 名之後唔報名次，改報超越咗百分之幾嘅玩家（使用者定案）。 */
+  'leaderboard.selfBeats':
+    '你嘅最佳：{value}（{score} 分）· 超越 {beats}% 嘅玩家（共 {total} 位）',
   'leaderboard.tab.score': '最高分數',
   'leaderboard.tab.combo': 'COMBO 數',
   'leaderboard.tab.merges': '合成數',
