@@ -1350,6 +1350,7 @@ describe('GameSession — 溢位與結束 / overflow and game over', () => {
   function makeOverflowRoom(
     container: Partial<ContainerConfig> = {},
     settings: Partial<GameSettings> = {},
+    endless = false,
   ): GameSession {
     return new GameSession({
       config: {
@@ -1363,6 +1364,7 @@ describe('GameSession — 溢位與結束 / overflow and game over', () => {
       },
       rng: createRng(20261004),
       virtualWidth: 500,
+      endless,
     });
   }
 
@@ -1442,6 +1444,73 @@ describe('GameSession — 溢位與結束 / overflow and game over', () => {
     runFrames(session, 90);
 
     expect(session.isOver).toBe(true);
+  });
+
+  it('never ends the run in endless mode, however high the pile crosses the line', () => {
+    /*
+     * 無盡模式（使用者定案）：越線不警告、不結束。刻意重現上面「對照組」結束那一局的情境
+     * —— 同樣的極淺容器、同樣兩顆接觸入堆、`overflowGraceMs: 0` —— 差別只在 `endless`。
+     * Endless mode (the user's decision): crossing the line neither warns nor ends the run. This
+     * deliberately replays the scenario that ends the run above — same shallow container, same
+     * two touching dumplings, `overflowGraceMs: 0` — with `endless` as the only difference.
+     */
+    const session = makeOverflowRoom({ topOffset: 980, overflowAboveRim: 0 }, { overflowGraceMs: 0 }, true);
+
+    session.setAim(250);
+    session.drop();
+    runFrames(session, 90);
+    session.setAim(250);
+    session.drop();
+    runFrames(session, 180);
+
+    expect(session.isOver).toBe(false);
+    /* 紅線與倒數也必須維持關閉 —— 只擋結束、卻照樣亮紅線會誤導玩家。 */
+    expect(session.overflowSettled).toBe(false);
+    expect(session.overflowDanger).toBe(false);
+    expect(session.overflowSecondsLeft).toBe(0);
+    expect(session.overflowProgress).toBe(0);
+  });
+
+  it('clears a running countdown when endless mode is switched on', () => {
+    /*
+     * 倒數途中打開無盡模式，殘留的倒數必須被清掉：否則關掉無盡之後，那個舊倒數會在半途繼續
+     * 跑到結束 —— 玩家根本沒有再越線。
+     * Turning endless on mid-countdown must clear the pending countdown: otherwise, after endless
+     * is turned back off, that stale countdown would resume and end the run even though the
+     * player never crossed the line again.
+     */
+    const session = makeOverflowRoom({ topOffset: 980, overflowAboveRim: 0 }, { overflowGraceMs: 5000 });
+
+    session.setAim(250);
+    session.drop();
+    runFrames(session, 90);
+    session.setAim(250);
+    session.drop();
+    runFrames(session, 90);
+
+    /* 前提：堆疊已越線且停定，倒數正在跑。 */
+    expect(session.overflowSettled).toBe(true);
+    expect(session.overflowSecondsLeft).toBeGreaterThan(0);
+
+    session.setEndless(true);
+    expect(session.overflowSettled).toBe(false);
+    expect(session.overflowSecondsLeft).toBe(0);
+
+    session.setEndless(false);
+    expect(session.isOver).toBe(false);
+  });
+
+  it('exposes the endless flag and ignores a redundant toggle', () => {
+    const session = makeOverflowRoom({}, {}, false);
+
+    expect(session.endlessMode).toBe(false);
+
+    session.setEndless(true);
+    expect(session.endlessMode).toBe(true);
+
+    /* 設成同一個值不該有任何副作用（尤其是重設倒數）。 */
+    session.setEndless(true);
+    expect(session.endlessMode).toBe(true);
   });
 
   it('ignores drops after the run is over', () => {

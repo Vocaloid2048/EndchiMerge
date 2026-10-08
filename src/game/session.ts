@@ -262,6 +262,12 @@ export interface GameSessionOptions {
    * the path taken by tests and by any run without sprite assets.
    */
   silhouettes?: SilhouetteCache;
+  /**
+   * 起始的無盡模式狀態。這是跨局設定，執行期由 `setEndless()` 更新。
+   * The initial endless-mode state. It is a cross-run setting, changed at runtime via
+   * `setEndless()`.
+   */
+  endless?: boolean;
 }
 
 export class GameSession implements SkillBoard {
@@ -370,6 +376,17 @@ export class GameSession implements SkillBoard {
    */
   private maxComboValue = 0;
   private over = false;
+  /**
+   * 無盡模式：越過警戒線**不觸發** 5 秒警告、也**不會結束**這一局（使用者定案）。
+   * Endless mode: crossing the warning line triggers **neither** the 5-second warning **nor**
+   * the end of the run (the user's decision).
+   *
+   * 這是一個**跨局保留的設定**（住在設定頁），不是單局狀態，所以 `reset()` 不會動它 ——
+   * 玩家調好之後預期每一局都照這個規則跑。
+   * It is a **setting that outlives a run** (it lives on the settings page), not per-run state,
+   * so `reset()` leaves it alone: once set, the player expects every run to follow it.
+   */
+  private endless = false;
 
   /**
    * 最後一次投放的時刻；`-Infinity` 代表「還沒投過」，所以開局第一顆不受冷卻限制。
@@ -407,6 +424,7 @@ export class GameSession implements SkillBoard {
     this.levels = options.config.levels.levels;
     this.unlocks = options.unlocks;
     this.silhouettes = options.silhouettes;
+    this.endless = options.endless === true;
     this.virtualHeight = options.virtualHeight ?? 1000;
     this.mergeCooldownMs = Math.max(0, this.config.levels.settings.mergeCooldownMs);
     this.dropCooldownMs = Math.max(0, this.config.levels.settings.dropCooldownMs);
@@ -2304,6 +2322,15 @@ export class GameSession implements SkillBoard {
     if (this.over) return;
 
     /*
+     * 無盡模式：整段溢位判定直接跳過（使用者定案）。不停用倒數、也不結束，玩家想玩多久就
+     * 玩多久 —— 警戒線仍畫出來當參考，但沒有任何後果。
+     * Endless mode skips the whole overflow check (the user's decision). No countdown, no end —
+     * the player plays as long as they like. The warning line is still drawn as a reference, but
+     * it has no consequence.
+     */
+    if (this.endless) return;
+
+    /*
      * 浮動期間與其後的緩衝完全不判定溢位（使用者定案）：浮起本來就會逼近警戒線，照常計時
      * 等於技能一用就自殺。這裡直接跳過，連計時器都不推進 —— 凍結而不是歸零，因為歸零會
      * 讓緩衝結束後「從頭倒數」，而那既不是玩家的意圖也不是原本的狀態。
@@ -2591,9 +2618,9 @@ export class GameSession implements SkillBoard {
     return this.combo.snapshot().multiplier;
   }
 
-  /** 溢位寬限的進度 `0..1`；給 UI 顯示倒數。 */
+  /** 溢位寬限的進度 `0..1`；給 UI 顯示倒數。無盡模式下永遠是 0（沒有在倒數）。 */
   get overflowProgress(): number {
-    return this.overflow.progress;
+    return this.endless ? 0 : this.overflow.progress;
   }
 
   /**
@@ -2605,18 +2632,40 @@ export class GameSession implements SkillBoard {
    * still moving shows nothing at all (the user's decision).
    */
   get overflowSettled(): boolean {
-    return !this.over && !this.overflowPaused && this.overflow.settled;
+    return !this.over && !this.endless && !this.overflowPaused && this.overflow.settled;
   }
 
   /** 溢位倒數剩餘秒數（整數，1 起跳）；未起算時為 0。 */
   get overflowSecondsLeft(): number {
-    if (this.overflowPaused) return 0;
+    if (this.endless || this.overflowPaused) return 0;
     return this.overflow.settled ? this.overflow.remainingSeconds : 0;
   }
 
   /** 這一步是否處於「已越線且已停定」的危險狀態。 */
   get overflowDanger(): boolean {
-    return !this.over && !this.overflowPaused && this.overflow.settled;
+    return !this.over && !this.endless && !this.overflowPaused && this.overflow.settled;
+  }
+
+  /** 無盡模式是否開啟。 */
+  get endlessMode(): boolean {
+    return this.endless;
+  }
+
+  /**
+   * 切換無盡模式。
+   * Toggle endless mode.
+   *
+   * 開啟時**立刻清掉正在跑的溢位倒數**：不清的話，玩家在倒數中打開無盡模式、之後又關掉，
+   * 那個殘留的倒數會在半途繼續跑到結束 —— 玩家根本沒有再越線，卻被判結束。
+   * Turning it on **clears any countdown already running**: otherwise a player who turns endless
+   * on during a countdown and later turns it off would have that stale countdown resume and end
+   * the run even though they never crossed the line again.
+   */
+  setEndless(on: boolean): void {
+    if (this.endless === on) return;
+
+    this.endless = on;
+    if (on) this.overflow.reset();
   }
 
   /** 這一局是否已結束（溢位逾時）。 */
