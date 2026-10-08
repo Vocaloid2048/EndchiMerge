@@ -13,6 +13,19 @@ export const zhHans: Messages = {
   'common.close': '关闭',
   'common.save': '保存',
 
+  /* 設計稿標籤 / Mock labels */
+  'label.score': '分数',
+  'label.bestTry': '最高纪录',
+  'label.merged': '合成次数',
+  'label.next': '下一颗',
+  'label.combo': '连击',
+  'label.skillList': '技能列表',
+  'label.meltingList': '图鉴',
+  'label.gameOver': '游戏结束',
+  'label.newBest': '新纪录',
+  'label.best': '最高纪录',
+  'label.statSuffix': '：',
+
   'chrome.toolbar': '工具栏',
   'chrome.canvas': '游戏容器：方向键瞄准、空格键投放，或用鼠标点击投放。方团团在此落下与合成。',
   'chrome.music': '音乐开关',
@@ -97,7 +110,7 @@ export const zhHans: Messages = {
     '倘若堆叠太高超过警戒线，则需要在 5 秒内尽快清除堆叠，超时后则判定为本局结束。',
   'help.origin.heading': '制作缘由',
   'help.origin.body1':
-    '《方团团大作战》是基于《明日方舟：终末地》的「合成！山团团」网页活动玩法的非官方粉丝延伸版本。',
+    '《方团团大作战》是基于《明日方舟：终末地》的「融合！山团团！」网页活动玩法的非官方粉丝延伸版本。',
   'help.origin.body2':
     '当初在玩完这个网页活动后意犹未尽，总感觉缺了一点乐趣，想说如果再添加一些新技能、设定、角色的话会不会更加好玩？刚好最近在尝试学习使用 AI Agent（加上不太熟悉网页游戏开发），打算让 Agent 基于我的期望自己完成整个项目（但后来发现我想太多了），结果花了半天时间参考官方的山团团、再加以自己的想法来制作一个个方团团（所以看起来几乎一样？）。后面也花了几天时间来跟 Agent 一边对话、一边修正源代码的部分（所以源代码的部分主要是 Agent 编写，但方团团是我自己一个个慢慢捏出来的）。',
   'help.origin.body3':

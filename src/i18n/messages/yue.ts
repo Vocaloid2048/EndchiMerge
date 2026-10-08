@@ -16,6 +16,19 @@ export const yue: Messages = {
   'common.close': '閂',
   'common.save': '儲存',
 
+  /* 設計稿標籤 / Mock labels（「下一粒」用粵語量詞，其他地方亦作「兩粒方團團」） */
+  'label.score': '分數',
+  'label.bestTry': '最高紀錄',
+  'label.merged': '合成次數',
+  'label.next': '下一粒',
+  'label.combo': '連擊',
+  'label.skillList': '技能列表',
+  'label.meltingList': '圖鑑',
+  'label.gameOver': '遊戲結束',
+  'label.newBest': '新紀錄',
+  'label.best': '最高紀錄',
+  'label.statSuffix': '：',
+
   'chrome.toolbar': '工具列',
   'chrome.canvas': '遊戲容器：撳方向鍵瞄準、空白鍵投放，或者用滑鼠撳落去投放。方團團喺呢度跌落同合成。',
   'chrome.music': '音樂開關',
@@ -100,7 +113,7 @@ export const yue: Messages = {
     '如果堆疊太高、過咗警戒線，就要喺 5 秒內盡快清走個堆疊，超時就會當呢局結束。',
   'help.origin.heading': '製作緣由',
   'help.origin.body1':
-    '《方團團大作戰》係基於《明日方舟：終末地》嘅「合成！山團團」網頁活動玩法嘅非官方粉絲延伸版本。',
+    '《方團團大作戰》係基於《明日方舟：終末地》嘅「融合！山團團！」網頁活動玩法嘅非官方粉絲延伸版本。',
   'help.origin.body2':
     '當初玩完呢個網頁活動之後意猶未盡，總覺得爭咁啲樂趣，諗住如果加多啲新技能、設定、角色，會唔會更加好玩？咁啱最近又喺度學用 AI Agent（加上自己唔太熟網頁遊戲開發），打算畀 Agent 照住我嘅期望自己搞掂成個專案（但後來發現我諗多咗），結果花咗半日時間參考官方嘅山團團，再加埋自己嘅諗法，一個一個咁整出方團團（所以睇落幾乎一樣？）。之後都花咗幾日時間同 Agent 一路傾一路改原始碼（所以原始碼主要係 Agent 寫，但方團團係我自己一個一個慢慢揑出嚟嘅）。',
   'help.origin.body3':

@@ -11,12 +11,11 @@
  * 佔位符寫成 `{name}`，由 `t()` 代入（見 `src/i18n/index.ts`）。
  * Placeholders are written `{name}` and substituted by `t()`.
  *
- * 刻意**不翻譯**的字串：設計稿上的英文標籤（`SCORE` / `BEST TRY` / `MERGED` / `NEXT` /
- * `COMBO` / `SKILL LIST` / `MELTING LIST` / `GAME OVER` / `NEW BEST`）屬於設計語言，
- * 五種語言一律照原樣顯示，因此不在此表。
- * Strings deliberately **left untranslated**: the mock's English labels (`SCORE`, `BEST TRY`,
- * `MERGED`, `NEXT`, `COMBO`, `SKILL LIST`, `MELTING LIST`, `GAME OVER`, `NEW BEST`) are part of
- * the design language and read the same in every locale, so they are not listed here.
+ * **設計稿標籤**（`label.*`）原本刻意不翻譯，使用者後來定案要跟著語系走，因此已列進字典。
+ * 英文字典照原樣收錄，因為那幾個字本來就是英文原文。
+ * The **mock's own labels** (`label.*`) used to be left untranslated on purpose; the user has
+ * since decided they should follow the locale, so they are in the tables now. The English table
+ * carries them verbatim, since those strings are already the English original.
  */
 
 export const zhHant = {
@@ -24,6 +23,33 @@ export const zhHant = {
   'common.cancel': '取消',
   'common.close': '關閉',
   'common.save': '儲存',
+
+  /* ── 設計稿標籤 / Mock labels ──────────────────────────────────── */
+  /*
+   * 這些字在設計稿上是英文。同一組標籤會出現在兩個地方（HUD 與結算覆蓋層），所以共用同一組
+   * 鍵，而不是每個畫面各寫一份 —— `label.score` 與 `label.merged` 都是兩處共用。
+   * These read as English in the mock. The same labels appear in two places (the HUD and the
+   * end-of-run overlay), so they share one set of keys rather than one per screen.
+   */
+  'label.score': '分數',
+  'label.bestTry': '最高紀錄',
+  'label.merged': '合成次數',
+  'label.next': '下一顆',
+  'label.combo': '連擊',
+  'label.skillList': '技能列表',
+  /* 使用者定案「MELTING LIST 就是圖鑑」（docs/CHANGELOG.md），所以照那個詞走。 */
+  'label.meltingList': '圖鑑',
+  'label.gameOver': '遊戲結束',
+  'label.newBest': '新紀錄',
+  'label.best': '最高紀錄',
+  /*
+   * 「標籤 ＋ 數值」之間的分隔號。中文用全形「：」，英文用半形「:」—— 標點也是語系的一部分，
+   * 所以它是一個鍵，而不是寫死在程式或 CSS 裡。
+   * The separator between a stat's label and its value. Chinese takes a fullwidth colon and
+   * English a halfwidth one: punctuation is part of the locale, so it is a key rather than
+   * something hard-coded in the script or the stylesheet.
+   */
+  'label.statSuffix': '：',
 
   /* ── 主畫面骨架 / Main-screen chrome ───────────────────────────── */
   'chrome.toolbar': '工具列',

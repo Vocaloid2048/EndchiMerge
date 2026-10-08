@@ -14,7 +14,7 @@
  * game state itself.
  */
 
-import { i18nAriaLabel, i18nText } from '../i18n';
+import { i18nAriaLabel, i18nText, type MessageKey } from '../i18n';
 import { appendChildren, el } from './dom';
 
 export interface GameOverSummary {
@@ -40,12 +40,15 @@ export interface GameOverOptions {
   onRestart: () => void;
 }
 
-/** 一格統計（標籤 ＋ 數值）。 */
-function statRow(label: string): { root: HTMLElement; value: HTMLElement } {
+/** 一格統計（標籤 ＋ 數值）。標籤收的是**鍵**，與 HUD 那兩列共用同一組 `label.*`。 */
+function statRow(labelKey: MessageKey): { root: HTMLElement; value: HTMLElement } {
   const root = el('div', 'game-over__stat');
   const value = el('dd', 'game-over__stat-value', '0');
 
-  appendChildren(root, el('dt', 'game-over__stat-label', label), value);
+  const term = el('dt', 'game-over__stat-label');
+  i18nText(term, labelKey);
+
+  appendChildren(root, term, value);
 
   return { root, value };
 }
@@ -57,12 +60,13 @@ export function createGameOver(options: GameOverOptions): GameOverView {
   root.setAttribute('aria-modal', 'true');
   i18nAriaLabel(root, 'gameOver.aria');
 
-  const badge = el('p', 'game-over__badge', 'NEW BEST');
+  const badge = el('p', 'game-over__badge');
+  i18nText(badge, 'label.newBest');
   badge.hidden = true;
 
-  const score = statRow('SCORE');
-  const merged = statRow('MERGED');
-  const best = statRow('BEST');
+  const score = statRow('label.score');
+  const merged = statRow('label.merged');
+  const best = statRow('label.best');
 
   const stats = el('dl', 'game-over__stats');
   appendChildren(stats, score.root, merged.root, best.root);
@@ -71,8 +75,11 @@ export function createGameOver(options: GameOverOptions): GameOverView {
   restart.type = 'button';
   i18nText(restart, 'gameOver.playAgain');
 
+  const title = el('h2', 'game-over__title');
+  i18nText(title, 'label.gameOver');
+
   const card = el('div', 'game-over__card');
-  appendChildren(card, el('h2', 'game-over__title', 'GAME OVER'), badge, stats, restart);
+  appendChildren(card, title, badge, stats, restart);
 
   root.append(card);
   options.host.append(root);

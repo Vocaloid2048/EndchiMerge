@@ -20,6 +20,24 @@ export const en: Messages = {
   'common.close': 'Close',
   'common.save': 'Save',
 
+  /*
+   * 設計稿標籤 / Mock labels.
+   * 英文這一欄照原樣 —— 這幾個字本來就是英文原文，也就是其他四語的翻譯來源。
+   * This column is verbatim: these strings are the English original that the other four
+   * locales translate from.
+   */
+  'label.score': 'SCORE',
+  'label.bestTry': 'BEST TRY',
+  'label.merged': 'MERGED',
+  'label.next': 'NEXT',
+  'label.combo': 'COMBO',
+  'label.skillList': 'SKILL LIST',
+  'label.meltingList': 'MELTING LIST',
+  'label.gameOver': 'GAME OVER',
+  'label.newBest': 'NEW BEST',
+  'label.best': 'BEST',
+  'label.statSuffix': ':',
+
   'chrome.toolbar': 'Toolbar',
   'chrome.canvas':
     'Game container: aim with the arrow keys, drop with Space, or click to drop. Dumplings fall and merge here.',

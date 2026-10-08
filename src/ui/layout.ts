@@ -29,7 +29,7 @@
 import { DESIGN_HEIGHT, DESIGN_WIDTH, LAYOUT_RECTS } from '../core/design';
 import { VIRTUAL_HEIGHT } from '../core/constants';
 import type { Rect } from '../core/types';
-import { i18nAriaLabel, i18nTitle, type MessageKey } from '../i18n';
+import { i18nAriaLabel, i18nText, i18nTitle, type MessageKey } from '../i18n';
 import { applyDesignTokens } from './designTokens';
 import { appendChildren, el } from './dom';
 import { createAssetIcon, type AssetIconName } from './icons';
@@ -121,19 +121,39 @@ function buildScoreCard(): HTMLElement {
   value.dataset['hook'] = 'score-value';
 
   const stats = el('dl', 'card__stats');
-  for (const [label, hookName] of [
-    ['BEST TRY', 'best-try'],
-    ['MERGED', 'merged'],
+  for (const [labelKey, hookName] of [
+    ['label.bestTry', 'best-try'],
+    ['label.merged', 'merged'],
   ] as const) {
     const row = el('div', 'card__stat');
-    const term = el('dt', 'card__stat-label', `${label}:`);
+    const term = el('dt', 'card__stat-label');
+
+    /*
+     * 標籤與分隔號是**兩個** `<span>`，不是一個字串加冒號。
+     * Label and separator are **two** `<span>`s rather than one string plus a colon.
+     *
+     * 理由是換語系時 `applyTo()` 對每個 `[data-i18n]` 是直接覆寫 `textContent`：往 `dt`
+     * 追加的文字節點不帶標記，下一次換語系就會被整個抹掉。分成兩個標記節點，兩邊各自更新。
+     * `applyTo()` overwrites `textContent` outright for every `[data-i18n]` node, so a text node
+     * appended to the `<dt>` carries no tag and would be wiped on the next locale change. Two
+     * tagged nodes update independently.
+     */
+    const name = el('span');
+    i18nText(name, labelKey);
+    const separator = el('span');
+    i18nText(separator, 'label.statSuffix');
+    appendChildren(term, name, separator);
+
     const definition = el('dd', 'card__stat-value', '0');
     definition.dataset['hook'] = hookName;
     appendChildren(row, term, definition);
     stats.append(row);
   }
 
-  appendChildren(card, el('h2', 'card__label', 'SCORE'), value, el('hr', 'card__rule'), stats);
+  const label = el('h2', 'card__label');
+  i18nText(label, 'label.score');
+
+  appendChildren(card, label, value, el('hr', 'card__rule'), stats);
   return card;
 }
 
@@ -174,7 +194,11 @@ function buildNextCard(): HTMLElement {
   card.dataset['region'] = 'next';
   const preview = el('div', 'card__preview');
   preview.dataset['hook'] = 'next-preview';
-  appendChildren(card, el('h2', 'card__label', 'NEXT'), preview);
+
+  const label = el('h2', 'card__label');
+  i18nText(label, 'label.next');
+
+  appendChildren(card, label, preview);
   return card;
 }
 
@@ -205,7 +229,11 @@ function buildComboCard(): HTMLElement {
   count.dataset['hook'] = 'combo-count';
   const detail = el('p', 'card__detail', '+ 0 (×1.0)');
   detail.dataset['hook'] = 'combo-detail';
-  appendChildren(card, el('h2', 'card__label', 'COMBO'), count, detail);
+
+  const label = el('h2', 'card__label');
+  i18nText(label, 'label.combo');
+
+  appendChildren(card, label, count, detail);
   return card;
 }
 
@@ -227,7 +255,10 @@ function buildSkillList(): HTMLElement {
   const grid = el('div', 'skill-grid');
   grid.dataset['hook'] = 'skill-grid';
 
-  appendChildren(panel, el('h2', 'panel__title', 'Skill List'), meter, grid);
+  const title = el('h2', 'panel__title');
+  i18nText(title, 'label.skillList');
+
+  appendChildren(panel, title, meter, grid);
   return panel;
 }
 
@@ -257,7 +288,11 @@ function buildMeltingList(): HTMLElement {
   panel.dataset['region'] = 'melting';
   const body = el('div', 'melting__body');
   body.dataset['hook'] = 'melting-body';
-  appendChildren(panel, el('h2', 'panel__title', 'MELTING LIST'), body);
+
+  const title = el('h2', 'panel__title');
+  i18nText(title, 'label.meltingList');
+
+  appendChildren(panel, title, body);
   return panel;
 }
 

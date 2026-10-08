@@ -19,6 +19,23 @@ export const ja: Messages = {
   'common.close': '閉じる',
   'common.save': '保存',
 
+  /*
+   * 設計稿標籤 / Mock labels.
+   * 元の設計は英語表記だが、ユーザーの決定により各言語へ訳す。
+   * The mock's own labels, translated per the user's decision.
+   */
+  'label.score': 'スコア',
+  'label.bestTry': 'ハイスコア',
+  'label.merged': '合成回数',
+  'label.next': 'つぎ',
+  'label.combo': 'コンボ',
+  'label.skillList': 'スキル一覧',
+  'label.meltingList': '図鑑',
+  'label.gameOver': 'ゲームオーバー',
+  'label.newBest': '新記録',
+  'label.best': 'ハイスコア',
+  'label.statSuffix': '：',
+
   'chrome.toolbar': 'ツールバー',
   'chrome.canvas':
     'ゲームコンテナ：方向キーで狙い、スペースキーで落とす、またはクリックで落とします。方團團はここで落下し、合成されます。',
