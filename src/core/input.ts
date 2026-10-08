@@ -12,10 +12,18 @@
  * The bindings return a disposer rather than owning a lifecycle, so page switching
  * (the M6 unlock screen) can tear them down.
  *
- * 鍵盤支援（方向鍵移動、空白／Enter 投放）與滑鼠走同一組回呼，所以兩種操作在
+ * 鍵盤支援（←／→ 移動瞄準點，空白／Enter／↓ 投放）與滑鼠走同一組回呼，所以兩種操作在
  * `GameSession` 眼中完全等價。
  * Keyboard support funnels through the same callbacks, so pointer and keyboard are
  * indistinguishable to `GameSession`.
+ *
+ * 鍵位對應是**橫向的**：瞄準點只有一個自由度，所以只有左右兩個方向鍵有意義，`↓` 留給
+ * 投放（使用者定案）。`↑` 刻意不做事 —— 它在這個遊戲裡沒有對應的動作，與其讓它偷偷往左
+ * 移一格，不如讓它什麼都不做。
+ * The key map is **horizontal**: the aim has one degree of freedom, so only left and right
+ * mean anything and `↓` is given to the drop (the user's decision). `↑` deliberately does
+ * nothing — it has no corresponding action here, and silently nudging left would be worse
+ * than no response at all.
  */
 
 import type { Viewport, VirtualPoint } from '../render/viewport';
@@ -49,10 +57,14 @@ export interface DropInputOptions {
 
 const DEFAULT_KEY_STEP = 20;
 
-/** 會攔截的按鍵，避免方向鍵與空白滾動頁面。 */
-const MOVE_LEFT_KEYS = new Set(['ArrowLeft', 'ArrowUp']);
-const MOVE_RIGHT_KEYS = new Set(['ArrowRight', 'ArrowDown']);
-const DROP_KEYS = new Set(['Enter', ' ', 'Spacebar']);
+/**
+ * 會攔截的按鍵，避免方向鍵與空白滾動頁面。
+ * Keys that are intercepted so the arrows and Space do not scroll the page.
+ */
+const MOVE_LEFT_KEYS = new Set(['ArrowLeft']);
+const MOVE_RIGHT_KEYS = new Set(['ArrowRight']);
+/** `ArrowDown`（使用者定案：↓ 即投放）＋ 空白與 Enter。 */
+const DROP_KEYS = new Set(['Enter', ' ', 'Spacebar', 'ArrowDown']);
 export function attachDropInput(options: DropInputOptions): () => void {
   const { target, viewport, onAim, onDrop, onCancel } = options;
   const keyStep = options.keyStep ?? DEFAULT_KEY_STEP;

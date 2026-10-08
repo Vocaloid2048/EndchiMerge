@@ -531,6 +531,19 @@ async function bootstrap(): Promise<void> {
     initialAim: session.aimXValue,
   });
 
+  /*
+   * 開局就把焦點交給畫布。`keydown` 綁在畫布上（而不是 `window`），這樣在名稱欄打字時
+   * 空白鍵才不會順手投下一顆；代價是畫布沒有焦點時方向鍵收不到，玩家得先點一下畫面。
+   * 這裡補上開場的聚焦，方向鍵才會「一開局就能用」。`preventScroll` 是必要的 —— 少了它
+   * 瀏覽器會為了把畫布帶進視野而捲動頁面。
+   * Hand the focus to the canvas up front. `keydown` is bound to the canvas rather than to
+   * `window` so that typing a space in the name field cannot drop a dumpling; the price is that
+   * the arrows go nowhere until the canvas is focused, which used to mean clicking the board
+   * first. Focusing here makes the arrow keys work from the very first press. `preventScroll`
+   * matters: without it the browser scrolls the page to bring the canvas into view.
+   */
+  canvas.focus({ preventScroll: true });
+
   /* 先寫一次 HUD，否則 NEXT 卡會空著等到第一次狀態變化。 */
   updateHud();
 
