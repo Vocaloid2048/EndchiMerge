@@ -63,14 +63,22 @@ export interface Layout {
 
 /**
  * 工具列每個圖示的語意（design.md D23 + 重新開始）。
+ * Toolbar semantics per design.md D23, plus restart.
+ *
+ * **「主頁面」已移除**（使用者定案）：排行榜、說明與設定都是模態，遊戲本體永遠在下面，
+ * 一顆切回本體的按鈕無事可做 —— 所以 `ic_game` 不再出現在工具列，膠囊也就回到設計稿的
+ * 五顆鈕（見 `core/design.ts` 的 `toolGroup`）。
+ * **The "home" button was removed** (the user's decision): the leaderboard, help and settings are
+ * all modals and the game itself never goes away, so a button that switches back to it has
+ * nothing to do. `ic_game` therefore left the toolbar and the capsule returned to the mock's five
+ * buttons (see `toolGroup` in `core/design.ts`).
+ *
  * 重新開始的**行為**（彈出確認對話框）不在這裡 —— 這裡只負責把按鈕放上工具列，`main.ts`
  * 會用 `ui/restartButton.ts` 把確認流程接上。
- * Toolbar semantics per design.md D23, plus restart. Restart's *behaviour* (the confirmation
- * dialog) does not live here — this only places the button; `main.ts` wires the
- * confirm flow via `ui/restartButton.ts`.
+ * Restart's *behaviour* (the confirmation dialog) does not live here — this only places the
+ * button; `main.ts` wires the confirm flow via `ui/restartButton.ts`.
  */
 const TOOLBAR_ITEMS: readonly { icon: AssetIconName; label: string; action: string; disabled?: boolean }[] = [
-  { icon: 'home', label: '主頁面', action: 'home' },
   { icon: 'trophy', label: '排行榜', action: 'leaderboard' },
   { icon: 'workshop', label: '創意工坊（即將推出）', action: 'workshop', disabled: true },
   { icon: 'help', label: '遊戲說明', action: 'help' },
@@ -118,7 +126,7 @@ function buildScoreCard(): HTMLElement {
   return card;
 }
 
-/** 工具列：六圖示共用一個膠囊群組（design.md D23 + 重新開始鍵）。 */
+/** 工具列：五圖示共用一個膠囊群組（design.md D23 + 重新開始鍵）。 */
 function buildToolbar(): HTMLElement {
   const nav = el('nav', 'panel panel--pill toolbar');
   nav.dataset['region'] = 'toolbar';

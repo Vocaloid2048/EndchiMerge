@@ -24,7 +24,6 @@
 
 /** 素材圖示的語意名（對應 `design.md D23` 的工具列語意 + 重新開始）。 */
 export const ASSET_ICON_NAMES = [
-  'home',
   'trophy',
   'workshop',
   'help',
@@ -36,7 +35,6 @@ export type AssetIconName = (typeof ASSET_ICON_NAMES)[number];
 
 /** 素材圖示 → `public/assets/ui/` 下的檔名（不含副檔名）。 */
 const ASSET_ICON_FILES: Record<AssetIconName, string> = {
-  home: 'ic_game',
   trophy: 'ic_leaderboard',
   workshop: 'ic_creation',
   help: 'ic_question',
