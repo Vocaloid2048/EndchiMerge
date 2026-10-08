@@ -31,16 +31,24 @@
  */
 
 import type { SkillCardState } from '../game/session';
+import { i18n, t, type MessageKey } from '../i18n';
 import { el } from './dom';
 
-/** 每個 user_pick 技能的提示文案；沒登記的技能用通用句式，不會空白。 */
-const HINTS: Readonly<Record<string, string>> = {
-  discard: '當棄即棄：點選要棄掉的方團團',
-  fate_swap: '命運互換：點選兩顆方團團交換位置',
+/**
+ * 每個 user_pick 技能的提示文案鍵；沒登記的技能用通用句式，不會空白。
+ * The hint key for each user_pick skill; an unregistered skill falls back to the generic line,
+ * so the strip is never blank.
+ *
+ * 文案裡**已含技能名**（而不是用 `{name}` 插值）：這兩個技能的名字是定死的，插值反而要在
+ * 「當棄即棄！」後面再接一個標點。技能名若日後改名，這裡要一起改。
+ * The sentences **contain the skill name** rather than interpolating `{name}`: those two names
+ * are fixed, and interpolating would put a second punctuation mark after "當棄即棄！". If a skill
+ * is renamed, these move with it.
+ */
+const HINT_KEYS: Readonly<Record<string, MessageKey>> = {
+  discard: 'skillHint.discard',
+  fate_swap: 'skillHint.fate_swap',
 };
-
-/** 通用句式（未登記的 user_pick 技能）。 */
-const GENERIC_HINT = '點選方團團';
 
 export interface SkillHintOptions {
   /**
@@ -81,9 +89,19 @@ export function createSkillHint(options: SkillHintOptions): SkillHint {
       return;
     }
 
-    const base = HINTS[arming.id] ?? GENERIC_HINT;
-    const text = `${base}（${String(arming.selectedCount)}/${String(arming.pickCount)}）・點空白處取消`;
-    const next = `${arming.id}|${String(arming.selectedCount)}`;
+    /*
+     * 語系也放進簽名：換語言時同一張卡的文字要重畫，否則會留著上一個語言。
+     * The locale is part of the signature: on a locale change the same card's text has to be
+     * rewritten, or it would keep the previous language.
+     */
+    const base =
+      HINT_KEYS[arming.id] === undefined ? t('skillHint.generic') : t(HINT_KEYS[arming.id]);
+    const text = t('skillHint.counter', {
+      base,
+      selected: arming.selectedCount,
+      total: arming.pickCount,
+    });
+    const next = `${arming.id}|${String(arming.selectedCount)}|${i18n.locale}`;
 
     if (next === signature) return;
     signature = next;

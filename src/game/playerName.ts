@@ -96,15 +96,3 @@ export function validateDisplayName(raw: string): NameValidation {
 
   return { ok: true, value, units };
 }
-
-/** 把失敗原因轉成給玩家看的一句話（繁中）。 */
-export function nameErrorText(reason: NameError): string {
-  switch (reason) {
-    case 'empty':
-      return '請輸入名稱（至少 1 個字）';
-    case 'charset':
-      return '只能使用中英文、數字、空白與 _ - .';
-    case 'tooLong':
-      return `名稱太長（上限 ${String(NAME_MAX_UNITS)} 單位；中文 1 字算 2 單位）`;
-  }
-}

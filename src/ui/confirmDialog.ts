@@ -30,19 +30,30 @@
  * `ui/scale.ts`), the same coordinate language as every other panel.
  */
 
+import { t } from '../i18n';
 import { appendChildren, el } from './dom';
 
-export interface ConfirmDialogOptions {
+/**
+ * 對話框上的一組文案。
+ * One set of dialog copy.
+ *
+ * 獨立成型別是為了讓 `setTexts()` 能在**語系變更後**重寫一次 —— 對話框只在建立時被建一次，
+ * 之後不會重建，所以文字必須能被換掉（見 `ui/restartButton.ts`）。
+ * A separate type so `setTexts()` can rewrite the copy **after a locale change**: the dialog is
+ * built once and never rebuilt, so its strings have to be replaceable (see
+ * `ui/restartButton.ts`).
+ */
+export interface ConfirmDialogTexts {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  /** 取消鈕的文字；未提供時用 `common.cancel` 的翻譯。 */
+  cancelLabel?: string;
+}
+
+export interface ConfirmDialogOptions extends ConfirmDialogTexts {
   /** 掛載點；通常是 `layout.root`（同時也是縮放畫布）。 */
   host: HTMLElement;
-  /** 標題，例如「重新開始？」。 */
-  title: string;
-  /** 說明文字，講清楚這個動作會失去什麼。 */
-  message: string;
-  /** 確認鈕的文字，例如「重新開始」。 */
-  confirmLabel: string;
-  /** 取消鈕的文字；預設「取消」。 */
-  cancelLabel?: string;
   /**
    * 確認鈕的語氣：`'danger'`（預設，警示色，用於破壞性動作）或 `'accent'`（強調色）。
    * The confirm button's tone: `'danger'` (default, for destructive actions) or `'accent'`.
@@ -58,27 +69,27 @@ export interface ConfirmDialog {
   /** 關閉對話框（等同取消）；已經關著時不做事。 */
   close(): void;
   readonly visible: boolean;
+  /** 換一組文案（語系變更時呼叫）；不影響開關狀態。 */
+  setTexts(texts: ConfirmDialogTexts): void;
   /** 移除節點與事件綁定；頁面層級 teardown 用。 */
   dispose(): void;
 }
 
 export function createConfirmDialog(options: ConfirmDialogOptions): ConfirmDialog {
-  const cancelLabel = options.cancelLabel ?? '取消';
   const tone = options.tone ?? 'danger';
 
   const root = el('div', 'confirm');
   root.hidden = true;
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-modal', 'true');
-  root.setAttribute('aria-label', options.title);
 
-  const title = el('h2', 'confirm__title', options.title);
-  const message = el('p', 'confirm__message', options.message);
+  const title = el('h2', 'confirm__title');
+  const message = el('p', 'confirm__message');
 
-  const cancel = el('button', 'confirm__action confirm__action--ghost', cancelLabel);
+  const cancel = el('button', 'confirm__action confirm__action--ghost');
   cancel.type = 'button';
 
-  const confirm = el('button', `confirm__action confirm__action--${tone}`, options.confirmLabel);
+  const confirm = el('button', `confirm__action confirm__action--${tone}`);
   confirm.type = 'button';
 
   const actions = el('div', 'confirm__actions');
@@ -89,6 +100,17 @@ export function createConfirmDialog(options: ConfirmDialogOptions): ConfirmDialo
 
   root.append(card);
   options.host.append(root);
+
+  /** 目前的一組文案；`setTexts()` 會整組換掉。 */
+  function setTexts(texts: ConfirmDialogTexts): void {
+    title.textContent = texts.title;
+    message.textContent = texts.message;
+    confirm.textContent = texts.confirmLabel;
+    cancel.textContent = texts.cancelLabel ?? t('common.cancel');
+    root.setAttribute('aria-label', texts.title);
+  }
+
+  setTexts(options);
 
   /*
    * 關閉後要把焦點還原到「開啟這個對話框的那顆鈕」，否則鍵盤使用者關掉之後會落到頁面開頭。
@@ -165,6 +187,7 @@ export function createConfirmDialog(options: ConfirmDialogOptions): ConfirmDialo
 
     open,
     close,
+    setTexts,
 
     dispose(): void {
       cancel.removeEventListener('click', onCancelClick);

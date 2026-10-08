@@ -31,7 +31,24 @@
 
 import type { LeaderboardCategory, LeaderboardEntry, LeaderboardSource } from '../game/leaderboard';
 import { LEADERBOARD_CATEGORIES, LEADERBOARD_LIMIT } from '../game/leaderboard';
+import { i18n, i18nAriaLabel, i18nText, t, type MessageKey } from '../i18n';
 import { appendChildren, el } from './dom';
+
+/**
+ * 分頁標題的語系鍵。
+ * The locale key for each tab's label.
+ *
+ * 分類的**識別與順序**仍由資料層（`LEADERBOARD_CATEGORIES`）決定，只有顯示文字由 UI 翻譯
+ * ——資料層不該認識語系。
+ * The categories' **identity and order** still come from the data layer
+ * (`LEADERBOARD_CATEGORIES`); only the displayed text is translated here, because the data layer
+ * should know nothing about locales.
+ */
+const TAB_KEYS: Readonly<Record<LeaderboardCategory, MessageKey>> = {
+  score: 'leaderboard.tab.score',
+  combo: 'leaderboard.tab.combo',
+  merges: 'leaderboard.tab.merges',
+};
 
 export interface LeaderboardOptions {
   /** 掛載點；通常是 `layout.root`（同時也是縮放畫布）。 */
@@ -81,9 +98,9 @@ function primaryValue(entry: LeaderboardEntry, category: LeaderboardCategory): s
     case 'score':
       return formatNumber(entry.score);
     case 'combo':
-      return `${formatNumber(entry.maxCombo)} 連`;
+      return t('leaderboard.comboValue', { value: formatNumber(entry.maxCombo) });
     case 'merges':
-      return `${formatNumber(entry.merges)} 次`;
+      return t('leaderboard.mergesValue', { value: formatNumber(entry.merges) });
   }
 }
 
@@ -96,14 +113,17 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
   root.hidden = true;
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-modal', 'true');
-  root.setAttribute('aria-label', '排行榜');
+  i18nAriaLabel(root, 'leaderboard.title');
 
-  const title = el('h2', 'leaderboard__title', '排行榜');
-  const subtitle = el('p', 'leaderboard__subtitle', `全時段 · Top ${String(LEADERBOARD_LIMIT)}`);
+  const title = el('h2', 'leaderboard__title');
+  i18nText(title, 'leaderboard.title');
+
+  /* 副標題帶 Top 數，屬動態文字，由 `renderChrome()` 寫入。 */
+  const subtitle = el('p', 'leaderboard__subtitle');
 
   const closeButton = el('button', 'leaderboard__close', '×');
   closeButton.type = 'button';
-  closeButton.setAttribute('aria-label', '關閉排行榜');
+  i18nAriaLabel(closeButton, 'leaderboard.close');
 
   const header = el('header', 'leaderboard__header');
   appendChildren(header, title, subtitle, closeButton);
@@ -115,7 +135,7 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
   const tabButtons = new Map<LeaderboardCategory, HTMLButtonElement>();
 
   for (const item of LEADERBOARD_CATEGORIES) {
-    const button = el('button', 'leaderboard__tab', item.label);
+    const button = el('button', 'leaderboard__tab');
     button.type = 'button';
     button.setAttribute('role', 'tab');
     button.addEventListener('click', (): void => {
@@ -143,6 +163,15 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
 
   /* ── 渲染 ──────────────────────────────────────────────────────────── */
 
+  /** 每次開窗（與換語系）都重寫一次的動態外框文字：副標題與分頁標籤。 */
+  function renderChrome(): void {
+    subtitle.textContent = t('leaderboard.subtitle', { limit: LEADERBOARD_LIMIT });
+
+    for (const item of LEADERBOARD_CATEGORIES) {
+      tabButtons.get(item.id)!.textContent = t(TAB_KEYS[item.id]);
+    }
+  }
+
   function renderList(): void {
     const snapshot = source.snapshot(category);
 
@@ -154,8 +183,8 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
     if (snapshot.entries.length === 0) {
       const empty = el('li', 'leaderboard__empty');
       empty.textContent = source.sharing
-        ? '還沒有紀錄 —— 先玩一局吧！'
-        : '未開啟分享，成績不會上榜。';
+        ? t('leaderboard.emptyShare')
+        : t('leaderboard.emptyNoShare');
       list.replaceChildren(empty);
       summary.hidden = true;
       return;
@@ -173,7 +202,11 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
       row.dataset['rank'] = String(index + 1);
 
       const rank = el('span', 'leaderboard__rank', `#${String(index + 1)}`);
-      const who = el('span', 'leaderboard__who', entry.name === '' ? '（未命名）' : entry.name);
+      const who = el(
+        'span',
+        'leaderboard__who',
+        entry.name === '' ? t('leaderboard.unnamed') : entry.name,
+      );
       const value = el('span', 'leaderboard__value', primaryValue(entry, category));
       const when = el('span', 'leaderboard__when', formatWhen(entry.at));
 
@@ -197,10 +230,16 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
      */
     const { entry, percentile, total } = snapshot.self;
     summary.hidden = false;
-    summary.textContent = `你的最佳：${primaryValue(entry, category)}（${formatNumber(entry.score)} 分）· 超越你自己 ${String(percentile)}% 的場次（共 ${String(total)} 場）`;
+    summary.textContent = t('leaderboard.self', {
+      value: primaryValue(entry, category),
+      score: formatNumber(entry.score),
+      percentile,
+      total,
+    });
   }
 
   function render(): void {
+    renderChrome();
     renderList();
   }
 
@@ -251,6 +290,11 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
     if (!root.hidden) render();
   });
 
+  /* 換語系時榜上的文字（分頁、數值單位、自己的摘要）要跟著重畫。 */
+  const unsubscribeLocale = i18n.subscribe((): void => {
+    if (!root.hidden) render();
+  });
+
   return {
     get visible(): boolean {
       return !root.hidden;
@@ -261,6 +305,7 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
 
     dispose(): void {
       unsubscribe();
+      unsubscribeLocale();
       closeButton.removeEventListener('click', onCloseClick);
       close();
       document.removeEventListener('keydown', onKeyDown, true);

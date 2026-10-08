@@ -29,6 +29,7 @@
 import { DESIGN_HEIGHT, DESIGN_WIDTH, LAYOUT_RECTS } from '../core/design';
 import { VIRTUAL_HEIGHT } from '../core/constants';
 import type { Rect } from '../core/types';
+import { i18nAriaLabel, i18nTitle, type MessageKey } from '../i18n';
 import { applyDesignTokens } from './designTokens';
 import { appendChildren, el } from './dom';
 import { createAssetIcon, type AssetIconName } from './icons';
@@ -77,13 +78,23 @@ export interface Layout {
  * 會用 `ui/restartButton.ts` 把確認流程接上。
  * Restart's *behaviour* (the confirmation dialog) does not live here — this only places the
  * button; `main.ts` wires the confirm flow via `ui/restartButton.ts`.
+ *
+ * 標籤是 **i18n 鍵**而非字串：按鈕的 `title` 與 `aria-label` 都由 `data-i18n-*` 標記，
+ * 語系一換由 `i18n.applyTo()` 一次改掉（見 `src/i18n/index.ts`）。
+ * Labels are **i18n keys**, not strings: each button's `title` and `aria-label` are tagged with
+ * `data-i18n-*`, and a locale change rewrites them all in one `i18n.applyTo()` pass.
  */
-const TOOLBAR_ITEMS: readonly { icon: AssetIconName; label: string; action: string; disabled?: boolean }[] = [
-  { icon: 'trophy', label: '排行榜', action: 'leaderboard' },
-  { icon: 'workshop', label: '創意工坊（即將推出）', action: 'workshop', disabled: true },
-  { icon: 'help', label: '遊戲說明', action: 'help' },
-  { icon: 'settings', label: '設定', action: 'settings' },
-  { icon: 'restart', label: '重新開始', action: 'restart' },
+const TOOLBAR_ITEMS: readonly {
+  icon: AssetIconName;
+  labelKey: MessageKey;
+  action: string;
+  disabled?: boolean;
+}[] = [
+  { icon: 'trophy', labelKey: 'toolbar.leaderboard', action: 'leaderboard' },
+  { icon: 'workshop', labelKey: 'toolbar.workshop', action: 'workshop', disabled: true },
+  { icon: 'help', labelKey: 'toolbar.help', action: 'help' },
+  { icon: 'settings', labelKey: 'toolbar.settings', action: 'settings' },
+  { icon: 'restart', labelKey: 'toolbar.restart', action: 'restart' },
 ];
 
 /**
@@ -130,14 +141,14 @@ function buildScoreCard(): HTMLElement {
 function buildToolbar(): HTMLElement {
   const nav = el('nav', 'panel panel--pill toolbar');
   nav.dataset['region'] = 'toolbar';
-  nav.setAttribute('aria-label', '工具列');
+  i18nAriaLabel(nav, 'chrome.toolbar');
 
   for (const item of TOOLBAR_ITEMS) {
     const button = el('button', 'toolbar__button');
     button.type = 'button';
     button.dataset['action'] = item.action;
-    button.title = item.label;
-    button.setAttribute('aria-label', item.label);
+    i18nTitle(button, item.labelKey);
+    i18nAriaLabel(button, item.labelKey);
     if (item.disabled === true) button.disabled = true;
     button.append(createAssetIcon(item.icon));
     nav.append(button);
@@ -151,8 +162,8 @@ function buildMusicButton(): HTMLButtonElement {
   const music = el('button', 'panel panel--pill music');
   music.type = 'button';
   music.dataset['action'] = 'music';
-  music.title = '音樂開關';
-  music.setAttribute('aria-label', '音樂開關');
+  i18nTitle(music, 'chrome.music');
+  i18nAriaLabel(music, 'chrome.music');
   music.setAttribute('aria-pressed', 'false');
   music.append(createAssetIcon('music'));
   return music;
@@ -211,7 +222,7 @@ function buildSkillList(): HTMLElement {
   const meter = el('div', 'sp-meter');
   meter.dataset['hook'] = 'sp-meter';
   meter.setAttribute('role', 'meter');
-  meter.setAttribute('aria-label', '技力');
+  i18nAriaLabel(meter, 'chrome.spMeter');
 
   const grid = el('div', 'skill-grid');
   grid.dataset['hook'] = 'skill-grid';
@@ -235,10 +246,7 @@ function buildStage(): HTMLElement {
    */
   canvas.setAttribute('role', 'application');
   canvas.setAttribute('tabindex', '0');
-  canvas.setAttribute(
-    'aria-label',
-    '遊戲容器：方向鍵瞄準、空白鍵投放，或用滑鼠點擊投放。方團團在此落下與合成。',
-  );
+  i18nAriaLabel(canvas, 'chrome.canvas');
 
   stage.append(canvas);
   return stage;

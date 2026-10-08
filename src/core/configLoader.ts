@@ -30,6 +30,7 @@
  */
 
 import { SP_DEFAULT_MAX, SP_MAX_CEILING, SP_MIN } from './constants';
+import { LOCALES } from '../i18n/locale';
 import type {
   AllConfig,
   BrandingConfig,
@@ -37,6 +38,7 @@ import type {
   GameSettings,
   LevelDef,
   LevelsConfig,
+  LocaleNames,
   SkillDef,
   SkillParams,
   SkillsConfig,
@@ -215,6 +217,42 @@ function sanitizeSettings(raw: unknown, warn: ConfigWarning): GameSettings {
   };
 }
 
+/**
+ * 讀取逐語系的名稱覆寫表。
+ * Read the per-locale name overrides.
+ *
+ * 只收**支援的語系**與**非空字串**；其餘一律略過並警告。整份 `names` 沒有任何可用條目時
+ * 回傳 `undefined`（＝完全退回 `name`），讓「還沒翻譯」與「翻譯了但全是空的」在資料上沒有
+ * 分別。
+ * Only **supported locales** and **non-empty strings** are kept; anything else is skipped with a
+ * warning. When nothing usable remains the whole map is `undefined`, so "not yet translated"
+ * and "translated to nothing" are indistinguishable in the data.
+ */
+function sanitizeNames(
+  raw: Record<string, unknown>,
+  section: string,
+  warn: ConfigWarning,
+): LocaleNames | undefined {
+  const value = raw['names'];
+  if (value === undefined) return undefined;
+
+  if (!isRecord(value)) {
+    warn(`${section}.names is not an object; ignoring it.`);
+    return undefined;
+  }
+
+  const names: LocaleNames = {};
+  for (const locale of LOCALES) {
+    const text = value[locale];
+    if (text === undefined) continue;
+
+    if (typeof text === 'string' && text.trim() !== '') names[locale] = text;
+    else warn(`${section}.names.${locale} is not a non-empty string; ignoring it.`);
+  }
+
+  return Object.keys(names).length > 0 ? names : undefined;
+}
+
 function sanitizeLevel(raw: unknown, index: number, warn: ConfigWarning): LevelDef {
   const fallback = DEFAULT_LEVELS[index] ?? (DEFAULT_LEVELS[DEFAULT_LEVELS.length - 1] as LevelDef);
   if (!isRecord(raw)) {
@@ -238,9 +276,12 @@ function sanitizeLevel(raw: unknown, index: number, warn: ConfigWarning): LevelD
     }
   }
 
+  const names = sanitizeNames(raw, `levels[${index}]`, warn);
+
   return {
     id,
     name: read.string(raw, 'name', fallback.name),
+    names,
     sprite: read.string(raw, 'sprite', fallback.sprite),
     radius: read.number(raw, 'radius', fallback.radius, { min: 0.5 }),
     density: read.number(raw, 'density', fallback.density, { min: 0 }),
@@ -409,6 +450,7 @@ function sanitizeSkill(raw: unknown, index: number, warn: ConfigWarning): SkillD
   const skill: SkillDef = {
     id,
     name: read.string(raw, 'name', fallback?.name ?? id),
+    names: sanitizeNames(raw, `skills[${index}]`, warn),
     cost: read.number(raw, 'cost', fallback?.cost ?? 1, { min: 0 }),
     targeting,
     pickCount: targeting === 'immediate' ? 0 : pickCount,

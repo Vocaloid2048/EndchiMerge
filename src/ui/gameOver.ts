@@ -14,6 +14,7 @@
  * game state itself.
  */
 
+import { i18nAriaLabel, i18nText } from '../i18n';
 import { appendChildren, el } from './dom';
 
 export interface GameOverSummary {
@@ -54,7 +55,7 @@ export function createGameOver(options: GameOverOptions): GameOverView {
   root.hidden = true;
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-modal', 'true');
-  root.setAttribute('aria-label', '遊戲結束');
+  i18nAriaLabel(root, 'gameOver.aria');
 
   const badge = el('p', 'game-over__badge', 'NEW BEST');
   badge.hidden = true;
@@ -66,8 +67,9 @@ export function createGameOver(options: GameOverOptions): GameOverView {
   const stats = el('dl', 'game-over__stats');
   appendChildren(stats, score.root, merged.root, best.root);
 
-  const restart = el('button', 'game-over__restart', '再玩一次');
+  const restart = el('button', 'game-over__restart');
   restart.type = 'button';
+  i18nText(restart, 'gameOver.playAgain');
 
   const card = el('div', 'game-over__card');
   appendChildren(card, el('h2', 'game-over__title', 'GAME OVER'), badge, stats, restart);

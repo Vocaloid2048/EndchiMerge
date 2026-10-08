@@ -29,6 +29,7 @@
  */
 
 import type { SkillCardState } from '../game/session';
+import { i18n, t } from '../i18n';
 import { el } from './dom';
 import { createIcon, type IconName } from './icons';
 
@@ -43,14 +44,24 @@ const SKILL_ICONS: Readonly<Record<string, IconName>> = {
 /** 消耗徽章的顯示字元：① ② ③ … 超過 10 就用純數字。 */
 const BADGE_GLYPHS = ['', '①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
 
-/** 累計消耗型技能在名稱下方那行說明的文字。 */
-const CUMULATIVE_CAPTION = '累計使用技力';
-
 export interface SkillBarOptions {
   /** 掛載宿主（`layout` 的 skill 區的 `skill-grid` 槽）。 */
   host: HTMLElement;
   /** 按下技能卡（或再按一次取消）時回報技能 id。 */
   onActivate: (id: string) => void;
+  /**
+   * 技能卡上要顯示的名字。未提供時直接用 `SkillCardState.name`。
+   * The name to show on a skill card. Defaults to `SkillCardState.name`.
+   *
+   * 需要它是因為**技能名可依語系而不同**（`skills.json` 的 `names`），而 `GameSession` 刻意
+   * 不認識語系；`main.ts` 用 `resolveLocalizedName()` 從配置組出這個函式，技能名才會跟著
+   * 設定頁的語言走。這個元件每幀重畫，所以換語系時名字自然會更新。
+   * It exists because **skill names can differ per locale** (`names` in `skills.json`) while
+   * `GameSession` deliberately knows nothing about locales; `main.ts` builds this from config via
+   * `resolveLocalizedName()`, so the names follow the settings page's language. The bar redraws
+   * every frame, so a locale change updates them by itself.
+   */
+  nameFor?: (state: SkillCardState) => string;
 }
 
 export interface SkillBar {
@@ -83,11 +94,12 @@ function badgeTextFor(state: SkillCardState): string {
     return `${String(Math.round(state.cumulativeSpent))}/${String(state.unlockThreshold)}`;
   }
   if (state.cost > 0) return BADGE_GLYPHS[state.cost] ?? String(state.cost);
-  return '免';
+  return t('skillBar.free');
 }
 
 export function createSkillBar(options: SkillBarOptions): SkillBar {
   const { host, onActivate } = options;
+  const nameFor = options.nameFor ?? ((state: SkillCardState): string => state.name);
   const cards = new Map<string, CardNodes>();
 
   const handleClick = (event: Event): void => {
@@ -122,7 +134,7 @@ export function createSkillBar(options: SkillBarOptions): SkillBar {
      */
     const glyph = el('span', 'skill-card__glyph');
     glyph.append(createIcon(SKILL_ICONS[state.id] ?? 'help'));
-    const name = el('span', 'skill-card__name', state.name);
+    const name = el('span', 'skill-card__name', nameFor(state));
     const caption = el('span', 'skill-card__caption');
     const badge = el('span', 'skill-card__badge');
     /*
@@ -157,9 +169,10 @@ export function createSkillBar(options: SkillBarOptions): SkillBar {
        * small anyway.
        */
       const badgeText = badgeTextFor(state);
-      const captionText = state.unlockKind === 'cumulativeSpent' ? CUMULATIVE_CAPTION : '';
+      const name = nameFor(state);
+      const captionText = state.unlockKind === 'cumulativeSpent' ? t('skillBar.cumulative') : '';
       const signature = [
-        state.name,
+        name,
         badgeText,
         captionText,
         state.unlocked ? '1' : '0',
@@ -167,12 +180,14 @@ export function createSkillBar(options: SkillBarOptions): SkillBar {
         state.selectedCount,
         Math.round(state.progress * 100),
         state.targeting,
+        /* 換語系時即使數值沒變也要重畫文字與 aria。 */
+        i18n.locale,
       ].join('|');
 
       if (signature === nodes.signature) continue;
       nodes.signature = signature;
 
-      nodes.name.textContent = state.name;
+      nodes.name.textContent = name;
       nodes.badge.textContent = badgeText;
       nodes.caption.textContent = captionText;
       nodes.root.dataset['cost'] = String(state.cost);
@@ -195,12 +210,14 @@ export function createSkillBar(options: SkillBarOptions): SkillBar {
 
       const label =
         state.unlockKind === 'cumulativeSpent'
-          ? `${state.name}（累計使用技力 ${String(Math.round(state.cumulativeSpent))}/${String(
-              state.unlockThreshold,
-            )}，免費）`
+          ? t('skillBar.ariaCumulative', {
+              name,
+              spent: Math.round(state.cumulativeSpent),
+              threshold: state.unlockThreshold,
+            })
           : state.unlocked
-            ? `${state.name}（消耗 ${String(state.cost)} 技力）`
-            : `${state.name}（未解鎖）`;
+            ? t('skillBar.ariaCost', { name, cost: state.cost })
+            : t('skillBar.ariaLocked', { name });
       nodes.root.setAttribute('aria-label', label);
       nodes.root.title = label;
     }

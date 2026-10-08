@@ -22,15 +22,25 @@
  * calls `onRestart` once it is confirmed.
  */
 
-import { createConfirmDialog } from './confirmDialog';
+import { i18n, t } from '../i18n';
+import { createConfirmDialog, type ConfirmDialogTexts } from './confirmDialog';
 
-/** 對話框的文案（使用者定案）。 */
-const DIALOG = {
-  title: '重新開始？',
-  message: '進行中的這一局分數與版面都會清空，確定要重新開始嗎？',
-  confirmLabel: '重新開始',
-  cancelLabel: '取消',
-} as const;
+/**
+ * 對話框的文案（使用者定案），以**語系鍵**取得。
+ * The dialog copy (the user's decision), looked up by locale key.
+ *
+ * 每次呼叫都重新查表，所以語系一換、下一次呼叫就是新語言（見下面的訂閱）。
+ * Looked up afresh on every call, so after a locale change the next call is in the new language
+ * (see the subscription below).
+ */
+function dialogTexts(): ConfirmDialogTexts {
+  return {
+    title: t('restart.title'),
+    message: t('restart.message'),
+    confirmLabel: t('restart.confirm'),
+    cancelLabel: t('common.cancel'),
+  };
+}
 
 export interface RestartConfirmOptions {
   /** 工具列上的重新開始按鈕。 */
@@ -51,12 +61,18 @@ export interface RestartConfirm {
 export function attachRestartConfirm(options: RestartConfirmOptions): RestartConfirm {
   const dialog = createConfirmDialog({
     host: options.host,
-    title: DIALOG.title,
-    message: DIALOG.message,
-    confirmLabel: DIALOG.confirmLabel,
-    cancelLabel: DIALOG.cancelLabel,
+    ...dialogTexts(),
     onConfirm: options.onRestart,
   });
+
+  /*
+   * 對話框只建一次，所以語系變更要主動把文案換掉 —— `i18n.applyTo()` 只認 `data-i18n`
+   * 標記過的節點，而這裡的文字是建立時就寫死的。
+   * The dialog is built once, so a locale change has to rewrite its copy by hand:
+   * `i18n.applyTo()` only knows nodes tagged with `data-i18n`, and this copy is written at
+   * construction time.
+   */
+  const unsubscribe = i18n.subscribe((): void => dialog.setTexts(dialogTexts()));
 
   const onClick = (): void => dialog.open();
   options.button.addEventListener('click', onClick);
@@ -64,6 +80,7 @@ export function attachRestartConfirm(options: RestartConfirmOptions): RestartCon
   return {
     close: (): void => dialog.close(),
     dispose(): void {
+      unsubscribe();
       options.button.removeEventListener('click', onClick);
       dialog.dispose();
     },

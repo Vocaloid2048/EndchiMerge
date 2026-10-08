@@ -14,7 +14,6 @@ import { createLocalLeaderboard, LEADERBOARD_LIMIT } from '../src/game/leaderboa
 import type { ProgressStorage } from '../src/game/progress';
 import {
   NAME_MAX_UNITS,
-  nameErrorText,
   nameUnits,
   normalizeDisplayName,
   validateDisplayName,
@@ -114,12 +113,6 @@ describe('validateDisplayName — 名稱規則 / name rules', () => {
 
     expect(result.ok).toBe(true);
     expect(result.ok && result.value).toBe('ABC');
-  });
-
-  it('has a message for every failure reason', () => {
-    for (const reason of ['empty', 'charset', 'tooLong'] as const) {
-      expect(nameErrorText(reason).length).toBeGreaterThan(0);
-    }
   });
 });
 

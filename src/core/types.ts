@@ -10,12 +10,29 @@
  * *after* validation rather than the raw file.
  */
 
+import type { Locale } from '../i18n/locale';
+
+/**
+ * 依語系覆寫的顯示名稱。
+ * Display names overridden per locale.
+ *
+ * 只有**專有名詞**（角色名、技能名）需要它 —— 介面文案住在 `src/i18n/messages/`，不在
+ * 配置檔裡。未提供的語系回退到 `name`，所以翻譯可以逐條補上而不必一次填滿（見
+ * `resolveLocalizedName()`）。
+ * Only **proper nouns** (character names, skill names) need this — interface copy lives in
+ * `src/i18n/messages/`, not in config. A locale that is not listed falls back to `name`, so
+ * translations can be filled in one at a time (see `resolveLocalizedName()`).
+ */
+export type LocaleNames = Partial<Record<Locale, string>>;
+
 /** 單一等級（方團團）的靜態定義。 */
 export interface LevelDef {
   /** 1 為底的等級編號，也是合成鏈的索引。 */
   id: number;
-  /** 顯示名稱。 */
+  /** 顯示名稱（預設語言；其餘語系見 `names`）。 */
   name: string;
+  /** 依語系覆寫的名稱；未列出的語系用 `name`。 */
+  names?: LocaleNames;
   /** 相對於 `public/assets/` 的路徑，例如 `character/萊萬汀_img.webp`。 */
   sprite: string;
   /** 碰撞圓半徑，虛擬單位。 */
@@ -214,8 +231,10 @@ export interface SkillParams {
 export interface SkillDef {
   /** 穩定識別碼，對應 `src/game/skills/` 的處理器。 */
   id: string;
-  /** 顯示名稱。 */
+  /** 顯示名稱（預設語言；其餘語系見 `names`）。 */
   name: string;
+  /** 依語系覆寫的名稱；未列出的語系用 `name`。 */
+  names?: LocaleNames;
   /** 消耗技力，也決定技能格徽章的數字；免費技能為 0。 */
   cost: number;
   /** 選取方式。 */

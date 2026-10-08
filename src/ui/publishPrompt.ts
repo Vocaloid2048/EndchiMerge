@@ -26,6 +26,7 @@
  */
 
 import type { LeaderboardSource } from '../game/leaderboard';
+import { i18nAriaLabel, i18nText } from '../i18n';
 import { appendChildren, el } from './dom';
 import { createPublishFields } from './publishFields';
 
@@ -54,22 +55,20 @@ export function createPublishPrompt(options: PublishPromptOptions): PublishPromp
   root.hidden = true;
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-modal', 'true');
-  root.setAttribute('aria-label', '發布你的成績');
+  i18nAriaLabel(root, 'publishPrompt.title');
 
-  const title = el('h2', 'publish-prompt__title', '發布你的成績');
+  const title = el('h2', 'publish-prompt__title');
+  i18nText(title, 'publishPrompt.title');
 
   /*
    * 「之後要修改可以到設定」是使用者定案的流程（這一組欄位也是**玩家設定**）。設定 popup
-   * 尚未上線，這句會在它落地時才成立；在此之前那是唯一改名的入口，所以先照定案的流程寫。
+   * 現在已經上線，這句成立。文案住在 `src/i18n/messages/`。
    * The "edit it later in settings" line follows the user's decision (these fields are **player
-   * settings**). The settings popup is not live yet; that sentence becomes true when it is, and
-   * until then it points at the only place a name will be editable, so it is written as decided.
+   * settings**). The settings popup is live now, so the sentence holds. The copy lives in
+   * `src/i18n/messages/`.
    */
-  const message = el(
-    'p',
-    'publish-prompt__message',
-    '輸入顯示名稱並同意分享，你的成績才會出現在排行榜上；之後要修改可以到設定。',
-  );
+  const message = el('p', 'publish-prompt__message');
+  i18nText(message, 'publishPrompt.message');
 
   /*
    * 欄位的儲存鍵由 `onCommitted` 交回來，宿主不必自己去 DOM 裡找那顆按鈕。
@@ -87,8 +86,9 @@ export function createPublishPrompt(options: PublishPromptOptions): PublishPromp
     },
   });
 
-  const skip = el('button', 'publish-prompt__skip', '之後再說');
+  const skip = el('button', 'publish-prompt__skip');
   skip.type = 'button';
+  i18nText(skip, 'publishPrompt.skip');
 
   const actions = el('div', 'publish-prompt__actions');
   appendChildren(actions, skip);
@@ -159,6 +159,7 @@ export function createPublishPrompt(options: PublishPromptOptions): PublishPromp
 
     dispose(): void {
       skip.removeEventListener('click', onSkipClick);
+      fields.dispose();
       close();
       document.removeEventListener('keydown', onKeyDown, true);
       root.remove();

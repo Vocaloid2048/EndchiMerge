@@ -5,25 +5,32 @@
  * 這一組欄位本來嵌在排行榜彈窗的頂部（「發布列」）。使用者定案把它**單獨拿出來**，因為它
  * 是**玩家設定**而不是榜單的一部分，只有兩個地方會用到它：
  * 1. 首次按下排行榜時的**發布詢問**（`ui/publishPrompt.ts`）；
- * 2. 日後的**設定 popup**（要改名稱或分享意願時）。
+ * 2. **設定 popup**（要改名稱或分享意願時）。
  * 兩處共用同一支元件，驗證、內嵌儲存鍵與排版才不會各養一份。
  * These fields used to sit at the top of the leaderboard popup. The user's decision was to
  * **take them out on their own**, because they are **player settings** rather than part of the
  * board, and only two places need them: the **publish prompt** on the first leaderboard open
- * (`ui/publishPrompt.ts`), and the future **settings popup**. Sharing one component keeps
- * validation, the inset save key and the layout from being written twice.
+ * (`ui/publishPrompt.ts`), and the **settings popup**. Sharing one component keeps validation,
+ * the inset save key and the layout from being written twice.
  *
  * 這一支**不含任何儲存邏輯**：寫入與否、寫去哪裡都由 `LeaderboardSource` 決定，這裡只負責
  * 「驗證 → 交給來源 → 顯示錯誤」。
  * **No storage logic lives here**: where and whether things persist is the `LeaderboardSource`'s
  * business; this only validates, hands values to the source and shows errors.
  *
+ * 文字全部走 `src/i18n`：靜態的用 `data-i18n` 標記（換語系由 `applyTo()` 一次改掉），帶數字
+ * 的（單位計數、錯誤訊息）自己重畫並訂閱語系變更。
+ * All copy goes through `src/i18n`: static strings are tagged with `data-i18n` (rewritten in one
+ * `applyTo()` pass), and the ones carrying numbers (the unit counter, error messages) redraw
+ * themselves and subscribe to locale changes.
+ *
  * 尺寸是**設計稿像素**，與其他面板同一套座標語言。
  * Sizes are **design pixels**, the same coordinate language as every other panel.
  */
 
 import type { LeaderboardSource } from '../game/leaderboard';
-import { NAME_MAX_UNITS, nameErrorText, nameUnits, validateDisplayName } from '../game/playerName';
+import { NAME_MAX_UNITS, nameUnits, validateDisplayName, type NameError } from '../game/playerName';
+import { i18n, i18nPlaceholder, i18nText, t, type MessageKey } from '../i18n';
 import { appendChildren, el } from './dom';
 
 export interface PublishFieldsOptions {
@@ -59,7 +66,16 @@ export interface PublishFields {
   commit(): boolean;
   /** 把游標放進名稱欄。 */
   focus(): void;
+  /** 取消語系訂閱；宿主 teardown 用。 */
+  dispose(): void;
 }
+
+/** 驗證失敗的原因 → 訊息鍵。 */
+const NAME_ERROR_KEYS: Readonly<Record<NameError, MessageKey>> = {
+  empty: 'nameError.empty',
+  charset: 'nameError.charset',
+  tooLong: 'nameError.tooLong',
+};
 
 /**
  * 實例序號，用來組出唯一的 `id`。
@@ -75,18 +91,20 @@ export function createPublishFields(options: PublishFieldsOptions): PublishField
   instanceCount += 1;
   const nameId = `publish-fields-name-${String(instanceCount)}`;
 
-  const nameLabel = el('label', 'publish-fields__label', '顯示名稱');
+  const nameLabel = el('label', 'publish-fields__label');
   nameLabel.htmlFor = nameId;
+  i18nText(nameLabel, 'publish.name');
 
   const nameInput = el('input', 'publish-fields__name');
   nameInput.id = nameId;
   nameInput.type = 'text';
   nameInput.autocomplete = 'off';
   nameInput.spellcheck = false;
-  nameInput.placeholder = '輸入你的名稱';
+  i18nPlaceholder(nameInput, 'publish.namePlaceholder');
 
-  const saveButton = el('button', 'publish-fields__save', '儲存');
+  const saveButton = el('button', 'publish-fields__save');
   saveButton.type = 'button';
+  i18nText(saveButton, 'common.save');
 
   /*
    * 儲存鍵放在名稱欄**裡面**、貼齊右緣（使用者定案）：對輸入框而言它是浮在右側的一顆小鍵，
@@ -99,12 +117,22 @@ export function createPublishFields(options: PublishFieldsOptions): PublishField
   const nameBox = el('div', 'publish-fields__box');
   appendChildren(nameBox, nameInput, saveButton);
 
-  const units = el('p', 'publish-fields__units', `0 / ${String(NAME_MAX_UNITS)} 單位`);
+  const units = el('p', 'publish-fields__units');
 
   const shareInput = el('input', 'publish-fields__share-input');
   shareInput.type = 'checkbox';
-  const shareLabel = el('label', 'publish-fields__share', '同意將我的成績顯示在排行榜上');
-  shareLabel.prepend(shareInput);
+
+  /*
+   * 文字放在**另一個 span**裡，而不是直接寫在 `<label>` 上：label 內含 checkbox，而 i18n 的
+   * `applyTo()` 是設 `textContent` —— 直接標記 label 會把 checkbox 一起抹掉。
+   * The text lives in a **separate span** rather than on the `<label>` itself: the label contains
+   * the checkbox and `applyTo()` sets `textContent`, which would wipe the checkbox out.
+   */
+  const shareText = el('span', 'publish-fields__share-text');
+  i18nText(shareText, 'publish.consent');
+
+  const shareLabel = el('label', 'publish-fields__share');
+  appendChildren(shareLabel, shareInput, shareText);
 
   const error = el('p', 'publish-fields__error');
   error.hidden = true;
@@ -112,8 +140,18 @@ export function createPublishFields(options: PublishFieldsOptions): PublishField
   const element = el('div', 'publish-fields');
   appendChildren(element, nameLabel, nameBox, units, shareLabel, error);
 
+  /** 目前顯示中的錯誤原因；換語系時用它把訊息重寫一遍。 */
+  let lastError: NameError | null = null;
+
+  function errorTextFor(reason: NameError): string {
+    return t(NAME_ERROR_KEYS[reason], { max: NAME_MAX_UNITS });
+  }
+
   function refreshUnits(): void {
-    units.textContent = `${String(nameUnits(nameInput.value))} / ${String(NAME_MAX_UNITS)} 單位`;
+    units.textContent = t('publish.units', {
+      used: nameUnits(nameInput.value),
+      max: NAME_MAX_UNITS,
+    });
   }
 
   function sync(): void {
@@ -144,7 +182,8 @@ export function createPublishFields(options: PublishFieldsOptions): PublishField
       const browseOnly = result.reason === 'empty' && !wantSharing;
 
       if (!browseOnly) {
-        error.textContent = nameErrorText(result.reason);
+        lastError = result.reason;
+        error.textContent = errorTextFor(result.reason);
         error.hidden = false;
         focus();
         return false;
@@ -152,6 +191,7 @@ export function createPublishFields(options: PublishFieldsOptions): PublishField
 
       source.setDisplayName('');
       source.setSharing(false);
+      lastError = null;
       error.hidden = true;
       return true;
     }
@@ -159,6 +199,7 @@ export function createPublishFields(options: PublishFieldsOptions): PublishField
     source.setDisplayName(result.value);
     source.setSharing(wantSharing);
     nameInput.value = result.value;
+    lastError = null;
     error.hidden = true;
     refreshUnits();
 
@@ -173,12 +214,19 @@ export function createPublishFields(options: PublishFieldsOptions): PublishField
     return true;
   }
 
+  const unsubscribeLocale = i18n.subscribe((): void => {
+    refreshUnits();
+    if (lastError !== null) error.textContent = errorTextFor(lastError);
+  });
+
   nameInput.addEventListener('input', (): void => {
     refreshUnits();
+    lastError = null;
     error.hidden = true;
   });
 
   shareInput.addEventListener('change', (): void => {
+    lastError = null;
     error.hidden = true;
   });
 
@@ -186,5 +234,15 @@ export function createPublishFields(options: PublishFieldsOptions): PublishField
     if (commit()) onCommitted?.();
   });
 
-  return { element, sync, commit, focus };
+  refreshUnits();
+
+  return {
+    element,
+    sync,
+    commit,
+    focus,
+    dispose: (): void => {
+      unsubscribeLocale();
+    },
+  };
 }
