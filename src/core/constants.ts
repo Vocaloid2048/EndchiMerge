@@ -289,13 +289,15 @@ export const STORAGE_PREFIX = 'endchimerge';
  * 本地儲存鍵。
  * Local storage keys.
  *
- * 排行榜相關的鍵在純本地階段由 `game/leaderboard.ts` 使用；日後接上真後端
- * （Docker Postgres／Vercel）時，`leaderboard` 之外的幾個仍留在本地 —— 名稱、分享意願與
- * 「問過了沒」都是**玩家的設定**，不是伺服器資料。
- * The leaderboard keys are used by `game/leaderboard.ts` while the board is local. When a real
- * backend lands (Docker Postgres / Vercel) everything except `leaderboard` stays local: the
- * display name, the sharing preference and "have we already asked" are **player settings**, not
- * server data.
+ * 排行榜相關的鍵在純本地階段由 `game/leaderboard.ts` 使用；`preferences` 由
+ * `game/preferences.ts` 使用（語系、規則變更總開關、無盡模式）。日後接上真後端
+ * （Docker Postgres／Vercel）時，`leaderboard` 之外的幾個仍留在本地 —— 名稱、分享意願、
+ * 「問過了沒」與各項偏好都是**玩家的設定**，不是伺服器資料。
+ * The leaderboard keys are used by `game/leaderboard.ts` while the board is local, and
+ * `preferences` is used by `game/preferences.ts` (locale, the rules master switch, endless
+ * mode). When a real backend lands (Docker Postgres / Vercel) everything except `leaderboard`
+ * stays local: the display name, the sharing preference, "have we already asked" and every
+ * preference are **player settings**, not server data.
  */
 export const STORAGE_KEYS = {
   profile: `${STORAGE_PREFIX}:profile`,
