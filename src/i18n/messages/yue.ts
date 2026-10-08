@@ -73,7 +73,7 @@ export const yue: Messages = {
 
   'settings.title': '設定',
   'settings.close': '閂咗設定',
-  'settings.rules.heading': '遊戲玩法 / 規則更改',
+  'settings.rules.heading': '遊戲玩法',
   'settings.rules.subtitle': '改咗規則，成績就唔會記錄喺排行榜',
   'settings.rules.master': '准許更改遊戲規則',
   'settings.rules.masterNote': '開咗先可以改下面啲規則；開住嗰陣嘅成績唔會記錄喺排行榜度。',
@@ -90,15 +90,31 @@ export const yue: Messages = {
   'help.title': '遊戲說明',
   'help.close': '閂咗說明',
   'help.play.heading': '玩法',
-  'help.play.body':
-    '撳畫面或者撳空白鍵，掟低手上呢粒方團團。兩粒一樣嘅疊埋一齊就會合成下一級，一路疊到最大嘅「梨諾」。方團團堆得太高、過咗警戒線又停低 5 秒，呢局就完。每次投放同合成都會儲技力，用嚟開當棄即棄、協議：浮動、搖晃！呢啲技能。',
+  'help.play.body1':
+    '撳住上面吊住嗰粒方團團，或者撳空白鍵，就可以將方團團掟落去！兩粒一樣嘅方團團貼埋一齊就會合成上一級，目標係解鎖更高級嘅方團團，同埋拎更高分。',
+  'help.play.body2':
+    '投放嗰陣如果連續觸發合成，就會有 COMBO 分數加成，加成會一路累加，直至有一次投放冇觸發 COMBO 就會重置。',
+  'help.play.body3':
+    '玩家可以善用唔同效果嘅技能嚟提高分數；當中有連擊、投方團團就會儲到技力，技力可以兌換指定嘅技能。',
+  'help.play.body4':
+    '如果堆疊太高、過咗警戒線，就要喺 5 秒內盡快清走個堆疊，超時就會當呢局結束。',
   'help.origin.heading': '製作緣由',
-  'help.origin.body':
-    '《方團團大作戰》係一個非官方嘅粉絲同人作品：以《明日方舟：終末地》網頁活動「OrbiPom! MERGE!」嘅合成玩法做藍本，用 Matter.js 同 Canvas 由零寫起，當係技術示範同同人創作。',
+  'help.origin.body1':
+    '《方團團大作戰》係基於《明日方舟：終末地》嘅「合成！山團團」網頁活動玩法嘅非官方粉絲延伸版本。',
+  'help.origin.body2':
+    '當初玩完呢個網頁活動之後意猶未盡，總覺得爭咁啲樂趣，諗住如果加多啲新技能、設定、角色，會唔會更加好玩？咁啱最近又喺度學用 AI Agent（加上自己唔太熟網頁遊戲開發），打算畀 Agent 照住我嘅期望自己搞掂成個專案（但後來發現我諗多咗），結果花咗半日時間參考官方嘅山團團，再加埋自己嘅諗法，一個一個咁整出方團團（所以睇落幾乎一樣？）。之後都花咗幾日時間同 Agent 一路傾一路改原始碼（所以原始碼主要係 Agent 寫，但方團團係我自己一個一個慢慢揑出嚟嘅）。',
+  'help.origin.body3':
+    '希望第日多啲空閒時間嗰陣，再慢慢加唔同有趣嘅玩法同角色（全圖鑑？），亦都好歡迎透過 PR 一齊協作！亦都想睇下而家社群對 AI 協作產物嘅主流睇法係咪依然偏向拒絕……無論如何，希望大家玩得開心！',
   'help.author.heading': '作者',
-  'help.author.body': '由 Voc-夜芷冰 開發同維護。歡迎喺 GitHub 度畀意見或者報問題。',
+  'help.author.avatarAlt': '夜芷冰嘅頭像',
+  'help.author.discordAria': '喺 Discord 度搵夜芷冰',
+  'help.author.githubAria': '喺 GitHub 度睇夜芷冰',
+  'help.author.server': '入 Discord 伺服器',
+  'help.author.serverAria': '入《方團團大作戰》嘅 Discord 支援伺服器',
   'help.repo.label': 'GitHub 專案',
   'help.copyright.heading': '版權聲明',
-  'help.copyright.body':
-    '非官方粉絲作品，同鷹角網絡（Hypergryph）及 Gryphline 冇任何關係，亦都冇得到佢哋認可或者授權。靈感嚟自《明日方舟：終末地》嘅合成玩法；所有角色名同相關美術版權都歸原權利人所有。呢個專案完全免費、冇內購冇廣告，亦都唔會用任何形式賺錢。',
+  'help.copyright.body1':
+    '請注意：呢個專案同鷹角網絡（Hypergryph）及 Gryphline 冇任何關係。《方團團大作戰》只係一款由粉絲自己整嘅網頁遊戲，遊戲入面用嘅素材都由 夜芷冰 同 社群協作者 製作，所有角色名同相關美術版權都歸原權利人所有。本專案原始碼版權歸夜芷冰擁有。',
+  'help.copyright.body2':
+    '呢個專案完全免費、冇內購冇廣告，亦都唔會用任何形式賺錢。未經夜芷冰同意，「方團團」素材唔可以用嚟商業賺錢，或者其他會損害任何一方聲譽嘅用途（由其他社群協作者提供嘅素材，請先自己徵得對方同意先用）。',
 };

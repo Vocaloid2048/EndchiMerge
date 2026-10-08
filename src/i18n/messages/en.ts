@@ -81,7 +81,7 @@ export const en: Messages = {
 
   'settings.title': 'Settings',
   'settings.close': 'Close settings',
-  'settings.rules.heading': 'Gameplay / rule changes',
+  'settings.rules.heading': 'Gameplay',
   'settings.rules.subtitle': 'With rules changed, scores are not recorded on the leaderboard',
   'settings.rules.master': 'Allow changing game rules',
   'settings.rules.masterNote':
@@ -101,16 +101,31 @@ export const en: Messages = {
   'help.title': 'How to play',
   'help.close': 'Close help',
   'help.play.heading': 'How to play',
-  'help.play.body':
-    'Click the board or press Space to drop the dumpling in hand. Two of the same dumpling merge into the next tier, all the way up to Liino, the largest. If the pile crosses the warning line and stays there for 5 seconds, the run ends. Every drop and every merge banks SP, which you spend on skills such as Cast Off, Protocol: Levitate and Shake Up!.',
+  'help.play.body1':
+    'Click the suspended dumpling — or press Space — to drop it. When two identical dumplings touch, they merge into the next tier. The goal is to unlock the higher tiers and rack up a bigger score.',
+  'help.play.body2':
+    'Merging on drop after drop builds a COMBO bonus. The bonus stacks up, and resets the moment a single drop merges nothing.',
+  'help.play.body3':
+    'Each skill does something different, and they are worth learning if you want a higher score. You bank SP from combos and from dropping dumplings, and SP is what you spend to cast them.',
+  'help.play.body4':
+    'If the pile grows too tall and crosses the warning line, you have 5 seconds to clear it back down. Run out of time and the run ends.',
   'help.origin.heading': 'Why it exists',
-  'help.origin.body':
-    'EndchiMerge is an unofficial fan project: it takes the merge gameplay of Arknights: Endfield\u2019s \u201cOrbiPom! MERGE!\u201d web event as its blueprint and rebuilds it from scratch with Matter.js and Canvas, as a technical showcase and a piece of fan work.',
+  'help.origin.body1':
+    'EndchiMerge is an unofficial fan spin-off built on the gameplay of the “OrbiPom! MERGE!” web event from Arknights: Endfield.',
+  'help.origin.body2':
+    'After finishing that web event I still wanted more — something felt missing. What if there were more skills, more settings, more characters? Would it be more fun? Around the same time I had started learning to work with AI agents (and I am not much of a web game developer to begin with), so the plan was to let an agent build the whole project from my brief. (It turned out I was asking for too much.) What actually happened: I spent half a day studying the official OrbiPoms and reworking them into my own versions, one at a time — which is why they look almost identical. Then came several days of back-and-forth with the agent, fixing the source as we went. So the source code is mostly the agent’s work, while every dumpling was shaped by hand, one by one.',
+  'help.origin.body3':
+    'Once I have more spare time I would like to keep adding new modes and characters at a leisurely pace (a full glossary, maybe?). Collaboration through pull requests is very welcome! I am also curious whether the community still leans towards rejecting AI-assisted work… Either way — I hope you have fun.',
   'help.author.heading': 'Author',
-  'help.author.body':
-    'Built and maintained by Voc-\u591c\u82b7\u51b0. Suggestions and bug reports are welcome on GitHub.',
+  'help.author.avatarAlt': 'Avatar of 夜芷冰',
+  'help.author.discordAria': 'Message 夜芷冰 on Discord',
+  'help.author.githubAria': 'View 夜芷冰 on GitHub',
+  'help.author.server': 'Join the Discord server',
+  'help.author.serverAria': 'Join the EndchiMerge support Discord server',
   'help.repo.label': 'GitHub repository',
   'help.copyright.heading': 'Copyright',
-  'help.copyright.body':
-    'An unofficial fan project, not affiliated with or endorsed by Hypergryph or Gryphline. Inspired by the merge gameplay of Arknights: Endfield; all character names and artwork remain the property of their respective owners. The project is entirely free — no in-app purchases, no ads — and is not monetised in any form.',
+  'help.copyright.body1':
+    'Please note: this project has no connection to Hypergryph or Gryphline. “EndchiMerge” is simply a web game developed by a fan; the assets used in it were made by 夜芷冰 and community contributors, and all character names and related artwork remain the property of their respective rights holders. The copyright of this project’s source code belongs to 夜芷冰.',
+  'help.copyright.body2':
+    'The project is entirely free — no in-app purchases, no ads — and is not monetised in any form. Without 夜芷冰’s permission, “EndchiMerge” assets may not be used for commercial profit or for any purpose that damages the reputation of any party. (For assets contributed by other community members, please obtain their permission first.)',
 };

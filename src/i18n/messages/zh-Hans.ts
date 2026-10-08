@@ -70,7 +70,7 @@ export const zhHans: Messages = {
 
   'settings.title': '设置',
   'settings.close': '关闭设置',
-  'settings.rules.heading': '游戏玩法 / 规则更改',
+  'settings.rules.heading': '游戏玩法',
   'settings.rules.subtitle': '修改规则后，成绩不会记录在排行榜',
   'settings.rules.master': '允许更改游戏规则',
   'settings.rules.masterNote': '开启后才可调整以下规则；开启期间的成绩不会记录在排行榜上。',
@@ -87,15 +87,31 @@ export const zhHans: Messages = {
   'help.title': '游戏说明',
   'help.close': '关闭说明',
   'help.play.heading': '玩法',
-  'help.play.body':
-    '点击画面或按空格键，投下手上这颗方团团。两颗相同的方团团叠在一起就会合成下一级，一路叠到最大的「梨诺」。方团团堆得太高、越过警戒线并停住 5 秒，这一局就会结束。每次投放与合成都会累积技力，用来发动当弃即弃、协议：浮动、摇晃！等技能。',
+  'help.play.body1':
+    '点击悬挂中的方团团或按空格键，把方团团投下吧！当两个相同的方团团贴在一起，就会合成到下一级，目标是解锁更高级别的方团团，以及获取更高分数。',
+  'help.play.body2':
+    '当玩家在投放时连续触发合成，就会获得 COMBO 分数加成，加成将会累加，直至单次投放未触发 COMBO 则会重置。',
+  'help.play.body3':
+    '玩家可以善用不同效果的技能来提高分数；其中透过连击、投下方团团获得技力，技力可以兑换指定的技能。',
+  'help.play.body4':
+    '倘若堆叠太高超过警戒线，则需要在 5 秒内尽快清除堆叠，超时后则判定为本局结束。',
   'help.origin.heading': '制作缘由',
-  'help.origin.body':
-    '《方团团大作战》是一个非官方的粉丝同人作品：以《明日方舟：终末地》网页活动「OrbiPom! MERGE!」的合成玩法为蓝本，用 Matter.js 与 Canvas 从零重写，作为技术示范与同人创作。',
+  'help.origin.body1':
+    '《方团团大作战》是基于《明日方舟：终末地》的「合成！山团团」网页活动玩法的非官方粉丝延伸版本。',
+  'help.origin.body2':
+    '当初在玩完这个网页活动后意犹未尽，总感觉缺了一点乐趣，想说如果再添加一些新技能、设定、角色的话会不会更加好玩？刚好最近在尝试学习使用 AI Agent（加上不太熟悉网页游戏开发），打算让 Agent 基于我的期望自己完成整个项目（但后来发现我想太多了），结果花了半天时间参考官方的山团团、再加以自己的想法来制作一个个方团团（所以看起来几乎一样？）。后面也花了几天时间来跟 Agent 一边对话、一边修正源代码的部分（所以源代码的部分主要是 Agent 编写，但方团团是我自己一个个慢慢捏出来的）。',
+  'help.origin.body3':
+    '希望日后有更多空闲时间时，再慢慢添加不同有趣的玩法和角色（全图鉴？），也十分欢迎透过 PR 协作！也想看看现在社群对于 AI 协作产物的主流看法是否依然偏向拒绝……不论如何，希望大家玩得开心！',
   'help.author.heading': '作者',
-  'help.author.body': '由 Voc-夜芷冰 开发与维护。欢迎在 GitHub 上提出建议或反馈问题。',
+  'help.author.avatarAlt': '夜芷冰的头像',
+  'help.author.discordAria': '在 Discord 上联系夜芷冰',
+  'help.author.githubAria': '在 GitHub 上查看夜芷冰',
+  'help.author.server': '加入 Discord 服务器',
+  'help.author.serverAria': '加入《方团团大作战》的 Discord 支援服务器',
   'help.repo.label': 'GitHub 项目',
   'help.copyright.heading': '版权声明',
-  'help.copyright.body':
-    '非官方粉丝作品，与鹰角网络（Hypergryph）及 Gryphline 无关，亦未获其认可或授权。灵感来自《明日方舟：终末地》的合成玩法；所有角色名称与相关美术版权归原权利人所有。本项目完全免费、不含内购与广告，亦不以任何形式营利。',
+  'help.copyright.body1':
+    '请注意：本项目与鹰角网络（Hypergryph）及 Gryphline 无关。《方团团大作战》仅为一款由粉丝自行开发的网页游戏，本游戏中使用的素材均由 夜芷冰 及 社群协作者 制作，所有角色名称与相关美术版权归原权利人所有。本项目源代码版权归夜芷冰拥有。',
+  'help.copyright.body2':
+    '本项目完全免费、不含内购与广告，亦不以任何形式营利。未经夜芷冰同意，「方团团」素材不得用作商业盈利或其他有损害任一方声誉的用途（由其他社群协作者提供的素材，请先自行征得其同意再使用）。',
 };

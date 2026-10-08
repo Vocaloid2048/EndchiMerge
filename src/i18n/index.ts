@@ -103,10 +103,10 @@ export class I18n {
    * 把標記過的靜態文字重寫一遍。
    * Rewrite every tagged static string under `root`.
    *
-   * 認得四種標記：`data-i18n`（文字）、`data-i18n-aria-label`、`data-i18n-title`、
-   * `data-i18n-placeholder`。
-   * Four tags are recognised: `data-i18n` (text), `data-i18n-aria-label`, `data-i18n-title`
-   * and `data-i18n-placeholder`.
+   * 認得五種標記：`data-i18n`（文字）、`data-i18n-aria-label`、`data-i18n-title`、
+   * `data-i18n-placeholder`、`data-i18n-alt`。
+   * Five tags are recognised: `data-i18n` (text), `data-i18n-aria-label`, `data-i18n-title`,
+   * `data-i18n-placeholder` and `data-i18n-alt`.
    */
   applyTo(root: ParentNode): void {
     for (const node of root.querySelectorAll<HTMLElement>('[data-i18n]')) {
@@ -127,6 +127,11 @@ export class I18n {
     for (const node of root.querySelectorAll<HTMLElement>('[data-i18n-placeholder]')) {
       const key = node.dataset['i18nPlaceholder'];
       if (key !== undefined) node.setAttribute('placeholder', this.t(key as MessageKey));
+    }
+
+    for (const node of root.querySelectorAll<HTMLElement>('[data-i18n-alt]')) {
+      const key = node.dataset['i18nAlt'];
+      if (key !== undefined) node.setAttribute('alt', this.t(key as MessageKey));
     }
   }
 
@@ -171,4 +176,10 @@ export function i18nTitle(node: HTMLElement, key: MessageKey): void {
 export function i18nPlaceholder(node: HTMLElement, key: MessageKey): void {
   node.dataset['i18nPlaceholder'] = key;
   node.setAttribute('placeholder', i18n.t(key));
+}
+
+/** 標記一張圖的 `alt` 並立刻寫入（頭像一類有語意文字的圖片才需要）。 */
+export function i18nAlt(node: HTMLElement, key: MessageKey): void {
+  node.dataset['i18nAlt'] = key;
+  node.setAttribute('alt', i18n.t(key));
 }
