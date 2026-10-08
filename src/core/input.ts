@@ -24,6 +24,21 @@
  * mean anything and `↓` is given to the drop (the user's decision). `↑` deliberately does
  * nothing — it has no corresponding action here, and silently nudging left would be worse
  * than no response at all.
+ *
+ * 鍵盤的一次移動是**相對位移**，而且基準必須是「現在**真的**在哪」（`readAim`），不是
+ * 「我上次送出去多少」。差別只在夾制發生時看得見：曾經這裡自己記住最後送出的值，於是
+ * 貼牆長按左鍵時那個值一路往左飄，畫面停在牆上、輸入層卻以為自己已經在牆外；接著按右鍵
+ * 就變成「先把飄掉的距離追回來」，要連按好幾下才肯動 —— 使用者回報的正是這個。
+ * 讀取當前值讓夾制對鍵盤**透明**：貼牆時基準就是牆，往另一邊按一下就走一步。輸入層因此
+ * 不留任何遊戲狀態，也就沒有東西可以走鐘。
+ * A keyboard step is a **relative** move, and its base must be where the aim *actually* is
+ * (`readAim`), not the last number this layer sent. The difference only shows up once
+ * clamping happens: this file used to remember its last sent value, so holding Left against
+ * the wall let that value drift past the wall while the picture stayed put; the next Right
+ * press then spent several presses "catching up" instead of moving. Reading the current
+ * value keeps clamping transparent to the keyboard — at the wall the base *is* the wall, so
+ * one press of the other key moves one step. It also means this layer keeps no game state,
+ * and so has nothing that can drift.
  */
 
 import type { Viewport, VirtualPoint } from '../render/viewport';
@@ -51,8 +66,14 @@ export interface DropInputOptions {
   onCancel?: () => void;
   /** 鍵盤一次移動的虛擬距離；預設 20。 */
   keyStep?: number;
-  /** 初始瞄準位置；鍵盤用它累加相對位移。 */
-  initialAim?: number;
+  /**
+   * 讀取**目前**的瞄準位置。鍵盤每次按鍵都重新問一次，並以它為基準加減 `keyStep`；
+   * 這樣牆壁夾制（以及 resize 造成的重夾）都會自然反映在下一步上。
+   * Read the **current** aim. Every arrow press asks again and offsets that base by
+   * `keyStep`, so wall clamping (and any re-clamp from a resize) shows up in the next step
+   * for free.
+   */
+  readAim: () => number;
 }
 
 const DEFAULT_KEY_STEP = 20;
@@ -66,22 +87,8 @@ const MOVE_RIGHT_KEYS = new Set(['ArrowRight']);
 /** `ArrowDown`（使用者定案：↓ 即投放）＋ 空白與 Enter。 */
 const DROP_KEYS = new Set(['Enter', ' ', 'Spacebar', 'ArrowDown']);
 export function attachDropInput(options: DropInputOptions): () => void {
-  const { target, viewport, onAim, onDrop, onCancel } = options;
+  const { target, viewport, onAim, onDrop, onCancel, readAim } = options;
   const keyStep = options.keyStep ?? DEFAULT_KEY_STEP;
-
-  /*
-   * 鍵盤需要知道「目前在哪」，但輸入層不該保存遊戲狀態。折衷做法是記住最後一次
-   * 自己送出的值，並以**相對位移**回報 —— 硬算絕對值會讓方向鍵在貼牆夾制後失去同步。
-   * Keyboard needs a current position but this layer must not own game state, so it
-   * tracks the last value it sent and reports relative deltas; an absolute value would
-   * desync once the session clamps at a wall.
-   */
-  let lastAim = options.initialAim ?? 0;
-
-  const aim = (x: number): void => {
-    lastAim = x;
-    onAim(x);
-  };
 
   /**
    * 把事件的視窗座標換成虛擬 X。
@@ -102,7 +109,7 @@ export function attachDropInput(options: DropInputOptions): () => void {
     const rect = target.getBoundingClientRect();
     const point = viewport.toVirtual(rect, clientX, clientY);
     if (point === null) return null;
-    aim(point.x);
+    onAim(point.x);
     return point;
   };
 
@@ -143,7 +150,14 @@ export function attachDropInput(options: DropInputOptions): () => void {
 
     /* 阻止方向鍵滾動頁面。 */
     event.preventDefault();
-    aim(lastAim + (isLeft ? -keyStep : keyStep));
+    /*
+     * 基準取**現在**的瞄準位置。貼牆長按時 `readAim()` 每次都回牆上的值，所以放開左鍵再
+     * 按右鍵是從牆邊往回走一步，而不是先追回一段看不見的溢出量。
+     * The base is the aim's **current** value. Holding against a wall makes `readAim()` keep
+     * answering with the wall position, so Left-then-Right steps one notch back in from the
+     * edge instead of first paying off an invisible overflow.
+     */
+    onAim(readAim() + (isLeft ? -keyStep : keyStep));
   };
 
   target.addEventListener('pointermove', handlePointerMove);

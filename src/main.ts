@@ -548,7 +548,14 @@ async function bootstrap(): Promise<void> {
       else session.canvasPointerAction(point.x, point.y);
     },
     onCancel: (): void => session.cancelSkill(),
-    initialAim: session.aimXValue,
+    /*
+     * 鍵盤每次按鍵都會問一次「現在瞄準在哪」，所以貼牆長按不會在輸入層留下一段看不見的
+     * 溢出量（見 `input.ts`）。讀的是 session 已夾制的值，規則仍只住在 session。
+     * The keyboard asks where the aim currently is on every press, so holding a key against
+     * a wall leaves no invisible overflow behind (see `input.ts`). The value read is the
+     * session's already-clamped one; the rules still live only in the session.
+     */
+    readAim: (): number => session.aimXValue,
   });
 
   /*
