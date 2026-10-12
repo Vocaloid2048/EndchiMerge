@@ -7,6 +7,62 @@
 
 ---
 
+## 未發佈 — 客戶端接上後端：榜真的有別的玩家了（2026-10-13）
+
+`LeaderboardSource` 這個接縫從排行榜重寫那天就留著，這一節是它第一次真的被接上。UI 只多了**一行**。
+
+### 新增 — 伺服器版資料層（`src/game/remoteLeaderboard.ts`）
+
+- `createRemoteLeaderboard()` 是 `LeaderboardSource` 的 HTTP 實作：`POST /api/run/start` 開局取憑證、
+  `POST /api/score` 提交、`GET /api/leaderboard?category=…` 取榜。`fetch` 可注入，所以測試不碰網路。
+- **提交的是「某一局自己的數字」，不是本機紀錄。** 本機紀錄的三個最大值可能來自不同的三局（那是
+  刻意的），湊在一起送會被 `checkRationality` 判成不合理 —— 所以 `record()` 把這一局原封不動存下來，
+  `sync()` 送的是它。這是使用者定案「任何刷新三個最大值之一的那一局都送」的實作。
+- **憑證在開局時鑄，不是提交時。** 憑證的頒發時刻就是這一局的起點，`checkClaimedDuration` 拿它判斷
+  「宣稱的時長不可能超過實際流逝的時間」。提交時才鑄的話那個差值永遠是零，**每一局正常的遊戲**都會
+  被退。因此介面多了選填的 `beginRun()`。
+- **`snapshot()` 一定是快取**（介面是同步的），所以另加選填的 `refresh()`；UI 在榜面開啟時呼叫它一次。
+  抓不到就**保留上一次的榜**，而不是清空。
+- 失敗分類處理：網路失敗／429／5xx 留著待送；4xx（400／401／403／409）是**定論**，清掉標記；200 但
+  `verified: false` 代表「受理了但沒上榜」（不合理），記一行且不重試。任何一條都不影響遊戲本身。
+
+### 變更 — 本機的一半抽出來，兩個實作共用（`src/game/leaderboard.ts`）
+
+- 新增 `createPlayerRecord()`：**身份、顯示名、分享意願、本機紀錄**。本機榜與伺服器榜都建在它上面，
+  所以「改名不新增一筆」「只升不降」「時長跟著分數走」這些規則**只有一份實作**。
+- `createLocalLeaderboard()` 行為不變（50 條既有測試全過），只是改成使用它；`LeaderboardSource` 多了
+  兩個選填成員（`refresh`／`beginRun`），本機實作兩個都不需要。
+
+### 修正 — 少了「這一局投了幾個」，提交必被退
+
+- `GameSession` 新增 `totalDrops`：這一局**累計投放**的顆數。`dropCount` 是「目前場上還有幾顆」，
+  合成與回收都會讓它變少，拿它去送會變成「合成 60 次但只投了 12 顆」而被退。
+- `LeaderboardRun` 新增選填的 `drops`；未提供時客戶端退回 `merges`（伺服器的下界是「合成 ≤ 投放」，
+  少報是安全的，送 0 會讓每一筆都被退）。
+
+### 新增 — 客戶端版本隨提交送出
+
+- `vite.config.ts` 的 `define` 把 `package.json` 的版本編譯成 `__APP_VERSION__`，由 `main.ts` 交給
+  `createRemoteLeaderboard`。伺服器只把它存進 `scores.version` 備查 —— 查一件舊事時，「這一筆是哪個
+  版本的客戶端送出來的」是唯一問得出來的線索。
+
+### 測試與驗證
+
+- 新增 `tests/remoteLeaderboard.test.ts`（32 條），全部用注入的假 `fetch`。
+- typecheck ✅、vitest **694 通過 / 0 略過**（34 檔）✅、build ✅。
+- **對真的開發伺服器跑過一次端到端**（`npm run dev`，SQLite ＋ Vite 代理）：開局拿到憑證 → 提交
+  `score=900, merges=12, drops=15, durationMs=8000` → **通過合理性檢查並出現在榜上**（同一局再送一次
+  不重送）→ 把真的排行榜彈窗接到真的伺服器版資料層，在瀏覽器裡改名、開局、提交 `score=3000`，榜上
+  出現兩列並顯示「你的最佳：3,000（3,000 分）· 第 1 名，共 2 位玩家」。
+
+### 已知未完成
+
+- **改名要等下一次提交才上到伺服器**：`profiles.display_name` 只由 `upsertProfile` 更新，所以客戶端的
+  快取先樂觀改名，而伺服器的真值要等下一次提交。要做「立刻生效」就得有 `profile/name` 端點。
+- **解鎖清單仍未上報**：客戶端送的是「某一局」的成績，解鎖集合只存在本機（要 `profile/sync`）。
+
+---
+
 ## 未發佈 — M9 後端（Vercel Functions ＋ Postgres）與每局時長（2026-10-12）
 
 > 本節涵蓋 `85e99dc`（客戶端顯示每局時長）與分支 `feat-backend` 上的後端（`3d5520f` 骨架，
@@ -160,6 +216,7 @@
 ### 測試與驗證
 
 - typecheck ✅、vitest **635 通過 / 12 略過**（33 檔）✅、build ✅。
+  *（數字是當時的狀態；加了 SQLite 方言之後是 **662 通過 / 0 略過**，見下面那一節。）*
 - 新增 `tests/duration.test.ts`（6 條）、`tests/api.test.ts`（54 條）；`tests/leaderboard.test.ts`
   新增「時長跟著分數」6 條。
 - `tests/api.test.ts` 的後端測試**完全不需要資料庫**：餵 `MemoryStore` ＋ 注入時鐘，毫秒內跑完
@@ -196,6 +253,108 @@
 - **分析事件**（`design.md` §6.8 的 `events` 表與上報）未做；`profile/sync` 與 `profile/name` 未做。
 - **完整名稱驗證**：`sanitiseName` 只做最低限度清洗；§6.4 的完整管線（32 加權單位、NFKC、七層
   關鍵詞摺疊）待做，且必須客戶端與伺服器**共用同一份實作**。
+
+---
+
+## 未發佈 — 本機開發：SQLite ＋ `npm run dev`，以及兩個只在真 SQL 上看得見的缺陷（2026-10-13）
+
+> 使用者原本要的是「`npm run dev` 用 npm 起前端 ＋ 後端 ＋ 一個輕量 MySQL，資料庫檔案放 `.mysql/`」。
+> MySQL 那一半**在這個 repo 做不到**：專案路徑含中文（`團圓大作戰`），而 `mysqld` 會在第一個中文字
+> 截斷路徑 —— `--initialize-insecure` 寫得進去，啟動時卻讀不到自己的 error log
+> （`Could not open file 'E:\hkust_repo\Vocaloid2048.err'` → `[MY-010119] Aborting`），連相對路徑也
+> 一樣，而該目錄沒有 8.3 短檔名可用。使用者因此改成 **SQLite**，而這個改動順帶把整合測試從 gated
+> 變成一律會跑 —— 於是抓到兩個從來沒被執行過的路徑上的缺陷。
+
+### 新增 — SQLite：第三個方言，只服務本機開發（`api/_lib/db/sqlite.ts`）
+
+- 用 Node 22 內建的 `node:sqlite`，**不加任何相依**。它是一個**檔案**而不是一個服務，所以
+  `npm run dev` 與 `npx vitest run` 都不必先起任何東西。
+- 這是 `Dialect` 這個接縫**第一次真的被用來加一個方言**：`sqlStore.ts`、`handlers.ts`、
+  `runtime.ts`、`limits.ts`、`tokens.ts` 與所有端點檔**一行都沒有動**。改動只有 `DialectName` 多一個
+  值、`dialectFromUrl` 認 `sqlite:`／`sqlite3:`、`db/index.ts` 的 `DIALECTS`／`createDriver`／
+  `connectionNotesFor` 各多一個分支，加上新檔案本身。`db/index.ts` 的 `createDriver` 由三元改寫成
+  `switch`，所以少一個分支會被 `never` 那一行擋下來。
+- 它與另外兩個方言只差**三項寫法**：時間存 `integer`（UTC 毫秒）、逐列最大值用 `max(a, b)`（SQLite
+  沒有 `greatest`）、現在時刻用 `(strftime('%s','now') * 1000)`（SQLite 沒有 `now()`）。
+  反過來，`on conflict … do nothing` 與 `returning` 與 Postgres **同形**，所以它走
+  `insertScoreSignal = 'rows'` 那條路，完全不碰 MySQL 的 `affectedRows` / `FOUND_ROWS` 地雷。
+  它也有 `nulls last`（3.30 起；Node 22 內建 3.51），不必像 MySQL 那樣用 `best_at is null` 模擬。
+- 驅動是**同步**的（`node:sqlite` 沒有非同步 API），所以每個方法只是把同步結果包成 resolved
+  promise；交易因此比另外兩個方言簡單（沒有第二條連線、沒有 `begin` 落在別人身上的可能）。三個
+  pragma：`foreign_keys = on`（SQLite 預設**不強制**外鍵，而這是一個安靜的失敗）、
+  `journal_mode = WAL`、`busy_timeout = 5000`。
+- ⚠️ 它**不是**部署選項，而且 `connectionNotes()` 對它永遠回一條警告：函式環境的檔案系統是拋棄式
+  的，一個請求寫進去的檔案下一個請求不一定看得到。`docs/backend.md` §5.1.1 有完整說明。
+
+### 新增 — `npm run dev`：一個指令，前端 ＋ 後端 ＋ 資料庫（`scripts/dev.ts`）
+
+- 四件事：補開發用環境變數預設值（**只補沒有設的**，所以 `.env` 永遠優先）、`ensureSchema` 建表、
+  用 `node:http` 起 API（`127.0.0.1:8787`，`DEV_API_PORT` 可改）、在同一個行程裡起 Vite 並把 `/api`
+  代理到它。客戶端因此**用相對路徑 `/api/…` 就好**，不需要任何 CORS 設定或 `baseURL` 分支。
+- **走的是正式環境那一個轉接頭**（`adapters/vercel.ts` 的 `createVercelHandler`），只把 Node 的
+  `req`／`res` 交給它 —— 而 Vercel 的 `res` 介面（`statusCode`／`setHeader`／`end`）本來就是
+  `node:http` 的 `ServerResponse` 的子集，所以連包裝都不必寫。本機與雲上跑的是**同一條**
+  轉接頭 → 外殼 → 處理器 → 儲存層的路徑，只有傳輸層不同。這也比 `vercel dev` 少一個每次連到雲端的
+  CLI 與一份 `.vercel/`。
+- **路由是掃出來的**：動態載入 `api/**` 底下每一個 `.ts`，用它自己的路徑當路由（`api/run/start.ts`
+  → `/api/run/start`），以 `_` 開頭者跳過（Vercel 也這樣排除）。所以**新增端點不必改這個檔案**；
+  手抄一份路由表總有一天會出現「本機 404、線上正常」。打錯路徑的 404 會列出所有認得的路徑。
+- 資料庫在 `.mysql/endchi.db`，連 WAL 的 `-wal`／`-shm` 一起整個資料夾進 `.gitignore`。要重來一個
+  乾淨的資料庫就是刪掉那個資料夾。
+- `npm run dev:web` 只起 Vite（純 UI 改動用）。`package.json` 的 `dev` 由 `vite` 改成跑這個腳本。
+
+### 修正 — `scores.device_id` 的外鍵讓兩個正常路徑永遠寫不進去
+
+三個方言的 schema 都把 `scores.device_id` 宣告成 `references profiles (device_id) on delete cascade`，
+而那是**錯的**，它會拒絕兩個完全正常的寫入：
+
+1. **新裝置的第一次提交**。`saveScore` 先寫 `scores` 再寫 `profiles` —— 順序不能反，因為「這一局
+   是不是新的」是由 `scores` 那一句的結果決定的（冪等）。所以寫入的那一刻還沒有父列。
+2. **被退回的提交**。`verified = false` 的局**故意**不建 profile（`design.md` §6.7：留審計痕跡、
+   不進榜），所以它永遠沒有父列；有外鍵就等於「拒絕留檔」，而那正是要留的東西。
+
+反過來，那條外鍵**買不到任何東西**：整個程式沒有任何地方刪除 profile，`on delete cascade` 是裝飾品。
+所以它不是取捨而是矛盾 —— 三個方言一併移除，`schema.sql` 也一起改（它與程式的逐句一致性由測試守
+住）。`tests/dialect.test.ts` 新增一條釘住「三個方言都不可以有 `references profiles`／`foreign key`」。
+
+**為什麼從前沒發現**：這個缺陷在 Postgres 與 MySQL 上都存在，但整合測試是 gated 的、從沒真的跑過。
+
+### 修正 — `scores.created_at` 從來沒有被綁進去（`SqlStore` 與 `MemoryStore` 分歧）
+
+`scores.created_at` 靠 DDL 的預設值（Postgres 的 `now()`、SQLite 的 `strftime`）填，而
+`sqlStore.insertScore` 明明收了一個 `atMs`。這一欄同時是**速率限制的視窗**
+（`countSubmissionsSince`）、**審計時間**、以及 `getScore` 讀回來的 `atMs`，而 `MemoryStore` 三處都用
+呼叫端傳進來的值 —— 於是兩個 `Store` 實作對同一份資料給出不同的答案，而單元測試走的正是
+`MemoryStore`，看不到。
+
+修法是把它綁進去（三個方言都多一個佔位符，`sqlStore` 多綁 `this.dialect.ts(row.atMs)`）。
+SQLite 那邊還多一層理由：它的 `strftime` 只有**秒**的解析度，靠預設值連精度都與另外兩個方言對不上。
+`tests/dialect.test.ts` 新增一條釘住 `insertScore` 的佔位符數**等於 13**（漏一個參數在 Postgres 會
+報「參數不足」，在 MySQL／SQLite 卻會把值**錯位**吃進去而不報錯）。
+
+### 變更 — 整合測試不再 gated，改為預設跑記憶體 SQLite
+
+`tests/db.integration.test.ts` 從前只有設了 `TEST_DATABASE_URL` 才跑，理由是「這個 repo 與 CI 不該
+為了跑測試而背一個資料庫」。加了 SQLite 之後那個理由消失了，所以預設值改成 **`sqlite::memory:`**，
+`describe.skipIf` 與那個「已跳過」的公告區塊一併移除：**這個 suite 現在一律會跑真的 SQL**，而指向真的
+Postgres／MySQL 仍然只是一個環境變數的事。記憶體資料庫還多一個好處 —— 每次都是乾淨的。
+
+同一份檔案另外新增一個 `describe`，用獨立的記憶體資料庫驗**這個驅動額外做的三件事**：`pragma
+foreign_keys = on` 真的生效（自己建一對父子表來驗，因為我們的 schema 現在沒有外鍵）、交易真的會
+回滾、以及交易的巢狀呼叫不會開第二層。
+
+### 測試與驗證
+
+- typecheck ✅、vitest **662 通過 / 0 略過**（33 檔）✅。
+- `tests/dialect.test.ts` 32 → **44 條**：每一個迴圈都跑**三個**方言（`DIALECTS` 加入
+  `sqliteDialect`），新增 `sqlitePathFromUrl` 的路徑解析（`sqlite:`／`sqlite://`／`sqlite:///`／
+  `sqlite://E:/`／`:memory:`／裸路徑）、`max` vs `greatest`、`now()` vs `strftime`、
+  `insertScore` 的 13 個佔位符、以及「三個方言都沒有外鍵指向 `profiles`」。
+- `tests/db.integration.test.ts` 13 → **16 條，而且不再略過**。**它一改成一律執行就抓到上面兩個
+  修正**，兩者都是在真庫上也存在、卻因為 gated 而從來沒被執行過的路徑。
+- **本機實測**（`npm run dev` 真的跑起來）：`/api/health` 回 `{"database":"sqlite"}`；
+  開局 → 提交（`verified:true`、`rank:1`）→ 同一局重送拿回同一個裁決（`rank:null`）→ 取榜看到
+  `durationMs:6200` 與 `self` 名次，**全部經由 Vite 的 5173 代理**；未知路徑回 404 並列出四個端點。
 
 ---
 

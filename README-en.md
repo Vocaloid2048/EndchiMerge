@@ -30,6 +30,7 @@ Techstack:<br>
 - We do not collect any sensitive personal data
 - Progress and settings are stored only in your browser's local storage
 - Once leaderboards are live, only the following will be uploaded: an anonymous device UUID, the display name you choose, and your score. **Nothing that identifies you**
+  (The leaderboard is live now, and it is **off by default**: nothing is uploaded until you tick consent the first time you open it.)
 
 
 ## <span style="color:#569CD6">🏞️ Design</span>
@@ -120,6 +121,7 @@ Every successful drop banks **0.05 SP**, and every merge banks another **0.05 SP
 - ✅ **Merging and combos**: same-level contact merges, handled in two phases (the collision callback only collects; the merge runs after the physics step). The combo multiplier is a non-linear curve topping out at ×10.0
 - ✅ **A visible overflow rule**: red dashed line, pale red warning band and a 5-second countdown — and it only measures dumplings that have **joined the pile** (touched another dumpling)
 - ✅ **Unlocks and codex**: merging a level into existence unlocks that character (the MELTING LIST *is* the codex); unlocks and the high score persist across runs
+- ✅ **Leaderboard (server-backed)**: one row per player, with separate orderings for score, COMBO and merges, and each row carrying the run time (`HH:mm:ss`) of **the run that set its best score** to the right of the value. Scores are uploaded **only after you consent**, and only the local record is written while playing — so it works offline
 - ✅ **SP and skills**: SP accrues from drops and merges and gates skills on its **current** value
   (spending locks them again instantly); each of the four skills is its own class acting through
   a narrow board interface, with costs and parameters all coming from JSON. Float and Shake share
@@ -143,9 +145,14 @@ cd EndchiMerge
 # 3. Install dependencies
 npm install
 
-# 4. Start the dev server
+# 4. Start the dev server (front end + back end + database, one command)
 npm run dev
 ```
+
+`npm run dev` brings up **Vite (front end)** and the **backend API** in a single process and creates a
+**SQLite** database at `.mysql/endchi.db` for you — a file, so no Docker, no MySQL, no service to
+start. It then proxies `/api` to the backend, so the front end talks to it through relative `/api/…`
+paths. Point it at a real Postgres / MySQL by putting `DATABASE_URL` in `.env`.
 
 Other commands:
 
@@ -153,11 +160,14 @@ Other commands:
 npm run build      # typecheck + bundle
 npm run preview    # preview the production build
 npm run typecheck  # typecheck only
-npm test           # run unit tests once (Vitest)
-npm run test:watch # unit tests in watch mode
+npm test           # run tests once (Vitest; includes real SQL against an in-memory database)
+npm run test:watch # tests in watch mode
+npm run dev:web    # front end only (pure UI work; the API is not reachable)
+npm run db:migrate # create the tables in whatever DATABASE_URL names (all three dialects)
 ```
 
-Requires Node.js 20 or newer.
+Requires Node.js 20 or newer; the **dev command (`npm run dev`) needs 22 or newer**, because the
+backend uses the built-in `node:sqlite`.
 </details>
 
 ## 📂 Project structure
@@ -180,10 +190,11 @@ EndchiMerge
 │  ├─health.ts                  # GET  /api/health — really asks the database
 │  └─_lib                       # Handlers, tokens, bounds, store, request log, shell
 │     ├─adapters/               # Seam 1: platform (Vercel req/res, Web Request/Response)
-│     └─db/                     # Seam 2: dialect (Postgres / MySQL), drivers, Binder
+│     └─db/                     # Seam 2: dialect (Postgres / MySQL / SQLite), drivers, Binder
 ├─schema.sql                    # The four backend tables (Postgres copy; see docs/backend.md §5)
 ├─vercel.json                   # Build settings and function timeout
 ├─.env.example                  # Environment variable names and notes (no values)
+├─.mysql                        # Local dev database (a SQLite file, gitignored, made by npm run dev)
 ├─public                        # Served verbatim, never bundled
 │  ├─config                     # Game configuration (externalised, no rebuild needed)
 │  │  ├─levels.json             # The 10-level merge chain and per-level physics
@@ -206,6 +217,9 @@ EndchiMerge
 │  │  └─input.ts                # Drop input (pointer and keyboard)
 │  ├─game                       # Per-run logic
 │  │  ├─session.ts              # Drops, aiming, merging, combos, overflow, body recycling
+│  │  ├─leaderboard.ts          # The local half of the leaderboard (identity, name, consent, local record) plus the storage-backed build
+│  │  ├─remoteLeaderboard.ts    # The server-backed build: /api/run/start, /api/score, /api/leaderboard
+│  │  ├─localStore.ts           # The one local storage layer and its sync revision
 │  │  ├─merge.ts                # Merge-table lookup (pure)
 │  │  ├─combo.ts                # Combo window and multiplier curve (pure)
 │  │  ├─overflow.ts             # Overflow grace countdown (pure, no geometry)
@@ -243,8 +257,10 @@ EndchiMerge
 │  │  └─sprite.css              # Silhouette outline
 │  ├─main.ts                    # Application entry point (assembly only)
 │  └─vite-env.d.ts
-├─tests                         # Vitest unit tests (deterministic logic)
+├─tests                         # Vitest: front-end logic + backend handlers/dialects/store/real SQL
 ├─scripts
+│  ├─dev.ts                     # npm run dev: API (SQLite) + Vite, routes scanned from api/
+│  ├─migrate.ts                 # npm run db:migrate: create the tables in DATABASE_URL (three dialects)
 │  ├─sign-assets.mjs            # Signs character assets (SVG / PNG / WebP)
 │  └─install-git-hooks.mjs      # Sets core.hooksPath (runs after npm install)
 ├─.githooks

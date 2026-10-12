@@ -17,10 +17,12 @@
  * no input field, no save key.
  *
  * 這一支**不含任何規則或儲存**：榜單、名次全部由 `game/leaderboard.ts` 的 `LeaderboardSource`
- * 報告。接上真後端時只需要換一個 `LeaderboardSource` 實作，這個檔案一行都不用動。
+ * 報告。接上真後端時換的是一個 `LeaderboardSource` 實作，這個檔案只多了**一行** ——
+ * `open()` 裡的 `source.refresh?.()`，因為伺服器版的 `snapshot()` 讀的是快取（見該介面成員）。
  * **No rules or storage live here**: the board and the ranks all come from the
- * `LeaderboardSource` in `game/leaderboard.ts`. Wiring up a real backend means swapping that one
- * implementation — this file does not change.
+ * `LeaderboardSource` in `game/leaderboard.ts`. Wiring up a real backend swaps one implementation
+ * and adds **one line** here — `source.refresh?.()` in `open()` — because the server build's
+ * `snapshot()` reads a cache (see that interface member).
  *
  * 一筆紀錄是**一位玩家**（不是一局）：榜排的是玩家，每一行顯示該玩家在目前分頁那個分類的
  * 最佳值，並在數值**右邊**帶上該玩家的用時（`HH:mm:ss`，見 `renderList()`）。
@@ -321,6 +323,18 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
 
     previouslyFocused =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    /*
+     * 開窗時抓一次最新的榜（選填的介面成員，只有伺服器版有）。`snapshot()` 是同步的，所以它讀的
+     * 一定是上一次抓回來的快取 —— 少了這一行，玩家在另一台裝置上刷新的成績要等他重開分頁才看得到。
+     * 本機版沒有這一步，`?.` 因此是必要的。
+     * Fetch the board once on open (an optional member that only the server build has).
+     * `snapshot()` is synchronous, so it necessarily reads the last cache — without this line a
+     * score set on another device would not show until the tab was reopened. The local build has no
+     * such step, so the `?.` is required.
+     */
+    source.refresh?.();
+
     render();
     root.hidden = false;
     document.addEventListener('keydown', onKeyDown, true);

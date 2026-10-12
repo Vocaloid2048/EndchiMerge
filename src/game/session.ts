@@ -366,6 +366,20 @@ export class GameSession implements SkillBoard {
   private aimX: number;
   private elapsedMs = 0;
   private scoreValue = 0;
+  /**
+   * 這一局累計**投放**了幾顆。
+   * How many drops this run has made in total.
+   *
+   * 它與 `dropCount` 是兩件事：那個是「目前場上還有幾顆」（合成與回收都會讓它變少），而伺服器的
+   * 合理性檢查要的是**投入量** —— 它的上界由時長推出（`maxDropsFor`），而「合成數 ≤ 投放數」正是
+   * 從投入量算起的。拿場上顆數去送，一局玩得久一點就會變成「合成 60 次但場上只有 12 顆」而被退。
+   * It is not `dropCount`: that one is "how many pieces are on the board right now" (both merging
+   * and recycling lower it), whereas the server's rationality check wants the **input** — its upper
+   * bound is derived from the duration (`maxDropsFor`), and "merges ≤ drops" is counted from it.
+   * Submitting the live body count would read as "60 merges but only 12 pieces were ever dropped"
+   * and be rejected on any run that lasted a while.
+   */
+  private totalDropsValue = 0;
   private mergedCountValue = 0;
   /**
    * 這一局連勝**最高**爬到幾連。`combo.count` 是「當下」的串長，會被中途斷連歸零，所以
@@ -708,6 +722,8 @@ export class GameSession implements SkillBoard {
     if (this.dropMergeCountValue === 0) this.combo.reset();
     this.dropMergeCountValue = 0;
     this.dropScoreValue = 0;
+    /* 累計投入量（見 `totalDropsValue`）：**只有真的投出去才加**，冷卻擋掉的呼叫走不到這裡。 */
+    this.totalDropsValue += 1;
 
     /*
      * 技力來源之一是**投放**（使用者定案：每投放一次 +0.05），不是合成。掛在這裡而不是
@@ -2423,6 +2439,7 @@ export class GameSession implements SkillBoard {
     this.appliedGravityY = this.config.levels.settings.gravityY;
 
     this.scoreValue = 0;
+    this.totalDropsValue = 0;
     this.mergedCountValue = 0;
     this.maxComboValue = 0;
     this.over = false;
@@ -2551,6 +2568,19 @@ export class GameSession implements SkillBoard {
   /** 已投放的顆數（＝目前在場上的顆數）。 */
   get dropCount(): number {
     return this.entries.length;
+  }
+
+  /**
+   * 這一局累計投放了幾顆（投入量，只增不減）。
+   * How many drops this run has made in total — the input, which only grows.
+   *
+   * 排行榜的提交要用這一支，不是 `dropCount`：伺服器的合理性檢查拿它當上界推導的基準
+   * （見 `totalDropsValue`）。
+   * The leaderboard submission uses this rather than `dropCount`: the server's rationality check
+   * derives its bounds from it (see `totalDropsValue`).
+   */
+  get totalDrops(): number {
+    return this.totalDropsValue;
   }
 
   /** 目前分數（合成後等級的 `score` × 當下連擊倍率，累加後取整）。 */

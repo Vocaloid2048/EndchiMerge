@@ -4,10 +4,11 @@ import { loadConfig } from './core/configLoader';
 import { resolveLocalizedName } from './core/localizedName';
 import type { AllConfig } from './core/types';
 import { FrameLoop } from './game/loop';
-import { createLocalLeaderboard, type LeaderboardSource } from './game/leaderboard';
+import type { LeaderboardSource } from './game/leaderboard';
 import { createLocalStore } from './game/localStore';
 import { createPreferencesStore, type PreferencesStore } from './game/preferences';
 import { createProgressStore, type ProgressStore } from './game/progress';
+import { createRemoteLeaderboard } from './game/remoteLeaderboard';
 import { GameSession } from './game/session';
 import { i18n } from './i18n';
 import { SpriteLoader } from './render/spriteLoader';
@@ -264,17 +265,33 @@ async function bootstrap(): Promise<void> {
   let runStartBest = progress.highScore;
 
   /*
-   * 榜單資料層（現階段為本地實作）。UI 只依賴 `LeaderboardSource` 介面 —— 日後接真後端時只要
-   * 換掉這一行，排行榜彈窗與其餘 UI 都不必改。後端定案（使用者，2026-10-12）：**Vercel
-   * Functions ＋ 任何一個 Postgres**，兩邊只以 `DATABASE_URL` 相連，所以資料庫要放雲端託管
-   * （Neon／Supabase）或自架的 NAS 都行，改的是連線字串而不是程式碼。
-   * The leaderboard data layer (local today). The UI depends only on the `LeaderboardSource`
-   * interface, so wiring the real backend replaces this one line and leaves the popup and the rest
-   * of the UI untouched. The backend decision (the user, 2026-10-12) is **Vercel Functions plus any
-   * Postgres**, joined by nothing but `DATABASE_URL`, so the database can be managed (Neon,
-   * Supabase) or self-hosted on the NAS — the connection string changes, the code does not.
+   * 榜單資料層（**伺服器版**）。UI 只依賴 `LeaderboardSource` 介面 —— 換成本機版
+   * （`createLocalLeaderboard`）只改這一段，排行榜彈窗與其餘 UI 都不必改。
+   * 後端定案（使用者，2026-10-12）：**Vercel Functions ＋ 任何一個 Postgres／MySQL**，或是雲函式
+   * ＋ SQLite 的本機開發組合（見 `scripts/dev.ts`）；改的是連線字串，不是程式碼。
+   *
+   * `baseUrl` 留空 ＝ 同源：本機由 Vite 代理 `/api`（`scripts/dev.ts`），正式部署時前後端若不同
+   * 網域，填 `VITE_API_BASE_URL` 即可（伺服器那邊也要設 `ALLOWED_ORIGIN`）。
+   * The leaderboard data layer, **server-backed**. The UI depends only on the `LeaderboardSource`
+   * interface, so switching to the local build (`createLocalLeaderboard`) is a change to this block
+   * alone. `baseUrl` empty means same-origin: locally Vite proxies `/api` (`scripts/dev.ts`), and a
+   * production deploy with the API on another origin sets `VITE_API_BASE_URL` (the server then needs
+   * `ALLOWED_ORIGIN` too).
    */
-  const leaderboardSource = createLocalLeaderboard({ store: localStore });
+  const leaderboardSource = createRemoteLeaderboard({
+    store: localStore,
+    baseUrl: import.meta.env.VITE_API_BASE_URL ?? '',
+    version: __APP_VERSION__,
+  });
+
+  /*
+   * 開一局：伺服器版會在這裡鑄一張一次性的憑證，而**憑證的頒發時刻就是這一局的起點** ——
+   * 反作弊靠它判斷宣稱的時長合不合理，所以必須在開局時呼叫，不能等到提交。本機版沒有這一步。
+   * Start a run: the server build mints a one-off token here, and **its issue time is the run's
+   * start** — the anti-cheat uses it to judge the claimed duration, so it has to happen now rather
+   * than at submission. The local build has no such step.
+   */
+  leaderboardSource.beginRun?.();
 
   /**
    * 把**目前這一局**的成績併入本機紀錄。每幀呼叫。
@@ -304,6 +321,16 @@ async function bootstrap(): Promise<void> {
       score: session.score,
       maxCombo: session.maxCombo,
       merges: session.mergedCount,
+      /*
+       * 這一局**累計投放**了幾顆。伺服器的合理性檢查拿它當上界推導的基準（「合成數 ≤ 投放數」），
+       * 所以送的必須是投入量（`totalDrops`）而不是場上顆數（`dropCount`）—— 後者會被合成與回收
+       * 減少，一局玩久一點就會變成「合成 60 次但只投了 12 顆」而被退。
+       * How many drops **this run** made. The server's rationality check derives its bounds from it
+       * ("merges ≤ drops"), so what is sent has to be the input (`totalDrops`) and not the live body
+       * count (`dropCount`) — the latter is lowered by merging and recycling, and a longer run would
+       * read as "60 merges but only 12 drops" and be rejected.
+       */
+      drops: session.totalDrops,
       /*
        * 時長跟著分數走（見 `LeaderboardEntry.durationMs`）：這裡每幀都在記，所以傳的是「目前為
        * 止的時間」，最後留下的自然是**創下最高分那一刻**的時間。
@@ -350,6 +377,14 @@ async function bootstrap(): Promise<void> {
     recordRun();
     syncRun();
     session.reset();
+    /*
+     * 新的一局要**重新鑄一張憑證**（見 `LeaderboardSource.beginRun`）。順序在 `syncRun()` 之後：
+     * 上一局的提交需要上一局的憑證，而 `beginRun()` 會把「這一局的數字」清空。
+     * A new run **mints a fresh token** (see `LeaderboardSource.beginRun`). It comes after
+     * `syncRun()`: the previous run's submission needs the previous token, and `beginRun()` clears
+     * "this run's numbers".
+     */
+    leaderboardSource.beginRun?.();
     shownGameOver = false;
     gameOver?.hide();
     runStartBest = progress.highScore;

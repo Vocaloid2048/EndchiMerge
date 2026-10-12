@@ -30,6 +30,7 @@ Techstack:<br>
 - 我們不會收集任何個人敏感資料
 - 遊戲進度與設定僅儲存於您目前的瀏覽器本地快取
 - 當排行榜功能上線後，只會上傳：匿名裝置 UUID、您自訂的用戶名、分數。**不含任何可識別身分的資訊**
+  （排行榜現在已經上線，而且**預設不分享**：只有在您於首次開啟排行榜時勾選同意之後才會上傳）
 
 
 ## <span style="color:#569CD6">🏞️ 設計稿</span>
@@ -117,6 +118,9 @@ Techstack:<br>
 - ✅ **可見的溢出規則**：紅色虛線 ＋ 淺紅警戒區 ＋ 5 秒倒數，且只計算**已入堆**（碰過其他方團團）
   的顆粒
 - ✅ **解鎖與圖鑑**：每合出一級解鎖該角色（MELTING LIST 即圖鑑），解鎖與最高分跨局保存
+- ✅ **排行榜（已接後端）**：每位玩家一筆、分數／COMBO／合成三個分頁各自排序，榜上每列在數值右邊
+  帶上**創下最高分那一局**的用時（`HH:mm:ss`）。成績在**同意分享之後**才上傳，遊玩中只寫本地，
+  離線照樣能玩
 - ✅ **技力與技能**：技力隨投放與合成累積、依當前值動態解鎖（用掉即時上鎖）；四項技能各自
   一個 class、透過窄介面作用於棋盤，消耗與參數全部來自 JSON。浮動與搖晃共用**同一片**隱形
   天花板把堆疊封在容器口以下，容器左右另留 `leftOffset`／`rightOffset` 展示餘裕（寬度不變），
@@ -138,9 +142,13 @@ cd EndchiMerge
 # 3. 安裝依賴
 npm install
 
-# 4. 啟動開發伺服器
+# 4. 啟動開發伺服器（前端 ＋ 後端 ＋ 資料庫，一個指令）
 npm run dev
 ```
+
+`npm run dev` 會在同一個行程裡起 **Vite（前端）** 與 **後端 API**，並自己建一個 **SQLite** 資料庫
+放在 `.mysql/endchi.db`（一個檔案，所以不必裝 Docker、MySQL 或任何服務），再把 `/api` 代理到後端 ——
+所以前端用相對路徑 `/api/…` 就能打通。想改連真的 Postgres／MySQL 就在 `.env` 填 `DATABASE_URL`。
 
 其他指令：
 
@@ -148,11 +156,14 @@ npm run dev
 npm run build      # 型別檢查 + 打包
 npm run preview    # 預覽打包結果
 npm run typecheck  # 只跑型別檢查
-npm test           # 跑單元測試（Vitest，單次）
-npm run test:watch # 單元測試監看模式
+npm test           # 跑測試（Vitest，單次；含真的 SQL，資料庫在記憶體裡）
+npm run test:watch # 測試監看模式
+npm run dev:web    # 只起前端（純 UI 改動用，打不到 API）
+npm run db:migrate # 對 DATABASE_URL 指的資料庫建表（三個方言都支援）
 ```
 
-需要 Node.js 20 或以上。
+需要 Node.js 20 或以上；**開發指令（`npm run dev`）需要 22 或以上** —— 後端用的是內建的
+`node:sqlite`，那是 22 才有的。
 </details>
 
 ## 📂 專案結構
@@ -175,10 +186,11 @@ EndchiMerge
 │  ├─health.ts                  # GET  /api/health — 真的問一次資料庫
 │  └─_lib                       # 處理器、憑證、上界、儲存層、接收紀錄、外殼
 │     ├─adapters/               # 接縫一：平台（Vercel 的 req/res、Web 的 Request/Response）
-│     └─db/                     # 接縫二：方言（Postgres／MySQL）＋ 驅動 ＋ Binder
+│     └─db/                     # 接縫二：方言（Postgres／MySQL／SQLite）＋ 驅動 ＋ Binder
 ├─schema.sql                    # 後端四張表（Postgres 版；方言差異見 docs/backend.md §5）
 ├─vercel.json                   # 建置設定與函式逾時
 ├─.env.example                  # 環境變數的鍵名與說明（不放值）
+├─.mysql                        # 本機開發資料庫（SQLite 檔，gitignore；npm run dev 自己建）
 ├─public                        # 原樣 serve，不經打包器
 │  ├─config                     # 遊戲配置（外部化，改完不需重新 build）
 │  │  ├─levels.json             # 合成鏈 10 級與各級物理參數
@@ -201,6 +213,9 @@ EndchiMerge
 │  │  └─input.ts                # 投放輸入（指標與鍵盤）
 │  ├─game                       # 單局邏輯
 │  │  ├─session.ts              # 投放、瞄準、合成、連擊、溢位、剛體回收
+│  │  ├─leaderboard.ts          # 排行榜的本機一半（身份、名稱、分享、本機紀錄）＋ 榜存在本機的實作
+│  │  ├─remoteLeaderboard.ts    # 排行榜接後端的實作：打 /api/run/start、/api/score、/api/leaderboard
+│  │  ├─localStore.ts           # 統一的本地儲存層與同步版本計數
 │  │  ├─merge.ts                # 合成表判定（純函式）
 │  │  ├─combo.ts                # 連擊窗口與倍率曲線（純函式）
 │  │  ├─overflow.ts             # 溢位寬限倒數（純邏輯，不含幾何）
@@ -238,8 +253,10 @@ EndchiMerge
 │  │  └─sprite.css              # 輪廓白框
 │  ├─main.ts                    # 應用入口（只做組裝）
 │  └─vite-env.d.ts
-├─tests                         # Vitest 單元測試（確定性邏輯）
+├─tests                         # Vitest：前端確定性邏輯 ＋ 後端處理器／方言／儲存層／真 SQL
 ├─scripts
+│  ├─dev.ts                     # npm run dev：API（SQLite）＋ Vite，路由從 api/ 掃出來
+│  ├─migrate.ts                 # npm run db:migrate：對 DATABASE_URL 建表（三個方言）
 │  ├─sign-assets.mjs            # 角色素材元數據簽名（SVG / PNG / WebP）
 │  └─install-git-hooks.mjs      # 設定 core.hooksPath（npm install 後自動執行）
 ├─.githooks

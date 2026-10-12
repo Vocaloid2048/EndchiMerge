@@ -2,15 +2,17 @@
  * 排行榜資料層。
  * The leaderboard data layer.
  *
- * **現階段是純本地**：所有紀錄寫進 `localStorage`，只有自己在看。使用者已定案排行榜最終要
- * 接真後端（Docker Postgres container 或 Vercel 支援的後端＋微資料庫；騰訊雲再後），所以
- * 這一支刻意把「榜單從哪裡來」抽成 `LeaderboardSource` 介面 —— UI 只依賴介面，日後換成
- * 伺服器實作時**一行 UI 都不用改**。
- * **Local for now**: records live in `localStorage` and only the player sees them. The user has
- * decided the leaderboard will eventually talk to a real backend (a Docker Postgres container,
- * or Vercel's supported backend plus a micro database; Tencent Cloud later), so "where the board
- * comes from" is deliberately abstracted behind `LeaderboardSource` — the UI depends on the
- * interface only, and swapping in a server implementation changes **no UI code**.
+ * **兩個實作，一個介面。** 這一支提供「榜存在本機」的版本（`createLocalLeaderboard`），
+ * `game/remoteLeaderboard.ts` 提供「榜在伺服器」的版本（`createRemoteLeaderboard`）。兩者共用
+ * 本機的那一半 —— 身份、顯示名、分享意願與本機紀錄全在 `createPlayerRecord` 裡，所以「改名不新增
+ * 一筆」「只升不降」這些規則只有一份實作。UI 只認識 `LeaderboardSource`，因此換哪一個實作它都
+ * 不知道。
+ * **Two implementations, one interface.** This file provides the "board in `localStorage`" build
+ * (`createLocalLeaderboard`) and `game/remoteLeaderboard.ts` provides the "board on the server" one
+ * (`createRemoteLeaderboard`). They share the local half — identity, display name, sharing
+ * preference and the local record all live in `createPlayerRecord`, so rules such as "renaming never
+ * adds a row" and "monotonic" have exactly one implementation. The UI knows only
+ * `LeaderboardSource`, so it cannot tell which one it has.
  *
  * 設計要點（皆為使用者定案）/ Design points, all decided by the user:
  *
@@ -32,9 +34,11 @@
  *    **The name is not the identity.** Identity is a locally minted `playerId`
  *    (`endchimerge:device-id`). Renaming only rewrites that one row's `name` field: no new row,
  *    and no orphan left behind under the old name that can never be claimed again.
- * 5. **兩層：本機紀錄與榜。** 這條分界就是日後接真後端的那條線。
- *    **Two layers: the local record and the board.** This seam is exactly where the real backend
- *    will go.
+ * 5. **兩層：本機紀錄與榜。** 這條分界就是接真後端的那條線，而它現在真的被接了 ——
+ *    `remoteLeaderboard.ts` 就住在這一條線的另一邊，而它沒有動到這一支的任何規則。
+ *    **Two layers: the local record and the board.** This seam is where the real backend goes, and
+ *    it has now gone there — `remoteLeaderboard.ts` lives on the other side of it without touching
+ *    a single rule in this file.
  *    - `profile`（`endchimerge:profile`）＝ 這台裝置上的最佳成績，**邊玩邊更新**（只有真的刷新
  *      才寫入），所以關分頁、當機、斷電都不掉成績。
  *      **「有沒有東西沒上載」不再記在這裡** —— 那是 `game/localStore.ts` 的單一 `revision`
@@ -145,6 +149,23 @@ export interface LeaderboardRun {
   durationMs?: number;
   maxCombo: number;
   merges: number;
+  /**
+   * 這一局**累計投放**了幾顆（`GameSession.totalDrops`）。
+   * How many drops **this run** made in total (`GameSession.totalDrops`).
+   *
+   * 本機紀錄用不到它 —— 它只是伺服器合理性檢查的輸入（見 `api/_lib/limits.ts`：投放量受冷卻
+   * 限制、而且「合成數 ≤ 投放數」）。所以它是選填的，但**伺服器版本會送它**：少了它，一局正常
+   * 的遊戲會被判成 `merges_exceed_drops` 而退掉。
+   * The local record has no use for it — it is input to the server's rationality check (see
+   * `api/_lib/limits.ts`: drops are rate-limited by the cooldown, and merges are bounded by them).
+   * It is optional here, but **the server build does send it**: without it an ordinary run would be
+   * rejected as `merges_exceed_drops`.
+   *
+   * ⚠️ 是**投入量**而不是場上顆數：合成會讓場上變少，`GameSession.dropCount` 因此單調遞減。
+   * ⚠️ It is the **input**, not the live body count: merging lowers the latter, so
+   * `GameSession.dropCount` counts *down*.
+   */
+  drops?: number;
   /** 覆寫時間戳；未提供時用時鐘。測試用。 */
   at?: number;
 }
@@ -188,10 +209,12 @@ export interface LeaderboardSnapshot {
  * 榜單來源。
  * The leaderboard source.
  *
- * UI 只認這個介面。日後接真後端時新增一個 `createRemoteLeaderboard()` 即可 —— 名稱與分享
- * 意願仍留在本地（那是玩家的設定，不是伺服器資料）。
- * The UI knows only this interface. Adding the real backend means adding a
- * `createRemoteLeaderboard()`; the name and the sharing preference stay local, because they are
+ * UI 只認這個介面，而它有兩個實作：`createLocalLeaderboard`（榜存在本機）與
+ * `createRemoteLeaderboard`（榜在伺服器，見 `game/remoteLeaderboard.ts`）。名稱與分享意願永遠
+ * 留在本地 —— 那是玩家的設定，不是伺服器資料。
+ * The UI knows only this interface, and it has two implementations: `createLocalLeaderboard`
+ * (board in `localStorage`) and `createRemoteLeaderboard` (board on the server, see
+ * `game/remoteLeaderboard.ts`). The name and the sharing preference always stay local: they are
  * player settings rather than server data.
  */
 export interface LeaderboardSource {
@@ -250,13 +273,69 @@ export interface LeaderboardSource {
    * there is no un-uploaded update (returns `false`).
    */
   sync(): boolean;
-  /** 讀取某一分類的前 N 名與自己的名次。 */
+  /**
+   * 讀取某一分類的前 N 名與自己的名次。
+   * Read one category's top N plus the player's own rank.
+   *
+   * **同步**，而且實作因此一定讀的是手上已有的東西（本機版是存檔，伺服器版是上一次抓回來的
+   * 快取）。要伺服器版去拿新的，呼叫 `refresh()`。
+   * **Synchronous**, so an implementation necessarily reads what it already has (storage in the
+   * local build, the last fetch in the server build). To make the server build fetch, call
+   * `refresh()`.
+   */
   snapshot(category: LeaderboardCategory, limit?: number): LeaderboardSnapshot;
   /** 訂閱變更（刷新、上載、改名、切換分享）；回傳取消訂閱的函式。 */
   subscribe(listener: () => void): () => void;
+  /**
+   * 去拿一次最新的榜（選填）。
+   * Fetch the board once (optional).
+   *
+   * 只有**伺服器版**需要它 —— 見 `snapshot()` 為什麼一定是快取。UI 在榜面開啟時呼叫它一次，
+   * 所以「開啟榜 → 看到最新的」成立，而不必輪詢。
+   * Only the **server build** needs this — see why `snapshot()` must be a cache. The UI calls it
+   * once when the board opens, which is what makes "open the board, see current standings" true
+   * without polling.
+   */
+  refresh?(): void;
+  /**
+   * 開一局（選填）。
+   * Start a run (optional).
+   *
+   * 伺服器版靠它鑄一張一次性的憑證，而**憑證的頒發時刻就是這一局的起點** —— 反作弊的「宣稱的
+   * 時長不可能超過實際流逝的時間」全靠它。所以它必須在開局時呼叫，不能等到提交（提交時才鑄的
+   * 話那個差值永遠是零，任何正常的成績都會被退）。
+   * The server build mints a one-off token here, and **the token's issue time is the run's start**
+   * — the "claimed duration cannot exceed elapsed time" check depends on it. So it must be called
+   * when a run begins and not at submission (minting then would make the difference zero and reject
+   * every ordinary run).
+   */
+  beginRun?(): void;
 }
 
-export interface LocalLeaderboardOptions {
+/**
+ * 榜單相關的儲存鍵覆寫；測試用。
+ * Overrides for the leaderboard's storage keys; for tests.
+ */
+export interface LeaderboardKeys {
+  entries?: string;
+  name?: string;
+  sharing?: string;
+  prompt?: string;
+  profile?: string;
+  device?: string;
+}
+
+/** 六個儲存鍵都解析完之後的形狀。 */
+export interface ResolvedLeaderboardKeys {
+  readonly entries: string;
+  readonly name: string;
+  readonly sharing: string;
+  readonly prompt: string;
+  readonly profile: string;
+  readonly device: string;
+}
+
+export interface PlayerRecordOptions {
   /**
    * 共用的本地儲存層。**給了它才會與解鎖進度共用同一組 `revision`**，也就是「解鎖了新角色
    * 但沒刷新分數」也會被推上伺服器；不給的話（測試常態）自建一個只屬於自己的。
@@ -268,16 +347,7 @@ export interface LocalLeaderboardOptions {
   /** 自行注入儲存體；未提供 `store` 時才用。 */
   storage?: StorageBackend | null;
   /** 覆寫儲存鍵；測試用。 */
-  keys?: {
-    entries?: string;
-    name?: string;
-    sharing?: string;
-    prompt?: string;
-    profile?: string;
-    device?: string;
-  };
-  /** 顯示名次數；預設 `LEADERBOARD_LIMIT`。 */
-  limit?: number;
+  keys?: LeaderboardKeys;
   /** 時鐘；測試用。 */
   now?: () => number;
   /**
@@ -288,6 +358,82 @@ export interface LocalLeaderboardOptions {
   playerId?: string;
   /** 覆寫防竄改用的鹽；測試用。 */
   salt?: string;
+  /**
+   * 沒有存檔的本機紀錄時，用什麼當起點。
+   * What to start from when there is no stored local record.
+   *
+   * ⚠️ **這個回呼一定會被呼叫一次，不管有沒有存檔** —— 本機榜靠這個時機把榜讀出來（它需要
+   * `playerId` 才能折疊舊格式），所以它不是「只在需要時才問」的惰性取值。回傳 `null` 就是
+   * 「沒有更好的起點，用空紀錄」；有存檔時回傳值會被忽略。
+   * ⚠️ **The callback is always invoked once, stored record or not**: the local board reads itself
+   * at this moment (it needs `playerId` to fold the old format), so this is not a lazy lookup.
+   * Returning `null` means "nothing better, use an empty record"; when a record was stored the
+   * return value is ignored.
+   */
+  seed?: (context: PlayerRecordContext) => PlayerProfile | null;
+}
+
+/** `seed` 回呼拿得到的東西；都是已經解析完的，回呼不必自己再讀一次設定。 */
+export interface PlayerRecordContext {
+  readonly playerId: string;
+  readonly store: LocalStore;
+  readonly keys: ResolvedLeaderboardKeys;
+  readonly salt: string;
+}
+
+/**
+ * 一位玩家在本機的持久狀態：**身份、顯示名、分享意願，以及本機紀錄**。
+ * A player's persistent local state: **identity, display name, sharing preference and the local
+ * record**.
+ *
+ * 這一支是「榜從哪裡來」那條線的**下方**：它完全不知道榜的存在，只管本機的那一半。所以
+ * `createLocalLeaderboard`（榜存在本機）與 `createRemoteLeaderboard`（榜在伺服器）可以共用它，
+ * 而兩者之間沒有第二份「本機紀錄怎麼更新」的實作。
+ * This sits **below** the "where does the board come from" line: it knows nothing about a board and
+ * only owns the local half. `createLocalLeaderboard` (board in `localStorage`) and
+ * `createRemoteLeaderboard` (board on the server) therefore share it, and there is no second copy of
+ * "how the local record is updated" between them.
+ *
+ * **它不會主動通知任何人。** 通知是外層的事：同一件事（例如同意分享）在兩個版本裡要觸發不同
+ * 的副作用，而通知正是那個副作用的一部分。
+ * **It never notifies anyone on its own.** Notifying belongs to the caller: the same action (say,
+ * giving consent) has different consequences in the two versions, and notifying is part of those
+ * consequences.
+ */
+export interface PlayerRecord {
+  readonly store: LocalStore;
+  readonly keys: ResolvedLeaderboardKeys;
+  readonly salt: string;
+  readonly playerId: string;
+  /** 目前的顯示名；未設定為空字串。 */
+  readonly displayName: string;
+  setDisplayName(name: string): void;
+  readonly sharing: boolean;
+  setSharing(on: boolean): void;
+  readonly publishPromptDone: boolean;
+  /** 記下首次的發布詢問已經處理過；回傳這次是否真的改了什麼。 */
+  finishPublishPrompt(): boolean;
+  /** 本機紀錄的現值。 */
+  readonly profile: PlayerProfile;
+  /** 把本機紀錄再寫一次（內容不變，但會推進 `revision`）。 */
+  writeProfile(): void;
+  /** 把一局併入本機紀錄；回傳是否刷新了。 */
+  record(run: LeaderboardRun): boolean;
+  /** 有沒有還沒上載的變更（全機 `revision`）。 */
+  hasPendingUpload(): boolean;
+  /** 記下「現在的 `revision` 已經上載過了」。 */
+  markUploaded(): void;
+  /** 訂閱變更；回傳取消訂閱的函式。 */
+  subscribe(listener: () => void): () => void;
+  /** 通知訂閱者。 */
+  notify(): void;
+  /** 時鐘（建構時注入的那一個）。 */
+  now(): number;
+}
+
+export interface LocalLeaderboardOptions extends PlayerRecordOptions {
+  /** 顯示名次數；預設 `LEADERBOARD_LIMIT`。 */
+  limit?: number;
 }
 
 /**
@@ -297,7 +443,7 @@ export interface LocalLeaderboardOptions {
 const CONTENT_SALT = 'endchimerge/leaderboard/v2';
 
 /** 本機紀錄：這台裝置上的最佳成績，也就是「要上載的那一筆」。 */
-interface PlayerProfile {
+export interface PlayerProfile {
   playerId: string;
   name: string;
   score: number;
@@ -531,55 +677,30 @@ function mintId(): string {
     : `${String(Date.now())}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
-export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): LeaderboardSource {
-  /*
-   * 儲存收攏到 `localStore`（M7-3）。這一支過去自己數過 `storage === null` 十幾次，而「有沒有
-   * 東西沒上載」只能靠本機紀錄自己的 `revision` 回答 —— 偏偏解鎖新角色不會動到那個數字。
-   * 現在待上載的判斷交給 store 的單一 `revision`（涵蓋本機紀錄、解鎖清單與最高分）。
-   * Storage is centralised in `localStore` (M7-3). This module used to test `storage === null`
-   * a dozen times, and "anything not uploaded yet" could only be answered by the local record's
-   * own `revision` — which an unlock never touched. Pending upload now comes from the store's
-   * single `revision`, covering the local record, the unlock set and the high score.
-   */
-  const limit = Math.max(1, Math.trunc(options.limit ?? LEADERBOARD_LIMIT));
+export function createPlayerRecord(options: PlayerRecordOptions = {}): PlayerRecord {
   const now = options.now ?? ((): number => Date.now());
   const salt = options.salt ?? CONTENT_SALT;
 
-  const entriesKey = options.keys?.entries ?? STORAGE_KEYS.leaderboard;
-  const nameKey = options.keys?.name ?? STORAGE_KEYS.playerName;
-  const sharingKey = options.keys?.sharing ?? STORAGE_KEYS.shareScore;
-  const promptKey = options.keys?.prompt ?? STORAGE_KEYS.publishPrompt;
-  const profileKey = options.keys?.profile ?? STORAGE_KEYS.profile;
-  const deviceKey = options.keys?.device ?? STORAGE_KEYS.deviceId;
+  const keys: ResolvedLeaderboardKeys = {
+    entries: options.keys?.entries ?? STORAGE_KEYS.leaderboard,
+    name: options.keys?.name ?? STORAGE_KEYS.playerName,
+    sharing: options.keys?.sharing ?? STORAGE_KEYS.shareScore,
+    prompt: options.keys?.prompt ?? STORAGE_KEYS.publishPrompt,
+    profile: options.keys?.profile ?? STORAGE_KEYS.profile,
+    device: options.keys?.device ?? STORAGE_KEYS.deviceId,
+  };
 
   /*
-   * 自建 store 時要把**自己實際用的鍵**宣告成「要同步」的：測試會覆寫鍵名，而 store 預設的
+   * 自建 store 時要把**本機紀錄那個鍵**宣告成「要同步」的：測試會覆寫鍵名，而 store 預設的
    * 名單是正式鍵 —— 不宣告就會出現「寫了 profile 但 revision 沒動」的假陰性，上載永遠不發生。
-   * A private store must be told which of **this module's actual keys** sync: tests override key
-   * names while the store's default list holds the production ones, and without this the write
-   * would look like "profile written, revision untouched" — a false negative that stops every
-   * upload. `entries`／`name`／`sharing`／`prompt`／`device` 都是本機設定，不在名單裡。
+   * A private store must be told that the **local record's key** syncs: tests override key names
+   * while the store's default list holds the production ones, and without this the write would look
+   * like "profile written, revision untouched" — a false negative that stops every upload.
    */
   const store: LocalStore =
-    options.store ?? createLocalStore({ storage: options.storage, syncedKeys: [profileKey] });
+    options.store ?? createLocalStore({ storage: options.storage, syncedKeys: [keys.profile] });
 
   const listeners = new Set<() => void>();
-
-  const notify = (): void => {
-    for (const listener of listeners) listener();
-  };
-
-  const readBoard = (): LeaderboardEntry[] => {
-    return parseEntries(open(store.read(entriesKey), salt));
-  };
-
-  const writeBoard = (): void => {
-    store.write(entriesKey, seal(entries, salt));
-  };
-
-  const writeProfile = (): void => {
-    store.write(profileKey, seal(profile, salt));
-  };
 
   /* ── 身份 ────────────────────────────────────────────────────────────
    * 玩家識別碼優先取本機紀錄裡的那一個（身份跟著紀錄走，裝置鍵被清掉也認得回來），
@@ -588,51 +709,18 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
    * the device key does not orphan it), then from the device key, and is minted only if neither
    * exists.
    */
-  const storedProfile = parseProfile(open(store.read(profileKey), salt));
-  const storedDevice = store.read(deviceKey) ?? '';
+  const storedProfile = parseProfile(open(store.read(keys.profile), salt));
+  const storedDevice = store.read(keys.device) ?? '';
   const playerId =
     options.playerId ?? storedProfile?.playerId ?? (storedDevice !== '' ? storedDevice : mintId());
 
-  if (storedDevice !== playerId) store.write(deviceKey, playerId);
+  if (storedDevice !== playerId) store.write(keys.device, playerId);
 
-  /* ── 榜 ──────────────────────────────────────────────────────────────
-   * 先讀原始字串：舊格式是一個裸陣列（每局一筆），新格式是信封（一筆一位玩家）。兩者要分開
-   * 處理，而 `open()` 對舊格式只會回 `null`。
-   * Read the raw text first: the old format is a bare array (one row per run) and the new one is
-   * an envelope (one row per player). They need separate handling, and `open()` just returns
-   * `null` for the old one.
-   */
-  const rawBoard = store.read(entriesKey);
+  /* `seed` 一定會被呼叫一次（見 `PlayerRecordOptions.seed`）。 */
+  const seeded =
+    options.seed === undefined ? null : options.seed({ playerId, store, keys, salt });
 
-  let entries: LeaderboardEntry[];
-  let legacy: LeaderboardEntry[] | null = null;
-
-  try {
-    const parsed: unknown = rawBoard === null ? null : JSON.parse(rawBoard);
-    legacy = Array.isArray(parsed) ? parseEntries(parsed) : null;
-  } catch {
-    legacy = null;
-  }
-
-  if (legacy !== null) {
-    const collapsed = collapseLegacy(legacy, playerId);
-    entries = collapsed === null ? [] : [collapsed];
-
-    if (collapsed !== null) {
-      const name = store.read(nameKey) ?? '';
-      if (name !== '') entries = [{ ...collapsed, name }];
-    }
-  } else {
-    entries = readBoard();
-  }
-
-  let profile: PlayerProfile =
-    storedProfile ??
-    (() => {
-      /* 沒有本機紀錄時，用榜上自己那一筆當起點；連那一筆都沒有就是空的。 */
-      const mine = entries.find((entry) => entry.id === playerId);
-      return mine === undefined ? emptyProfile(playerId, now()) : profileFromEntry(mine, playerId);
-    })();
+  let profile: PlayerProfile = storedProfile ?? seeded ?? emptyProfile(playerId, now());
 
   /*
    * 名字是**設定**，以 `player-name` 為準 —— 但「沒有這個鍵」與「鍵裡是空的」是兩件事：
@@ -641,84 +729,29 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
    * empty" are different things: the first is a migrated old save (where the name only ever lived
    * on the records), the second is the player clearing it on purpose, which must not be undone.
    */
-  const savedName = store.read(nameKey);
+  const savedName = store.read(keys.name);
   let displayName = savedName ?? profile.name;
 
-  let sharing = store.read(sharingKey) === 'true';
-  let publishPromptDone = store.read(promptKey) === 'true';
+  let sharing = store.read(keys.sharing) === 'true';
+  let publishPromptDone = store.read(keys.prompt) === 'true';
 
   if (displayName !== '') {
     profile = { ...profile, name: displayName };
-    const index = entries.findIndex((entry) => entry.id === playerId);
-    if (index >= 0) {
-      entries = entries.map((entry, at) => (at === index ? { ...entry, name: displayName } : entry));
-    }
+
     /* 名字是從紀錄裡撿回來的，就順手把它補進設定，之後兩邊才不會各說各話。 */
-    if (savedName === null) store.write(nameKey, displayName);
+    if (savedName === null) store.write(keys.name, displayName);
   }
 
-  /* 遷移結果要落地，否則下次開啟又會走一次舊格式。 */
-  if (legacy !== null) {
-    writeBoard();
-    writeProfile();
-  }
-
-  /**
-   * 把本機紀錄的那一筆寫上（或更新）榜。
-   * Write (or update) the local record's row on the board.
-   *
-   * **`markUploaded()` 必須在寫完之後才呼叫**：寫 profile 本身會推進 `revision`（那是要同步的
-   * 資料），順序顛倒的話「剛上載完」會被自己再標成「有待上載」，於是每次上載都留下一次空轉。
-   * **`markUploaded()` has to come after the write**: writing the profile advances `revision`
-   * (it is synced data), so the reverse order would re-mark the upload as pending and leave one
-   * pointless upload behind every time.
-   */
-  const push = (): void => {
-    const row: LeaderboardEntry = {
-      id: profile.playerId,
-      name: displayName,
-      score: profile.score,
-      durationMs: profile.durationMs,
-      maxCombo: profile.maxCombo,
-      merges: profile.merges,
-      at: profile.at,
-    };
-
-    const index = entries.findIndex((entry) => entry.id === playerId);
-    const updated =
-      index >= 0 ? entries.map((entry, at) => (at === index ? row : entry)) : [...entries, row];
-
-    entries = capEntries(updated, limit, playerId);
-    writeBoard();
-
-    profile = { ...profile, name: displayName };
-    writeProfile();
-    store.markUploaded();
-  };
-
-  /**
-   * 上載：把本機紀錄推上榜。
-   * Upload: push the local record onto the board.
-   *
-   * 兩個前提都成立才會動：玩家同意分享、而且有一筆還沒送出去的更新。後者問的是**全機**的
-   * `revision`（見 `localStore.ts`），所以「這台裝置上有任何要同步的東西變了」都算 ——
-   * 包括只解鎖了新角色、分數沒動的那一種。這正是以前漏掉的情況。
-   * Both preconditions must hold: consent, and an update that has not been sent. The second is
-   * the **machine-wide** `revision` (see `localStore.ts`), so anything syncable changing on this
-   * device counts — including an unlock with no new high score, which is exactly what used to be
-   * missed.
-   */
-  const sync = (): boolean => {
-    if (!sharing) return false;
-    if (!store.hasPendingUpload()) return false;
-
-    push();
-    notify();
-
-    return true;
+  const writeProfile = (): void => {
+    store.write(keys.profile, seal(profile, salt));
   };
 
   return {
+    store,
+    keys,
+    salt,
+    playerId,
+
     get displayName(): string {
       return displayName;
     },
@@ -727,31 +760,21 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
       if (name === displayName) return;
 
       displayName = name;
-      store.write(nameKey, name);
+      store.write(keys.name, name);
 
       /*
-       * 本機紀錄的名字跟著改。**不必再手動推版本** —— 名字寫進 profile（要同步的鍵）時
-       * store 就推進 `revision` 了，下次 `sync()` 因此知道要再送一趟。
-       * The local record's name follows. **No manual version bump** — writing the name into the
-       * profile (a synced key) advances `revision` in the store, which is what tells the next
-       * `sync()` to send again.
+       * 本機紀錄的名字跟著改，但**榜上那一列不是這裡的事** —— 本機榜與伺服器榜各有各的榜面，
+       * 由外層自己決定要不要一起改名（見 `createLocalLeaderboard.setDisplayName`）。
+       * The local record's name follows; **the board row is not this layer's business** — the local
+       * board and the server board each have their own surface, and the caller decides whether to
+       * rename alongside.
+       *
+       * 不必再手動推版本：名字寫進 profile（要同步的鍵）時 store 就推進 `revision` 了。
+       * No manual version bump: writing the name into the profile (a synced key) advances
+       * `revision` in the store.
        */
       profile = { ...profile, name };
       writeProfile();
-
-      /*
-       * 榜上自己那一筆（如果已經在上面）一起改名。**不會新增一筆** —— 找到的是自己那個
-       * `playerId` 的那一列。
-       * The player's row on the board (if it is up there) is renamed too, and **no row is added**:
-       * what gets found is the row carrying this `playerId`.
-       */
-      const index = entries.findIndex((entry) => entry.id === playerId);
-      if (index >= 0) {
-        entries = entries.map((entry, at) => (at === index ? { ...entry, name } : entry));
-        writeBoard();
-      }
-
-      notify();
     },
 
     get sharing(): boolean {
@@ -759,34 +782,30 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
     },
 
     setSharing(on: boolean): void {
-      if (sharing !== on) {
-        sharing = on;
-        store.write(sharingKey, on ? 'true' : 'false');
-      }
+      if (sharing === on) return;
 
-      /*
-       * 同意的那一刻就推一次。使用者定案：「在用戶同意分享下，不需要用戶手動按下上載記錄」，
-       * 所以「同意」本身就是上載的觸發點，而不是等玩家在某處再按一顆按鈕。
-       * Consent itself is the trigger: the user's decision is that a player who has agreed should
-       * never have to press an upload button. `sync()` notifies when it does something, so only
-       * the paths that changed nothing need to notify here.
-       */
-      if (on && sync()) return;
-
-      notify();
+      sharing = on;
+      store.write(keys.sharing, on ? 'true' : 'false');
     },
 
     get publishPromptDone(): boolean {
       return publishPromptDone;
     },
 
-    finishPublishPrompt(): void {
-      if (publishPromptDone) return;
+    finishPublishPrompt(): boolean {
+      if (publishPromptDone) return false;
 
       publishPromptDone = true;
-      store.write(promptKey, 'true');
-      notify();
+      store.write(keys.prompt, 'true');
+
+      return true;
     },
+
+    get profile(): PlayerProfile {
+      return profile;
+    },
+
+    writeProfile,
 
     record(run: LeaderboardRun): boolean {
       const score = toCount(run.score) ?? 0;
@@ -828,7 +847,243 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
       };
 
       writeProfile();
-      notify();
+
+      return true;
+    },
+
+    hasPendingUpload(): boolean {
+      return store.hasPendingUpload();
+    },
+
+    markUploaded(): void {
+      store.markUploaded();
+    },
+
+    subscribe(listener: () => void): () => void {
+      listeners.add(listener);
+
+      return (): void => {
+        listeners.delete(listener);
+      };
+    },
+
+    notify(): void {
+      for (const listener of listeners) listener();
+    },
+
+    now,
+  };
+}
+
+export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): LeaderboardSource {
+  const limit = Math.max(1, Math.trunc(options.limit ?? LEADERBOARD_LIMIT));
+
+  /** 榜身。只有下面那個 `push()` 會動它。 */
+  let entries: LeaderboardEntry[] = [];
+  /** 開檔時讀到的是舊格式（每局一筆）嗎；是的話遷移結果要落地。 */
+  let migrated = false;
+
+  const writeBoard = (): void => {
+    player.store.write(player.keys.entries, seal(entries, player.salt));
+  };
+
+  /*
+   * 身份、顯示名、分享意願與本機紀錄全部交給 `createPlayerRecord` —— 本機榜與伺服器榜共用同一份，
+   * 所以「改名不新增一筆」「只升不降」這些規則不會有第二個實作。榜本身留在這裡。
+   * Identity, display name, sharing preference and the local record all come from
+   * `createPlayerRecord`: the local board and the server board share one copy, so rules such as
+   * "renaming never adds a row" and "monotonic" have no second implementation. The board stays here.
+   *
+   * **`seed` 回呼同時兼任「讀榜」**：折疊舊格式需要 `playerId`，而那是 `createPlayerRecord` 裡的
+   * 第一件事 —— 在那之前沒有人知道自己是誰。回呼一定會被呼叫一次（見其說明）。
+   * **The `seed` callback doubles as "read the board"**: folding the old format needs `playerId`,
+   * which is the first thing `createPlayerRecord` resolves — before that nobody knows who they are.
+   * The callback is always invoked once (see its documentation).
+   */
+  const player = createPlayerRecord({
+    store: options.store,
+    storage: options.storage,
+    keys: options.keys,
+    now: options.now,
+    playerId: options.playerId,
+    salt: options.salt,
+    seed: ({ playerId, store, keys, salt }) => {
+      /*
+       * 先讀原始字串：舊格式是一個裸陣列（每局一筆），新格式是信封（一筆一位玩家）。兩者要分開
+       * 處理，而 `open()` 對舊格式只會回 `null`。
+       * Read the raw text first: the old format is a bare array (one row per run) and the new one
+       * is an envelope (one row per player). They need separate handling, and `open()` just returns
+       * `null` for the old one.
+       */
+      const rawBoard = store.read(keys.entries);
+
+      let legacy: LeaderboardEntry[] | null = null;
+
+      try {
+        const parsed: unknown = rawBoard === null ? null : JSON.parse(rawBoard);
+        legacy = Array.isArray(parsed) ? parseEntries(parsed) : null;
+      } catch {
+        legacy = null;
+      }
+
+      if (legacy === null) {
+        entries = parseEntries(open(rawBoard, salt));
+
+        return null;
+      }
+
+      migrated = true;
+
+      const collapsed = collapseLegacy(legacy, playerId);
+      entries = collapsed === null ? [] : [collapsed];
+
+      if (collapsed !== null) {
+        const name = store.read(keys.name) ?? '';
+        if (name !== '') entries = [{ ...collapsed, name }];
+      }
+
+      /* 沒有本機紀錄時，用榜上自己那一筆當起點；連那一筆都沒有就是空的。 */
+      const mine = entries.find((entry) => entry.id === playerId);
+
+      return mine === undefined ? null : profileFromEntry(mine, playerId);
+    },
+  });
+
+  /*
+   * 榜上那一列的名字對齊顯示名。兩者會不一致的情況是「改了名但還沒上載」—— 顯示名是設定，
+   * 一寫就生效，而榜上的列要等下一次 `push()`。
+   * The board row's name is aligned with the display name. The two disagree when a rename has not
+   * been uploaded yet: the display name is a setting and takes effect at once, while the board row
+   * waits for the next `push()`.
+   */
+  const mineIndex = entries.findIndex((entry) => entry.id === player.playerId);
+  if (player.displayName !== '' && mineIndex >= 0) {
+    entries = entries.map((entry, at) =>
+      at === mineIndex ? { ...entry, name: player.displayName } : entry,
+    );
+  }
+
+  /* 遷移結果要落地，否則下次開啟又會走一次舊格式。 */
+  if (migrated) {
+    writeBoard();
+    player.writeProfile();
+  }
+
+  /**
+   * 把本機紀錄的那一筆寫上（或更新）榜。
+   * Write (or update) the local record's row on the board.
+   *
+   * **`markUploaded()` 必須在寫完之後才呼叫**：寫 profile 本身會推進 `revision`（那是要同步的
+   * 資料），順序顛倒的話「剛上載完」會被自己再標成「有待上載」，於是每次上載都留下一次空轉。
+   * **`markUploaded()` has to come after the write**: writing the profile advances `revision`
+   * (it is synced data), so the reverse order would re-mark the upload as pending and leave one
+   * pointless upload behind every time.
+   */
+  const push = (): void => {
+    const profile = player.profile;
+
+    const row: LeaderboardEntry = {
+      id: profile.playerId,
+      name: player.displayName,
+      score: profile.score,
+      durationMs: profile.durationMs,
+      maxCombo: profile.maxCombo,
+      merges: profile.merges,
+      at: profile.at,
+    };
+
+    const index = entries.findIndex((entry) => entry.id === profile.playerId);
+    const updated =
+      index >= 0 ? entries.map((entry, at) => (at === index ? row : entry)) : [...entries, row];
+
+    entries = capEntries(updated, limit, profile.playerId);
+    writeBoard();
+
+    player.writeProfile();
+    player.markUploaded();
+  };
+
+  /**
+   * 上載：把本機紀錄推上榜。
+   * Upload: push the local record onto the board.
+   *
+   * 兩個前提都成立才會動：玩家同意分享、而且有一筆還沒送出去的更新。後者問的是**全機**的
+   * `revision`（見 `localStore.ts`），所以「這台裝置上有任何要同步的東西變了」都算 ——
+   * 包括只解鎖了新角色、分數沒動的那一種。這正是以前漏掉的情況。
+   * Both preconditions must hold: consent, and an update that has not been sent. The second is
+   * the **machine-wide** `revision` (see `localStore.ts`), so anything syncable changing on this
+   * device counts — including an unlock with no new high score, which is exactly what used to be
+   * missed.
+   */
+  const sync = (): boolean => {
+    if (!player.sharing) return false;
+    if (!player.hasPendingUpload()) return false;
+
+    push();
+    player.notify();
+
+    return true;
+  };
+
+  return {
+    get displayName(): string {
+      return player.displayName;
+    },
+
+    setDisplayName(name: string): void {
+      if (name === player.displayName) return;
+
+      /* 設定（`player-name`）與本機紀錄由共用那一層一併處理；**榜上那一列是這裡的事**。 */
+      player.setDisplayName(name);
+
+      /*
+       * 榜上自己那一筆（如果已經在上面）一起改名。**不會新增一筆** —— 找到的是自己那個
+       * `playerId` 的那一列。
+       * The player's row on the board (if it is up there) is renamed too, and **no row is added**:
+       * what gets found is the row carrying this `playerId`.
+       */
+      const index = entries.findIndex((entry) => entry.id === player.playerId);
+      if (index >= 0) {
+        entries = entries.map((entry, at) => (at === index ? { ...entry, name } : entry));
+        writeBoard();
+      }
+
+      player.notify();
+    },
+
+    get sharing(): boolean {
+      return player.sharing;
+    },
+
+    setSharing(on: boolean): void {
+      player.setSharing(on);
+
+      /*
+       * 同意的那一刻就推一次。使用者定案：「在用戶同意分享下，不需要用戶手動按下上載記錄」，
+       * 所以「同意」本身就是上載的觸發點，而不是等玩家在某處再按一顆按鈕。
+       * Consent itself is the trigger: the user's decision is that a player who has agreed should
+       * never have to press an upload button. `sync()` notifies when it does something, so only
+       * the paths that changed nothing need to notify here.
+       */
+      if (on && sync()) return;
+
+      player.notify();
+    },
+
+    get publishPromptDone(): boolean {
+      return player.publishPromptDone;
+    },
+
+    finishPublishPrompt(): void {
+      if (!player.finishPublishPrompt()) return;
+
+      player.notify();
+    },
+
+    record(run: LeaderboardRun): boolean {
+      if (!player.record(run)) return false;
+
+      player.notify();
 
       return true;
     },
@@ -844,11 +1099,11 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
        * Empty until consent. It is also why consenting shows the player himself immediately:
        * `setSharing(true)` syncs before it notifies.
        */
-      const visible = sharing ? entries : [];
+      const visible = player.sharing ? entries : [];
       const sorted = [...visible].sort((a, b) => compareBy(category, a, b));
       const top = sorted.slice(0, take);
 
-      const rank = sorted.findIndex((entry) => entry.id === playerId);
+      const rank = sorted.findIndex((entry) => entry.id === player.playerId);
       const mine = rank < 0 ? undefined : sorted[rank];
 
       /* 自己不在榜上（未同意、或還沒上載過）時 `self` 是 `null`。 */
@@ -870,12 +1125,6 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
       };
     },
 
-    subscribe(listener: () => void): () => void {
-      listeners.add(listener);
-
-      return (): void => {
-        listeners.delete(listener);
-      };
-    },
+    subscribe: player.subscribe,
   };
 }
