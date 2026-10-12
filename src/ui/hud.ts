@@ -23,7 +23,6 @@ import type { SpriteLoader } from '../render/spriteLoader';
 import { placeholderColor } from '../render/placeholder';
 import type { LevelDef } from '../core/types';
 import { el, hook } from './dom';
-import { formatDuration } from './duration';
 import type { Layout } from './layout';
 
 export interface HudOptions {
@@ -36,8 +35,6 @@ export interface HudState {
   /** NEXT 卡顯示的等級編號（＝放下手上這顆之後才上場的那顆）。 */
   nextLevelId: number;
   score: number;
-  /** 這一局的遊玩時長（模擬時間毫秒）；渲染成分數右邊那一小段 `m:ss`。 */
-  durationMs: number;
   mergedCount: number;
   /** 本次投放已合成的次數 —— COMBO 卡的大數字。 */
   comboCount: number;
@@ -54,7 +51,6 @@ export class Hud {
   private readonly levels: ReadonlyMap<number, LevelDef>;
   private readonly nextHost: HTMLElement;
   private readonly scoreValue: HTMLElement;
-  private readonly durationValue: HTMLElement;
   private readonly mergedValue: HTMLElement;
   private readonly bestTryValue: HTMLElement;
   private readonly comboCountValue: HTMLElement;
@@ -67,8 +63,6 @@ export class Hud {
   private lastBestTry = Number.NaN;
   private lastComboCount = Number.NaN;
   private lastComboDetail = '';
-  /** 時長比對的是**格式化後的字串**（見 `update()`），初值用空字串。 */
-  private lastDuration = '';
 
   constructor(options: HudOptions) {
     this.sprites = options.sprites;
@@ -77,7 +71,6 @@ export class Hud {
     const { regions } = options.layout;
     this.nextHost = hook<HTMLElement>(regions.next, 'next-preview');
     this.scoreValue = hook<HTMLElement>(regions.score, 'score-value');
-    this.durationValue = hook<HTMLElement>(regions.score, 'duration');
     this.mergedValue = hook<HTMLElement>(regions.score, 'merged');
     this.bestTryValue = hook<HTMLElement>(regions.score, 'best-try');
     this.comboCountValue = hook<HTMLElement>(regions.combo, 'combo-count');
@@ -97,19 +90,15 @@ export class Hud {
     }
 
     /*
-     * 時長（使用者定案）比對的是**格式化後的字串**而不是毫秒：這個方法每幀都被呼叫，而時長
-     * 每秒才變一次，拿毫秒去比會變成每幀都寫一次 DOM、每幀都讓瀏覽器重新排版一次這一行。
-     * 比字串則只在秒數真的跳動時才寫。
-     * The duration (the user's decision) compares the **formatted string**, not the milliseconds:
-     * this method runs every frame, the duration changes once a second, and comparing raw
-     * milliseconds would write the DOM — and reflow that line — on every frame. Comparing the
-     * string writes only when the displayed second actually ticks.
+     * 這一局的時長**不在這裡**（使用者定案）：HUD 不再顯示當前這一局的時間，那個數字只在
+     * 排行榜上以 `HH:mm:ss` 出現（`ui/duration.ts`）。所以這個模組也不必認識時長 ——
+     * 少了它，「每幀都呼叫、每秒才變一次」那個比對字串的折衷也一併消失。
+     * The run's duration is deliberately **not here** (the user's decision): the HUD no longer shows
+     * how long the current run has lasted, and that number appears only on the leaderboard as
+     * `HH:mm:ss` (`ui/duration.ts`). This module therefore need not know about durations at all —
+     * and with it goes the compare-the-formatted-string compromise that existed only because this
+     * method runs every frame while the value changes once a second.
      */
-    const duration = formatDuration(state.durationMs);
-    if (duration !== this.lastDuration) {
-      this.durationValue.textContent = duration;
-      this.lastDuration = duration;
-    }
 
     if (state.mergedCount !== this.lastMerged) {
       this.mergedValue.textContent = String(state.mergedCount);

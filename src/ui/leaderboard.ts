@@ -23,9 +23,10 @@
  * implementation — this file does not change.
  *
  * 一筆紀錄是**一位玩家**（不是一局）：榜排的是玩家，每一行顯示該玩家在目前分頁那個分類的
- * 最佳值。
+ * 最佳值，並在數值**右邊**帶上該玩家的用時（`HH:mm:ss`，見 `renderList()`）。
  * A row is a **player** rather than a run: the board ranks players, and each row shows that
- * player's best in whichever category the current tab is showing.
+ * player's best in whichever category the current tab is showing, plus that player's run time
+ * (`HH:mm:ss`) **to the right of** that value (see `renderList()`).
  *
  * 尺寸是**設計稿像素**（掛在 `.stage-scale` 內，與整張畫布一起被 `ui/scale.ts` 等比縮放），
  * 與結算覆蓋層、確認對話框同一套座標語言。
@@ -35,8 +36,9 @@
 
 import type { LeaderboardCategory, LeaderboardEntry, LeaderboardSource } from '../game/leaderboard';
 import { LEADERBOARD_CATEGORIES, LEADERBOARD_LIMIT } from '../game/leaderboard';
-import { i18n, i18nAriaLabel, i18nText, t, type MessageKey } from '../i18n';
+import { i18n, i18nAriaLabel, i18nText, i18nTitle, t, type MessageKey } from '../i18n';
 import { appendChildren, el } from './dom';
+import { formatDuration } from './duration';
 
 /**
  * 分頁標題的語系鍵。
@@ -212,9 +214,30 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
         entry.name === '' ? t('leaderboard.unnamed') : entry.name,
       );
       const value = el('span', 'leaderboard__value', primaryValue(entry, category));
+      /*
+       * 時長（使用者定案：這一局的時間只在排行榜出現，格式 `HH:mm:ss`）就貼在該分類數值的
+       * **右邊**。它回答的是「這個數字是跑了多久打出來的」—— 數值本身答不了。
+       *
+       * 它描述的是**創下最高分那一局**的時間（`LeaderboardEntry.durationMs`）：這個欄位綁在
+       * 分數上，只有分數真的刷新時才會跟著換。所以在 COMBO／合成分頁上讀到的，是該玩家最高分
+       * 那一局的長度，而不是創下那項紀錄那一局的長度 —— 每位玩家只有一份時長。要每個分類各記
+       * 一份，得先在資料層與後端各加一欄。
+       * The duration (the user's decision: a run's time appears only on the leaderboard, as
+       * `HH:mm:ss`) sits immediately to the **right of** the category value. It answers "how long
+       * was the run that produced this number", which the number cannot say about itself.
+       *
+       * It describes the run that set the **best score** (`LeaderboardEntry.durationMs`): the field
+       * is bound to the score and only changes when the score truly improves. On the COMBO and
+       * merges tabs it therefore reads as that player's best-scoring run rather than the run that
+       * set that particular record — there is one duration per player. Giving each category its own
+       * would need a new column in both the data layer and the backend.
+       */
+      const duration = el('span', 'leaderboard__duration', formatDuration(entry.durationMs));
+      /* 裸一個 `00:01:30` 看不出是什麼，滑過去看得到名字。 */
+      i18nTitle(duration, 'label.duration');
       const when = el('span', 'leaderboard__when', formatWhen(entry.at));
 
-      appendChildren(row, rank, who, value, when);
+      appendChildren(row, rank, who, value, duration, when);
       return row;
     });
 

@@ -2,49 +2,62 @@
  * 時長格式化。
  * Duration formatting.
  *
- * 這一支的邊界比它看起來多：時長要出現在 HUD 分數旁邊那一小段（空間最緊）與結算卡的一格，
- * 而一局的長度可以從 5 秒（撞線後清理失敗就直接結束）到兩小時（無盡模式的上限），所以
- * **格式換段的界線**（剛滿 60 秒、剛滿 1 小時）與**壞輸入**都要釘住。
- * This has more edges than it looks: the duration appears in the tight note beside the HUD score and
- * in a cell of the game-over card, and a run can last anywhere from 5 seconds (failing to clear the
- * line) to two hours (the endless-mode ceiling), so both **shape transitions** (exactly 60 seconds,
- * exactly one hour) and **bad input** are pinned here.
+ * 這個格式現在只有**一個**消費點：排行榜每一列、分類數值右邊那一格（使用者定案把這一局的時間
+ * 從 HUD 與結算卡移走）。它要蓋的範圍沒變 —— 一局可以短到 5 秒（撞線後清理失敗就直接結束），
+ * 也可以長到兩小時（無盡模式的上限）—— 所以**每個欄位的補零**與**壞輸入**都要釘住。
+ * The format now has a single consumer: the cell to the right of the category value in each
+ * leaderboard row (the user's decision moved a run's time out of the HUD and the game-over card).
+ * Its range has not changed, though — a run can last anywhere from 5 seconds (failing to clear the
+ * line) to two hours (the endless-mode ceiling) — so **every field's padding** and **bad input** are
+ * pinned here.
  */
 
 import { describe, expect, it } from 'vitest';
 import { formatDuration } from '../src/ui/duration';
 
 describe('formatDuration — 時長格式 / duration format', () => {
-  it('uses m:ss below an hour and pads the seconds', () => {
-    expect(formatDuration(0)).toBe('0:00');
-    expect(formatDuration(7_000)).toBe('0:07');
-    expect(formatDuration(60_000)).toBe('1:00');
-    expect(formatDuration(754_000)).toBe('12:34');
+  it('always prints HH:mm:ss, with every field padded', () => {
+    expect(formatDuration(0)).toBe('00:00:00');
+    expect(formatDuration(7_000)).toBe('00:00:07');
+    expect(formatDuration(60_000)).toBe('00:01:00');
+    expect(formatDuration(754_000)).toBe('00:12:34');
   });
 
   it('floors to whole seconds, so a partial second never rounds up', () => {
-    expect(formatDuration(999)).toBe('0:00');
-    expect(formatDuration(1_999)).toBe('0:01');
-    expect(formatDuration(59_999)).toBe('0:59');
+    expect(formatDuration(999)).toBe('00:00:00');
+    expect(formatDuration(1_999)).toBe('00:00:01');
+    expect(formatDuration(59_999)).toBe('00:00:59');
   });
 
   /*
-   * 分鐘**不進位成 60**：75 分鐘是 `1:15:00` 而不是 `75:00`。少了這一條，兩種格式的界線
-   * 會變成靠「分鐘有沒有超過 59」去猜。
-   * Minutes **never reach 60**: 75 minutes prints `1:15:00`, not `75:00`. Without this the boundary
-   * between the two shapes would come down to guessing from the minute field.
+   * 分段換的是**欄位**而不是字串形狀：59 → 60 分鐘只是小時欄由 `00` 變 `01`，長度不變，
+   * 所以榜上那一整欄時間永遠等寬（列上已有 `tabular-nums`，每一格字元都對齊）。
+   * The boundary swaps a **field** rather than changing the string's shape: 59 → 60 minutes only
+   * turns the hours field from `00` to `01` and leaves the length alone, so a whole column of times
+   * stays the same width (the rows already carry `tabular-nums`, aligning every character).
    */
-  it('grows an hours field exactly at one hour', () => {
-    expect(formatDuration(3_599_999)).toBe('59:59');
-    expect(formatDuration(3_600_000)).toBe('1:00:00');
-    expect(formatDuration(4_500_000)).toBe('1:15:00');
-    expect(formatDuration(8 * 3_600_000 + 30_000)).toBe('8:00:30');
+  it('carries at the hour boundary without changing the string length', () => {
+    expect(formatDuration(3_599_999)).toBe('00:59:59');
+    expect(formatDuration(3_600_000)).toBe('01:00:00');
+    expect(formatDuration(4_500_000)).toBe('01:15:00');
+    expect(formatDuration(8 * 3_600_000 + 30_000)).toBe('08:00:30');
   });
 
-  /* 負值、NaN、Infinity 都當 0：壞值不該讓 HUD 印出 `NaN:NaN`。 */
+  /* 兩小時是無盡模式的上限，也就是實務上會看到的最長值。 */
+  it('covers the endless-mode ceiling of two hours', () => {
+    expect(formatDuration(2 * 3_600_000)).toBe('02:00:00');
+    expect(formatDuration(2 * 3_600_000 - 1)).toBe('01:59:59');
+  });
+
+  /* 小時欄沒有上限：過了 100 小時長出第三位，而不是回繞成兩位數。 */
+  it('lets the hours field grow past two digits instead of wrapping', () => {
+    expect(formatDuration(100 * 3_600_000)).toBe('100:00:00');
+  });
+
+  /* 負值、NaN、Infinity 都當 0：壞值不該讓榜上印出 `NaN:NaN:NaN`。 */
   it('treats negative and non-finite input as zero', () => {
-    expect(formatDuration(-5_000)).toBe('0:00');
-    expect(formatDuration(Number.NaN)).toBe('0:00');
-    expect(formatDuration(Number.POSITIVE_INFINITY)).toBe('0:00');
+    expect(formatDuration(-5_000)).toBe('00:00:00');
+    expect(formatDuration(Number.NaN)).toBe('00:00:00');
+    expect(formatDuration(Number.POSITIVE_INFINITY)).toBe('00:00:00');
   });
 });

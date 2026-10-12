@@ -13,16 +13,41 @@
 > 以及其後的**可攜性重構**：兩個平台、兩個方言）。反作弊**只做 T2**（伺服器頒發的短期憑證），
 > T1 對稱簽章與 T3 伺服器端重放皆不做（使用者定案）。
 
-### 新增 — 每局遊玩時長，顯示在分數旁邊（`85e99dc`）
+### 新增 — 每局遊玩時長，只在排行榜顯示（`85e99dc`，2026-10-13 改版）
 
-- `src/ui/duration.ts`：`formatDuration(ms)` → 未滿一小時 `m:ss`、滿一小時 `h:mm:ss`。**分鐘永不
-  進位成 60**（75 分鐘 → `1:15:00`，不是 `0:75:00`）；負值與非有限數視為 0。
-- HUD 的分數卡與結算卡各加一格時長。`applyTo()` 是**整段覆寫 `textContent`** 的，所以分數與時長
-  必須是**兩個節點**（`card__value-number` ＋ `card__value-note`），否則 HUD 每幀更新會把時長抹掉。
-- 時長比對用**格式化後的字串**而非毫秒：每幀呼叫但每秒才變一次，比字串才不會每幀寫 DOM。
+- `src/ui/duration.ts`：`formatDuration(ms)` → **固定 `HH:mm:ss`**（`00:00:07`、`00:12:34`、
+  `01:15:00`）。每個欄位都補零，所以榜上那一整欄時間字元對齊（列上已有 `tabular-nums`）；小時欄
+  沒有上限，過了 `99:59:59` 長出第三位而不回繞；負值與非有限數視為 0。
+- **位置改到排行榜**（使用者定案）：HUD 不再顯示當前這一局的時間，結算卡也拿掉那一格；榜上每一列
+  在**該分類數值右邊**多一格 `HH:mm:ss`（`.leaderboard__duration`，欄寬 130px）。
+- 因此 `85e99dc` 為此加的東西一併移除：HUD 的 `durationMs` 狀態欄位、分數卡的 `card__value-note`
+  節點與 `layout.css` 的對應樣式、結算卡的第四格，以及「時長比對格式化字串」那個折衷（它存在的
+  唯一理由是每幀呼叫但每秒才變一次）。分數卡因此收回一個節點（`card__value` 直接帶 `score-value`
+  hook），與 COMBO 卡同構。
 - `src/game/leaderboard.ts`：`durationMs` **跟著分數走** —— 只在分數真的刷新時才換。若獨立取最大值，
   榜上會出現「900 分、12 分鐘」這種自相矛盾的兩格。`collapseLegacy` 取「創下最高分那一局」的時長。
-- 五語字典各加 `label.duration`（時長／时长／時長／TIME／タイム）。
+  **附帶後果寫進註解**：COMBO／合成分頁上那一格顯示的是該玩家**最高分那一局**的長度，不是創下
+  那項紀錄那一局的長度（每位玩家只有一份時長；要每個分類各記一份得在資料層與後端各加一欄）。
+- 五語字典的 `label.duration` 保留，改作榜上那一格的 `title`。
+
+### 修正 — MySQL 的冪等訊號與分頁榜序（2026-10-13）
+
+第一次把測試**指向一個真的 MySQL**（`mysql-memory-server`，拋棄式、隨機埠）時抓到兩個單元測試
+在結構上不可能抓到的錯。兩者都只在 MySQL 一方發作，Postgres 一切正常：
+
+- **冪等訊號失效**：`mysql2` 的 `getDefaultFlags()` **預設就開著 `FOUND_ROWS`**
+  （`node_modules/mysql2/lib/connection_config.js`），而那個旗標把 `affectedRows` 由「真正寫入的列」
+  改成「**匹配到的**列」。於是刻意空轉的 `on duplicate key update run_id = run_id` 在既有列上回報
+  `1`，看起來就像新的一局 —— 重試會靜靜地重複記分。修法是一行黑名單 `flags: ['-FOUND_ROWS']`
+  （`mergeFlags` 認得 `-` 前綴），收在具名常數 `MYSQL_CLIENT_FLAGS`，並由兩條單元測試釘住（旗標在、
+  裸的 `FOUND_ROWS` 不在）。Postgres 不受影響 —— `returning` 的列數本來就是真的。
+  另一條候選修法 `insert … select … from dual where not exists (…)` 也**實測正確**（1／0，交易內
+  可用），但不採用：它會**複製一份插入欄位清單**，遲早與 `upsertProfile` 的欄位順序漂移。
+- **榜序與分頁不一致**：三個分類（分數／COMBO／合成）各自獨立取最大值，所以**伺服器**必須按請求的
+  分頁排序 —— 否則一位「高分低連擊」的玩家在 COMBO 榜上根本不會出現在前 N 名裡。`Dialect.boardOrder`
+  改成收 `category`，`Store.topProfiles`／`rankOf` 也各收一個，兩者共用同一份
+  `boardOrderKeys(category, timeOrder)`，名次與列序因此必然同源；`rankOf` 的謂詞就是那串鍵的
+  **前綴相等鏈**。`GET /api/leaderboard` 多一個 `?category=`，不明值退回 `score`。
 
 ### 新增 — 後端（`api/`，Vercel Functions ＋ 任何 Postgres）
 
@@ -134,33 +159,37 @@
 
 ### 測試與驗證
 
-- typecheck ✅、vitest **622 通過 / 11 略過** ✅、build ✅。
-- 新增 `tests/duration.test.ts`（4 條）、`tests/api.test.ts`（46 條）；`tests/leaderboard.test.ts`
+- typecheck ✅、vitest **635 通過 / 12 略過**（33 檔）✅、build ✅。
+- 新增 `tests/duration.test.ts`（6 條）、`tests/api.test.ts`（54 條）；`tests/leaderboard.test.ts`
   新增「時長跟著分數」6 條。
 - `tests/api.test.ts` 的後端測試**完全不需要資料庫**：餵 `MemoryStore` ＋ 注入時鐘，毫秒內跑完
   「開局 → 提交 → 上榜」，驗的是真的處理器。
 - 可攜性分**四層**測，前三層都不需要資料庫：
   - `tests/adapters.test.ts`（17 條）：兩個平台的轉接頭對**同一個**處理器產出**相同**的
     `ApiRequest`；`allow` 標頭能活著穿過轉接層。
-  - `tests/dialect.test.ts`（25 條）：Binder 佔位符／參數對齊、榜序、寫入語句形狀（含 MySQL 欄位
-    順序）、**DDL 可重複執行**、兩方言的表集合相同，以及 `schema.sql` 與程式**逐句一致**。
-  - `tests/sqlStore.test.ts`（19 條）：用錄影驅動（`RecordingDriver`）跑整個儲存層 —— 通用斷言
-    「每句的佔位符數 = 參數個數」，兩邊的冪等訊號、交易包覆與回滾、列映射。
-  - `tests/db.integration.test.ts`（12 條，**只有設了 `TEST_DATABASE_URL` 才跑**）：真資料庫上的
-    往返、「時長跟著分數」、冪等、被拒的局、同分排名、計數、JSON 標頭、交易原子性。
+  - `tests/dialect.test.ts`（32 條）：Binder 佔位符／參數對齊、**每個分類各自的榜序**、寫入語句形狀
+    （含 MySQL 欄位順序）、**連線旗標**（`-FOUND_ROWS`）、**DDL 可重複執行**、兩方言的表集合相同，
+    以及 `schema.sql` 與程式**逐句一致**。
+  - `tests/sqlStore.test.ts`（20 條）：用錄影驅動（`RecordingDriver`）跑整個儲存層 —— 通用斷言
+    「每句的佔位符數 = 參數個數」、兩邊的冪等訊號、交易包覆與回滾、列映射，以及 `rankOf` 拿哪個
+    分類的欄位去比。
+  - `tests/db.integration.test.ts`（13 條，**只有設了 `TEST_DATABASE_URL` 才跑**）：真資料庫上的
+    往返、「時長跟著分數」、冪等、被拒的局、同分排名、**高分低連擊的玩家在 COMBO 榜上排第一**、
+    計數、JSON 標頭、交易原子性。
 - **`schema.sql` 的一致性由測試守住**：檔案裡那份是給人看的（可以直接 `psql -f`），真正的來源是
   `db/postgres.ts` 的 `schema()`；測試把檔案讀回來逐句比對，漂移就會紅 —— 這是沿用本專案
   比對 `limits.ts` 與 `levels.json` 的同一手法。
-- 無頭瀏覽器實測（`duration.mjs`）：HUD 時長 `0:01 → 0:04` 會走、結算卡四格
-  （分數 9 ／ 時長 0:11 ／ 合成次數 6 ／ 最高紀錄 9）、無溢出、卡片在畫布內。
+- 無頭瀏覽器實測（Playwright，掛上真的版面與真的彈窗）：改版後 HUD 分數旁邊**沒有**時長、結算卡
+  三格（分數 ／ 合成次數 ／ 最高紀錄）、排行榜每一列在分類數值右邊顯示 `HH:mm:ss`；三個分頁都
+  對齊、無溢出、卡片在畫布內。
 
 ### 已知未完成
 
 - **客戶端尚未接上後端**：`src/game/leaderboard.ts` 仍走本地 `LeaderboardSource`，
   `sync()` 是預留的接縫。伺服器端可用，但要換成 HTTP 實作後榜上才會出現別的裝置。
-- **`SqlStore` 尚未在真實 MySQL 上跑過**：Postgres 路徑已在真庫上驗證過（整合測試），MySQL
-  目前只經 SQL 形狀、錄影驅動與方言一致性驗證 —— 要上騰訊雲之前應先指一個拋棄式 MySQL 跑一次
-  整合測試（`TEST_DATABASE_URL=mysql://…`）。
+- **`SqlStore` 的 MySQL 路徑已在本機真庫上跑過一次**（拋棄式 `mysql-memory-server`，
+  MySQL 8.4.9），上面那兩個修正就是這樣抓到的；但**尚未在雲上的 MySQL 跑過**。要上騰訊雲之前
+  應再指一個真的 MySQL 實例跑一次整合測試（`TEST_DATABASE_URL=mysql://…`）。
 - **EdgeOne 只做了轉接層**（使用者的定案）：`adapters/fetch.ts` 與 `createEdgeOneHandlers` 都在、
   也有測試，但**尚未部署到 EdgeOne** 驗證；屆時要選 **Node Functions** 而非 Edge Functions
   （後者是 V8 isolate、沒有 TCP，`mysql2`／`pg` 在裡面不能用）。

@@ -144,10 +144,10 @@
   list-style: none;
 }
 
-/* 名次／名稱／該分類數值／時間；刻意沒有第二個分數欄（見 `ui/leaderboard.ts`）。 */
+/* 名次／名稱／該分類數值／用時／記錄時間；刻意沒有第二個分數欄（見 `ui/leaderboard.ts`）。 */
 .leaderboard__row {
   display: grid;
-  grid-template-columns: 96px minmax(0, 1fr) 190px 210px;
+  grid-template-columns: 96px minmax(0, 1fr) 190px 130px 210px;
   align-items: center;
   gap: 16px;
   padding: 14px 20px;
@@ -177,6 +177,26 @@
 }
 
 .leaderboard__value {
+  text-align: right;
+}
+
+/*
+ * 用時（`HH:mm:ss`）。使用者定案：這一局的時間只在排行榜出現，貼在分類數值的**右邊**。
+ *
+ * 與 `.leaderboard__when` 同一個處理 —— 降一級色階、右對齊：它是一份參考資訊，決定這張榜
+ * 次序的仍然是左邊那個數值。字級沿用列上的 24px（不縮小），因為它與數值是一組的，兩者該看
+ * 起來像同一個句子。`tabular-nums` 同樣繼承自列，所以 100 行疊起來時每個字元都在同一條格線上。
+ * The run time (`HH:mm:ss`). The user's decision: a run's time appears only on the leaderboard,
+ * tucked to the **right of** the category value.
+ *
+ * Handled like `.leaderboard__when` — a colour level down and right-aligned: it is reference
+ * information, and the number to its left is still what ordered the board. The type size stays at
+ * the row's 24px rather than dropping, because the two belong together and should read as one
+ * sentence. `tabular-nums` is inherited from the row too, so every character in a hundred stacked
+ * rows lands on the same grid line.
+ */
+.leaderboard__duration {
+  color: var(--color-fg-muted);
   text-align: right;
 }
 

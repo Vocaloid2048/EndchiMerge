@@ -244,8 +244,6 @@ async function bootstrap(): Promise<void> {
     hud.update({
       nextLevelId: session.upcomingLevelId,
       score: session.score,
-      /* 這一局的時長顯示在分數右邊（使用者定案）。 */
-      durationMs: session.elapsed,
       mergedCount: session.mergedCount,
       /* COMBO 卡：本次投放的合成次數（大數字）＋ 合共得分與倍率（第二行）。 */
       comboCount: session.comboCount,
@@ -534,8 +532,6 @@ async function bootstrap(): Promise<void> {
         syncRun();
         gameOver?.show({
           score: current.score,
-          /* 這一局的時長，顯示在分數右邊那一格。 */
-          durationMs: current.elapsed,
           merged: current.mergedCount,
           /* 到結束這一刻最高分早已被即時記錄，直接讀現值即可。 */
           best: progress.highScore,
