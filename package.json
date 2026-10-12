@@ -20,6 +20,7 @@
     "@types/matter-js": "^0.20.2",
     "@types/node": "^26.6.5",
     "@types/pg": "^8.23.1",
+    "mysql-memory-server": "^1.17.0",
     "tsx": "^4.23.15",
     "typescript": "~5.9.2",
     "vite": "^7.1.3",

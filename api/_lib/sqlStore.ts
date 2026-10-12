@@ -25,13 +25,25 @@
  */
 
 import type { RequestRow } from './requests';
-import type { ProfileRow, RunTokenRow, ScoreRow, Store } from './store';
-import { Binder, type Dialect } from './db/dialect';
+import type { ProfileRow, RankProbe, RunTokenRow, ScoreRow, Store } from './store';
+import { Binder, BOARD_PRIMARY_COLUMN, type BoardCategory, type Dialect } from './db/dialect';
 import type { Driver, Row } from './db/types';
 
 const asText = (value: unknown): string => (typeof value === 'string' ? value : '');
 const asNullableText = (value: unknown): string | null =>
   typeof value === 'string' ? value : null;
+
+/** 一筆探針在指定分類下的取值（`rankOf` 用）。 */
+function probeValue(category: BoardCategory, probe: RankProbe): number {
+  switch (category) {
+    case 'score':
+      return probe.score;
+    case 'combo':
+      return probe.maxCombo;
+    case 'merges':
+      return probe.merges;
+  }
+}
 
 export class SqlStore implements Store {
   constructor(
@@ -243,13 +255,13 @@ export class SqlStore implements Store {
     return row === undefined ? null : this.toProfileRow(row);
   }
 
-  async topProfiles(limit: number): Promise<ProfileRow[]> {
+  async topProfiles(category: BoardCategory, limit: number): Promise<ProfileRow[]> {
     const b = new Binder(this.dialect);
 
     const { rows } = await this.driver.query(
       `select ${this.profileColumns()} from profiles
        where best_score > 0
-       order by ${this.dialect.boardOrder()}
+       order by ${this.dialect.boardOrder(category)}
        limit ${b.bind(Math.max(0, limit))}`,
       b.params,
     );
@@ -265,31 +277,72 @@ export class SqlStore implements Store {
     return this.dialect.readNumber((rows as Row[])[0]?.['n']);
   }
 
-  async rankOf(key: { score: number; atMs: number; deviceId: string }): Promise<number> {
-    /*
-     * 名次 ＝ 排在自己前面的有幾個 ＋ 1，而「排在前面」寫成**與 `topProfiles` 同一條排序**的三段
-     * 條件：分數更高，或同分但更早達成，或三者完全相同時 id 較小。寫成 `order by` 的鏡像是刻意的
-     * —— 兩邊任何一邊改了，這裡就必須跟著改，而 `tests/api.test.ts` 會用同分的案例把兩邊釘在一起。
-     * The rank is "how many come before me, plus one", and "before me" is spelled out as the **same
-     * three-part ordering as `topProfiles`**: a higher score, or an equal score reached earlier, or —
-     * with all three equal — a smaller id. Mirroring the `order by` is deliberate: changing either side
-     * requires changing this one, and `tests/api.test.ts` pins the two together with a tied case.
-     *
-     * 注意這裡**把同一個值綁了三次**（分數兩次、時間兩次）。Postgres 用 `$n` 本來可以重用，但 MySQL
-     * 的 `?` 是位置性的，每次出現都要一個參數 —— 兩邊都綁三次就得到同一份 SQL 文字，見 `Binder`。
-     * Note that the same values are **bound three times** (the score twice, the time twice). Postgres's
-     * `$n` could be reused, but MySQL's `?` is positional and needs one parameter per occurrence —
-     * binding three times on both sides yields a single SQL string, see `Binder`.
-     */
+  /**
+   * 「排在這一筆之前」的條件 —— `boardOrder(category)` 的**鏡像**。
+   * The "comes before this one" condition — the **mirror** of `boardOrder(category)`.
+   *
+   * 展開成一段「前綴相等，然後那一鍵嚴格在前」的連鎖，而不是另外手寫一份看起來一樣的排序：兩份一旦
+   * 分歧，`rankOf` 算出的名次就會與 `topProfiles` 列出來的順序互相矛盾（症狀是「我自己是第 3 名，
+   * 但列上寫 #5」）。
+   * Expanded into a chain of "the prefix is equal, then this key is strictly ahead" rather than a
+   * second hand-written look-alike ordering: once the two diverge, the rank from `rankOf` contradicts
+   * the row order from `topProfiles` — the symptom being "I am 3rd, but my row says #5".
+   *
+   * 每一個 `bind()` 都是**一次出現綁一次**（見 `Binder`），所以在 MySQL 上參數會比 Postgres 多。
+   * Every `bind()` is one call per occurrence (see `Binder`), so MySQL ends up with more parameters
+   * than Postgres.
+   */
+  private aheadOf(category: BoardCategory, b: Binder, probe: RankProbe): string {
+    const keys: readonly {
+      readonly column: string;
+      readonly value: unknown;
+      /** 降冪（`>`）還是升冪（`<`）。 */
+      readonly desc: boolean;
+      /** 時間鍵要走 `bindTime()`，Postgres 才不會拿字串去比 `timestamptz`。 */
+      readonly time?: boolean;
+    }[] = [
+      { column: BOARD_PRIMARY_COLUMN[category], value: probeValue(category, probe), desc: true },
+      /* 分數是第二個鍵，但分數分類的主鍵已經就是它，再比一次只是把同一件事寫兩遍。 */
+      ...(category === 'score'
+        ? []
+        : [{ column: 'best_score', value: probe.score, desc: true }]),
+      { column: 'best_at', value: probe.atMs, desc: false, time: true },
+      { column: 'device_id', value: probe.deviceId, desc: false },
+    ];
+
+    const bind = (key: (typeof keys)[number]): string =>
+      key.time === true ? b.bindTime(key.value as number) : b.bind(key.value);
+
+    const terms: string[] = [];
+
+    for (let at = 0; at < keys.length; at += 1) {
+      const conditions = keys
+        .slice(0, at)
+        .map((key) => `${key.column} = ${bind(key)}`);
+
+      const key = keys[at]!;
+
+      /*
+       * `best_at` 可能是 null，而 null 排在最後 —— 條件寫成 `best_at < t` 時 null 比較的結果是
+       * NULL（不是真），所以空的列本來就不會算在前面；顯式寫出 `is not null` 只是把這件事講明白。
+       * `best_at` may be null and nulls sort last: `best_at < t` already yields NULL (not true) for
+       * an empty row, so it never counts as ahead — the explicit `is not null` just says so out loud.
+       */
+      if (key.time === true) conditions.push(`${key.column} is not null`);
+
+      conditions.push(`${key.column} ${key.desc ? '>' : '<'} ${bind(key)}`);
+      terms.push(`(${conditions.join(' and ')})`);
+    }
+
+    return terms.join(' or ');
+  }
+
+  async rankOf(probe: RankProbe, category: BoardCategory): Promise<number> {
     const b = new Binder(this.dialect);
 
     const { rows } = await this.driver.query(
       `select ${this.dialect.countInt('count(*)')} as n from profiles
-       where best_score > ${b.bind(key.score)}
-          or (best_score = ${b.bind(key.score)} and best_at is not null
-              and best_at < ${b.bindTime(key.atMs)})
-          or (best_score = ${b.bind(key.score)} and best_at = ${b.bindTime(key.atMs)}
-              and device_id < ${b.bind(key.deviceId)})`,
+       where best_score > 0 and (${this.aheadOf(category, b, probe)})`,
       b.params,
     );
 

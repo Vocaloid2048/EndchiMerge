@@ -692,6 +692,92 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
     }
   });
 
+  /*
+   * 榜有三個分頁，而**排序由伺服器決定**。這裡送兩個玩家：一個高分低連擊、一個低分高連擊，兩邊的榜
+   * 應該給出相反的順序。若榜一律按分數排（把重排留給客戶端），低分高連擊那位就不會出現在組合數那
+   * 一頁 —— 而榜只回前 `limit` 名，客戶端救不回來。
+   * The board has three tabs and **the server owns the ordering**. Two players are submitted — one with
+   * a high score and low combo, one with a low score and high combo — and the two boards must order them
+   * oppositely. If the board were always score-ordered (leaving the re-sort to the client), the
+   * low-score/high-combo player would be missing from the combo page, and since the board returns only
+   * the top `limit` the client could not recover them.
+   */
+  it('orders each tab by its own column', async () => {
+    const { deps, advance } = makeDeps();
+
+    const submissions = [
+      ['player-scored-1111', { ...GOOD_RUN, score: 5_000, maxCombo: 3, merges: 40, drops: 80 }],
+      ['player-comboed-2222', { ...GOOD_RUN, score: 120, maxCombo: 90, merges: 100, drops: 120 }],
+    ] as const;
+
+    for (const [deviceId, run] of submissions) {
+      const started = await startRun(deps, deviceId);
+      advance(run.durationMs);
+      expect((await submitRun(deps, started, run, deviceId)).status).toBe(200);
+    }
+
+    const scoreBoard = (await board(deps, 'category=score')).body as {
+      category: string;
+      entries: { score: number; maxCombo: number }[];
+    };
+    const comboBoard = (await board(deps, 'category=combo')).body as typeof scoreBoard;
+
+    expect(scoreBoard.category).toBe('score');
+    expect(comboBoard.category).toBe('combo');
+
+    expect(scoreBoard.entries.map((entry) => entry.score)).toEqual([5_000, 120]);
+    expect(comboBoard.entries.map((entry) => entry.maxCombo)).toEqual([90, 3]);
+  });
+
+  /*
+   * `self` 的名次也要跟著分頁走 —— 同一個人在三個分頁上的名次本來就不一樣，而摘要那一行寫的是
+   * 「你的最佳：{該分頁的數值} · 第 N 名」，兩者必須描述同一個分頁。
+   * The `self` rank must follow the tab too: one player's position differs across the three tabs, and the
+   * summary line reads "your best: {this tab's value} · Nth", so the two have to describe the same tab.
+   */
+  it('reports the self rank for the requested tab', async () => {
+    const { deps, advance } = makeDeps();
+
+    const scored = 'player-scored-1111';
+    const comboed = 'player-comboed-2222';
+
+    for (const [deviceId, run] of [
+      [scored, { ...GOOD_RUN, score: 5_000, maxCombo: 3, merges: 40, drops: 80 }],
+      [comboed, { ...GOOD_RUN, score: 120, maxCombo: 90, merges: 100, drops: 120 }],
+    ] as const) {
+      const started = await startRun(deps, deviceId);
+      advance(run.durationMs);
+      await submitRun(deps, started, run, deviceId);
+    }
+
+    const rankOn = async (category: string): Promise<number> => {
+      const body = (await board(deps, `category=${category}&deviceId=${comboed}`)).body as {
+        self: { rank: number };
+      };
+      return body.self.rank;
+    };
+
+    /* 低分高連擊的那一位：組合數榜第 1，分數榜第 2。 */
+    expect(await rankOn('combo')).toBe(1);
+    expect(await rankOn('score')).toBe(2);
+  });
+
+  /*
+   * 不認識的分類**退回分數榜**而不是 400：榜是唯讀的，一個打錯的參數不值得讓整個請求失敗。
+   * An unknown category **falls back to the score board** rather than a 400: the board is read-only, and
+   * a mistyped parameter is not worth failing the request over.
+   */
+  it('falls back to the score board for an unknown category', async () => {
+    const { deps } = makeDeps();
+
+    for (const query of ['category=nope', 'category=SCORE', 'category=', 'category']) {
+      const response = await board(deps, query);
+
+      expect(response.status, query).toBe(200);
+      expect((response.body as { category: string }).category, query).toBe('score');
+    }
+  });
+
   it('rejects a non-POST submission and a body that is not an object', async () => {
     const { deps } = makeDeps();
 

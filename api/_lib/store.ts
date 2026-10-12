@@ -17,6 +17,7 @@
  * handlers.
  */
 
+import type { BoardCategory } from './db/dialect';
 import type { RequestRow } from './requests';
 
 /** `run_tokens` 的一列。 */
@@ -57,6 +58,24 @@ export interface ProfileRow {
   readonly bestAtMs: number | null;
 }
 
+/**
+ * 查名次時要問的那一組數字。
+ * The set of numbers asked about when looking up a rank.
+ *
+ * 三個最大值都要帶，因為**名次是相對於某個分類的**：同一個人在分數榜第 3 名、在組合數榜可能是
+ * 第 40 名。只帶分數的話，切到其他分頁時那一行「第 N 名」就是錯的。
+ * All three maxima are required because **a rank is always relative to a category**: the same player
+ * may be 3rd on the score board and 40th on the combo board. Carrying only the score would make the
+ * summary's "Nth" wrong on the other two tabs.
+ */
+export interface RankProbe {
+  readonly deviceId: string;
+  readonly score: number;
+  readonly maxCombo: number;
+  readonly merges: number;
+  readonly atMs: number;
+}
+
 export interface Store {
   putRunToken(row: RunTokenRow): Promise<void>;
   getRunToken(runId: string): Promise<RunTokenRow | null>;
@@ -80,35 +99,78 @@ export interface Store {
   saveScore(row: ScoreRow): Promise<boolean>;
 
   getProfile(deviceId: string): Promise<ProfileRow | null>;
-  /** 榜上前 `limit` 名（只含 `bestScore > 0` 的玩家）。 */
-  topProfiles(limit: number): Promise<ProfileRow[]>;
+  /**
+   * 某個分類的前 `limit` 名（只含 `bestScore > 0` 的玩家）。
+   * The top `limit` of one category (only players with `bestScore > 0`).
+   *
+   * 分類是**必填**而不是可選加預設值：榜有三個分頁，而每一個都應該只有一個寫法。給預設值的話，
+   * 呼叫端漏傳的那一天不會報錯，只會安靜地回一份分數榜去填組合數那一頁。
+   * The category is **required** rather than optional-with-a-default: the board has three tabs and each
+   * deserves exactly one spelling at the call site. A default would let a caller that forgot the
+   * argument quietly render a score board inside the combo tab.
+   */
+  topProfiles(category: BoardCategory, limit: number): Promise<ProfileRow[]>;
   /** 榜上的玩家總數（＝ `bestScore > 0` 的人數），客戶端拿它算「超越了百分之多少」。 */
   countProfiles(): Promise<number>;
   /**
-   * 某一組成績在榜上的名次（1 起算，用與 `topProfiles` **完全相同**的排序）。
-   * The 1-based position of a set of numbers on the board, using **exactly** the same ordering as
-   * `topProfiles`.
+   * 某一組成績在**指定分類**下的名次（1 起算，用與 `topProfiles` **完全相同**的排序）。
+   * The 1-based position of a set of numbers **within the given category**, using **exactly** the
+   * same ordering as `topProfiles`.
    *
    * 用同一個排序是刻意的：客戶端同時顯示「第 N 名」與逐列的 `#index`，兩者若各算各的，同分時就會
    * 出現「我自己是第 3 名，但列上寫 #5」這種對不起來的畫面。
    * The same ordering is deliberate: the client shows both a rank and a per-row `#index`, and if the
    * two were computed differently, a tie would produce "I am 3rd, but my row says #5".
    */
-  rankOf(key: { readonly score: number; readonly atMs: number; readonly deviceId: string }): Promise<number>;
+  rankOf(probe: RankProbe, category: BoardCategory): Promise<number>;
 
   insertRequest(row: RequestRow): Promise<void>;
 }
 
 /**
- * 榜的排序：分數降冪，同分時**較早達成**的排前面。
- * Board order: score descending, and on a tie the **earlier** achievement comes first.
+ * 某一列在指定分類下的取值。
+ * What one row is worth in the given category.
+ */
+function valueFor(profile: ProfileRow, category: BoardCategory): number {
+  switch (category) {
+    case 'score':
+      return profile.bestScore;
+    case 'combo':
+      return profile.bestMaxCombo;
+    case 'merges':
+      return profile.bestMerges;
+  }
+}
+
+/**
+ * 榜的排序：該分類降冪，同值時**較早達成**的排前面。
+ * Board order: the category descending, and on a tie the **earlier** achievement comes first.
+ *
+ * 它是 `Dialect.boardOrder()` 的鏡像，兩邊必須逐鍵一致 —— 否則同分時 `topProfiles` 的列序與
+ * `rankOf` 算出來的名次會互相矛盾。`compareProfiles` 與 `boardOrder` 的配對在
+ * `tests/api.test.ts` 有同分的案例釘住。
+ * It mirrors `Dialect.boardOrder()`, and the two must agree key for key — otherwise a tie makes the
+ * row order from `topProfiles` contradict the rank from `rankOf`. `tests/api.test.ts` pins the pair
+ * together with a tied case.
  *
  * 同分時取早的那一個，是為了讓排序**穩定且不可操作**：如果同分改看時間戳「新的優先」，任何人只要
  * 再送一次就能把自己往上推。
  * Ties go to the earlier one so the order is **stable and not gameable**: with "newest wins" on a
  * tie, anyone could push themselves up by submitting again.
  */
-function compareProfiles(a: ProfileRow, b: ProfileRow): number {
+function compareProfiles(category: BoardCategory, a: ProfileRow, b: ProfileRow): number {
+  const primary = valueFor(b, category) - valueFor(a, category);
+  if (primary !== 0) return primary;
+
+  /*
+   * 第二個鍵是**分數**（與客戶端 `compareBy` 同一個想法）：同樣的組合數時，分數高的那位是整體上
+   * 更強的玩家。分數分類下這一步是多餘的（主鍵已經相等），但留著讓四個鍵在三個分類裡都是同一個
+   * 形狀，也與 `boardOrderKeys()` 逐字對應。
+   * The second key is **score** (the same idea as the client's `compareBy`): with the same combo, the
+   * higher score is the stronger player overall. It is redundant on the score board (the primary key
+   * already ties), but keeping it gives all three categories one shape and matches `boardOrderKeys()`
+   * literally.
+   */
   if (a.bestScore !== b.bestScore) return b.bestScore - a.bestScore;
 
   const left = a.bestAtMs ?? 0;
@@ -197,10 +259,10 @@ export class MemoryStore implements Store {
     return this.profiles.get(deviceId) ?? null;
   }
 
-  async topProfiles(limit: number): Promise<ProfileRow[]> {
+  async topProfiles(category: BoardCategory, limit: number): Promise<ProfileRow[]> {
     return [...this.profiles.values()]
       .filter((row) => row.bestScore > 0)
-      .sort(compareProfiles)
+      .sort((a, b) => compareProfiles(category, a, b))
       .slice(0, Math.max(0, limit));
   }
 
@@ -213,21 +275,27 @@ export class MemoryStore implements Store {
     return count;
   }
 
-  async rankOf(key: { score: number; atMs: number; deviceId: string }): Promise<number> {
-    const probe: ProfileRow = {
-      deviceId: key.deviceId,
+  async rankOf(probe: RankProbe, category: BoardCategory): Promise<number> {
+    /*
+     * 把探針補成完整的一列，就能直接複用 `compareProfiles` —— 名次與列序因此**必然**用同一條排序，
+     * 而不是兩份「看起來一樣」的比較邏輯。
+     * The probe is completed into a full row so `compareProfiles` can be reused directly: the rank and
+     * the row order then **necessarily** share one ordering instead of two look-alike comparisons.
+     */
+    const probeRow: ProfileRow = {
+      deviceId: probe.deviceId,
       displayName: '',
-      bestScore: key.score,
+      bestScore: probe.score,
       bestDurationMs: 0,
-      bestMaxCombo: 0,
-      bestMerges: 0,
-      bestAtMs: key.atMs,
+      bestMaxCombo: probe.maxCombo,
+      bestMerges: probe.merges,
+      bestAtMs: probe.atMs,
     };
 
     let ahead = 0;
     for (const row of this.profiles.values()) {
       if (row.bestScore <= 0) continue;
-      if (compareProfiles(row, probe) < 0) ahead += 1;
+      if (compareProfiles(category, row, probeRow) < 0) ahead += 1;
     }
 
     return ahead + 1;

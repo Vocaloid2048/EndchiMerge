@@ -70,15 +70,15 @@ export interface Dialect {
   /* ── 語句片段 ──────────────────────────────────────────────────────────── */
 
   /**
-   * 榜的 `order by`（**不含** `order by` 這幾個字）。
-   * The board's `order by` (without the keywords themselves).
+   * 榜的 `order by`（**不含** `order by` 這幾個字），依分類。
+   * The board's `order by` (without the keywords themselves), per category.
    *
-   * 三個鍵必須與 `MemoryStore.compareProfiles` 完全一致，否則同分時 `rankOf` 與 `topProfiles` 會
-   * 對不起來 —— `tests/api.test.ts` 用同分的案例把兩邊釘在一起。
-   * The three keys must match `MemoryStore.compareProfiles` exactly, or a tie would make `rankOf` and
+   * 鍵必須與 `MemoryStore.compareProfiles` 完全一致，否則同分時 `rankOf` 與 `topProfiles` 會對不
+   * 起來 —— `tests/api.test.ts` 用同分的案例把兩邊釘在一起。
+   * The keys must match `MemoryStore.compareProfiles` exactly, or a tie would make `rankOf` and
    * `topProfiles` disagree — `tests/api.test.ts` pins the two together with a tied case.
    */
-  boardOrder(): string;
+  boardOrder(category: BoardCategory): string;
 
   /* ── 三個寫入語句（形狀差異太大，各自寫一份）/ Three writes, written per dialect ── */
 
@@ -184,8 +184,76 @@ export class Binder {
 }
 
 /**
- * 榜的排序鍵（三個鍵的**語意**，各方言只差 `nulls last` 的寫法）。
- * The board's sort keys — the **semantics** are shared, and only the spelling of nulls-last differs.
+ * 榜的三個分類。
+ * The board's three categories.
+ *
+ * 這是**榜在排什麼**的識別，不是顯示文字（顯示文字在客戶端的 `src/i18n`）。伺服器要靠它決定
+ * `order by` 用哪一欄，所以它必須是一個伺服器也認識的型別；客戶端另外有一份等價的
+ * `LeaderboardCategory`，兩邊刻意各自宣告 —— 伺服器不該 import 客戶端的模組。
+ * This identifies **what the board is ranking**, not the label (labels live in the client's
+ * `src/i18n`). The server needs it to pick the `order by` column, so it has to be a type the server
+ * knows; the client has an equivalent `LeaderboardCategory`, and the two are declared separately on
+ * purpose — the server must not import client modules.
+ */
+export type BoardCategory = 'score' | 'combo' | 'merges';
+
+/** 三個分類（順序即 UI 的顯示順序）。 */
+export const BOARD_CATEGORIES: readonly BoardCategory[] = ['score', 'combo', 'merges'];
+
+/**
+ * 這個字串是不是一個分類。
+ * Whether a string names a category.
+ *
+ * 查詢字串是**外部輸入**，所以「不認識的值」必須有明確的處置。這裡選**退回 `score`** 而不是回 400：
+ * 榜是唯讀的，一個打錯的分類參數最壞情況只是給了分數榜，不需要讓整個請求失敗。
+ * The query string is **outside input**, so an unknown value needs an explicit answer. Falling back to
+ * `score` is chosen over a 400 because the board is read-only: a mistyped category at worst returns the
+ * score board, which does not warrant failing the whole request.
+ */
+export function isBoardCategory(value: unknown): value is BoardCategory {
+  return typeof value === 'string' && (BOARD_CATEGORIES as readonly string[]).includes(value);
+}
+
+/**
+ * 每個分類排的是哪一欄。
+ * Which column each category ranks on.
+ *
+ * 三個值都是 `profiles` 上的**歷史最大值**，而且彼此獨立 —— 同一列的組合數與分數可能來自不同的局
+ * （見客戶端 `LeaderboardEntry`）。所以「組合數榜」不是把分數榜重新排一次，而是換一個主鍵。
+ * All three are **historical maxima** on `profiles` and independent of one another: one row's combo
+ * and score may come from different runs (see the client's `LeaderboardEntry`). A combo board is
+ * therefore not a re-sort of the score board but a different primary key.
+ */
+export const BOARD_PRIMARY_COLUMN: Readonly<Record<BoardCategory, string>> = {
+  score: 'best_score',
+  combo: 'best_max_combo',
+  merges: 'best_merges',
+};
+
+/**
+ * 組成榜的排序鍵，各方言只差「時間怎麼排空的」那一段。
+ * Build the board's sort keys; the dialects differ only in how the time column sorts nulls.
+ *
+ * 除了分類自己的那一欄，後面接的是**分數**（同等組合數時，分數高的排前面），再來是時間與 id 兩個
+ * 決勝鍵。與客戶端 `compareBy` 同一個思路，理由見那裡的說明。
+ * After the category's own column comes **score** (with an equal combo, the higher score leads), then
+ * time and id as tie-breakers — the same shape as the client's `compareBy`, for the reasons given
+ * there.
+ */
+export function boardOrderKeys(category: BoardCategory, timeOrder: string): string {
+  const primary = `${BOARD_PRIMARY_COLUMN[category]} desc`;
+  const tail = `${timeOrder}, device_id asc`;
+
+  return category === 'score' ? `${primary}, ${tail}` : `${primary}, best_score desc, ${tail}`;
+}
+
+/**
+ * 榜的排序鍵（分數分類的**語意**版本，不含方言寫法）。
+ * The board's sort keys — the **semantics** of the score category, free of dialect spelling.
+ *
+ * 保留它是因為它同時是給人看的說明與測試的基準：它不該被 `nulls last` 或 `is null` 汙染。
+ * It earns its place as both human-readable documentation and a test baseline: it must not be
+ * polluted by `nulls last` or `is null`.
  */
 export const BOARD_ORDER_KEYS = 'best_score desc, best_at asc, device_id asc';
 

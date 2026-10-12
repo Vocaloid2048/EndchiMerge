@@ -27,7 +27,7 @@
 
 import type { ApiRequest, ApiResponse, JsonObject } from './http';
 import { asObject, fail, methodNotAllowed, ok, readInteger, readString } from './http';
-import { isConnectionError } from './db/dialect';
+import { isConnectionError, isBoardCategory, type BoardCategory } from './db/dialect';
 import type { Config } from './env';
 import { MAX_RUN_MS } from './env';
 import { checkClaimedDuration, checkRationality } from './limits';
@@ -365,11 +365,16 @@ export const handleScore: CoreHandler = async (request, deps) => {
   const rank =
     profile === null || profile.bestScore <= 0
       ? null
-      : await deps.store.rankOf({
-          score: profile.bestScore,
-          atMs: profile.bestAtMs ?? now,
-          deviceId,
-        });
+      : await deps.store.rankOf(
+          {
+            deviceId,
+            score: profile.bestScore,
+            maxCombo: profile.bestMaxCombo,
+            merges: profile.bestMerges,
+            atMs: profile.bestAtMs ?? now,
+          },
+          'score',
+        );
 
   return {
     response: verdictResponse({
@@ -399,11 +404,23 @@ export const handleLeaderboard: CoreHandler = async (request, deps) => {
     ? Math.min(MAX_BOARD_LIMIT, Math.max(1, Math.trunc(parsedLimit)))
     : DEFAULT_BOARD_LIMIT;
 
+  /*
+   * 分頁。**排序由伺服器決定，不是把同一份榜交給客戶端重排** —— 榜只回前 `limit` 名，而在分數榜
+   * 排第 500 名的玩家，很可能正是組合數榜的第一名。如果一律用分數排序再取前 100，那一列根本不會
+   * 出現在組合數那一頁，客戶端再怎麼排都救不回來。
+   * The tab. **The server owns the ordering rather than handing one board over to be re-sorted by the
+   * client**: the board returns only the top `limit`, and the player ranked 500th by score may well be
+   * first by combo. Ordering by score and slicing 100 would leave that row out entirely, and no amount
+   * of client-side sorting can bring it back.
+   */
+  const rawCategory = request.query.get('category');
+  const category: BoardCategory = isBoardCategory(rawCategory) ? rawCategory : 'score';
+
   const provided = request.query.get('deviceId');
   const deviceId = provided !== null && isValidDeviceId(provided) ? provided : null;
 
   const [rows, total] = await Promise.all([
-    deps.store.topProfiles(limit),
+    deps.store.topProfiles(category, limit),
     deps.store.countProfiles(),
   ]);
 
@@ -423,11 +440,17 @@ export const handleLeaderboard: CoreHandler = async (request, deps) => {
     const profile = await deps.store.getProfile(deviceId);
 
     if (profile !== null && profile.bestScore > 0) {
-      const rank = await deps.store.rankOf({
-        score: profile.bestScore,
-        atMs: profile.bestAtMs ?? 0,
-        deviceId,
-      });
+      /* 名次要**跟著分頁走** —— 同一個人在三個分頁上的名次本來就不一樣。 */
+      const rank = await deps.store.rankOf(
+        {
+          deviceId,
+          score: profile.bestScore,
+          maxCombo: profile.bestMaxCombo,
+          merges: profile.bestMerges,
+          atMs: profile.bestAtMs ?? 0,
+        },
+        category,
+      );
 
       self = {
         rank,
@@ -441,7 +464,7 @@ export const handleLeaderboard: CoreHandler = async (request, deps) => {
     }
   }
 
-  return { response: ok({ ok: true, total, entries, self }), deviceId, runId: null };
+  return { response: ok({ ok: true, category, total, entries, self }), deviceId, runId: null };
 };
 
 /* ── GET /api/health ──────────────────────────────────────────────────────── */

@@ -23,7 +23,7 @@
 
 import { createPool, type Pool, type PoolConnection, type ResultSetHeader } from 'mysql2/promise';
 
-import type { Dialect } from './dialect';
+import { boardOrderKeys, type Dialect } from './dialect';
 import type { Driver, Row, SqlResult } from './types';
 
 /** 與 Postgres 那邊同一個理由（見 `postgres.ts`）。 */
@@ -79,9 +79,16 @@ class MysqlDriver implements Driver {
     /*
      * 非 SELECT：`affectedRows` 是 MySQL 唯一的「有沒有寫進去」訊號。`changedRows` 不行 —— 它算的是
      * 「值真的變了的列」，而我們的 `on duplicate key update run_id = run_id` 是刻意的 no-op，值不會變。
+     *
+     * ⚠️ 但 `affectedRows` 只有在 `FOUND_ROWS` 關掉時才等於「寫進去了」。開著的話它是「符合條件的
+     * 列數」，重複提交也會是 1 —— 見 `createMysqlDriver` 對這個 flag 的說明。
+     *
      * Anything but a SELECT: `affectedRows` is MySQL's only "did it land" signal. `changedRows` will
      * not do — it counts rows whose values actually changed, and our
      * `on duplicate key update run_id = run_id` is a deliberate no-op that changes nothing.
+     *
+     * ⚠️ But `affectedRows` only means "written" while `FOUND_ROWS` is off: with it on the number is
+     * "rows matched" and a duplicate reports 1 too — see the flag's explanation in `createMysqlDriver`.
      */
     return { rows: [], affected: (result as ResultSetHeader).affectedRows ?? 0 };
   }
@@ -109,6 +116,26 @@ class MysqlDriver implements Driver {
     if (this.connection === null) await this.pool.end();
   }
 }
+
+/**
+ * 連線時套用的 client flags。
+ * The client flags every connection is opened with.
+ *
+ * 目前只有一條，但它值得有自己的名字與測試：`mysql2` 的預設值是**開著** `FOUND_ROWS` 的，而那個
+ * flag 會讓 `affectedRows` 從「真的寫進去的列數」變成「符合條件的列數」—— 於是
+ * `on duplicate key update run_id = run_id` 這個刻意的 no-op 在重複提交時回報 `1`，
+ * `saveScore()` 就把每次重試都當成新的一局。這條路徑**不會拋錯**，只會靜靜算錯，而 Postgres 那邊
+ * 完全正常，所以只有真的用 MySQL 跑一次才會發現。
+ * There is only one entry, and it earns its own name and test: `mysql2` enables `FOUND_ROWS` **by
+ * default**, and that flag turns `affectedRows` from "rows actually written" into "rows matched" — so
+ * the deliberate no-op `on duplicate key update run_id = run_id` reports `1` for a duplicate and
+ * `saveScore()` treats every retry as a new run. The path **throws nothing** and is silently wrong,
+ * and the Postgres side is perfectly fine, so only actually running MySQL exposes it.
+ *
+ * `mergeFlags()` in `mysql2` drops a default flag when it is listed with a `-` prefix, which is the
+ * only way to unset one (there is no separate "off" switch).
+ */
+export const MYSQL_CLIENT_FLAGS: readonly string[] = ['-FOUND_ROWS'];
 
 const asBoolean = (value: unknown): boolean | undefined => {
   if (typeof value === 'boolean') return value;
@@ -140,14 +167,13 @@ export function createMysqlDriver(url: string): Driver {
     supportBigNumbers: true,
     bigNumberStrings: false,
     /*
-     * ⚠️ **刻意不設 `FOUND_ROWS`**（`CLIENT_FOUND_ROWS`）。那個 flag 會讓 UPDATE 回報「符合條件的列數」
-     * 而不是「真的變動的列數」，於是 `on duplicate key update run_id = run_id` 這個**刻意的 no-op**
-     * 也會回報 `affectedRows = 1` —— 每個重複提交都會被當成新的一局，最大值重複累加。
-     * ⚠️ **`FOUND_ROWS` (`CLIENT_FOUND_ROWS`) is deliberately NOT set.** That flag makes an UPDATE
-     * report "rows matched" rather than "rows actually changed", so the **deliberate no-op**
-     * `on duplicate key update run_id = run_id` would report `affectedRows = 1` too — making every
-     * duplicate submission look like a fresh run and double-counting the maxima.
+     * 見 `MYSQL_CLIENT_FLAGS`：關掉 `FOUND_ROWS` 是**正確性**的要求，不是調校。少了它，重複提交會
+     * 被當成新的一局，最大值重複累加，而且不會有任何錯誤訊息。
+     * See `MYSQL_CLIENT_FLAGS`: turning `FOUND_ROWS` off is a **correctness** requirement rather than
+     * tuning. Without it a duplicate submission counts as a new run, double-counting the maxima, with
+     * no error to show for it.
      */
+    flags: [...MYSQL_CLIENT_FLAGS],
     ...(MANAGED_HOSTS.test(url) ? { ssl: { rejectUnauthorized: false } } : {}),
   });
 
@@ -208,7 +234,7 @@ export const mysqlDialect: Dialect = {
    * MySQL has no `nulls last`. `best_at is null` yields 0 for non-null and 1 for null, so ascending
    * order puts the non-null ones first — the same order Postgres's `nulls last` produces.
    */
-  boardOrder: () => 'best_score desc, best_at is null, best_at asc, device_id asc',
+  boardOrder: (category) => boardOrderKeys(category, 'best_at is null, best_at asc'),
 
   insertRunToken: () => `insert into run_tokens (run_id, device_id, token_hash, issued_at, expires_at)
      values (?, ?, ?, ?, ?)

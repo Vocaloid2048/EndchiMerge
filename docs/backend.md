@@ -16,7 +16,7 @@
 | ------ | ------------------- | -------------------------------------------------------- |
 | `POST` | `/api/run/start`    | 開一局：伺服器鑄一張短期憑證（T2 的關鍵）                                   |
 | `POST` | `/api/score`        | 提交成績：驗憑證 → 驗時間 → 驗合理性 → 寫榜                                |
-| `GET`  | `/api/leaderboard`  | 取榜（`?limit=N`，預設 100、上限 200），附查詢者的自身名次                     |
+| `GET`  | `/api/leaderboard`  | 取榜（`?category=score\|combo\|merges`、`?limit=N`，預設 100、上限 200），附查詢者的自身名次   |
 | `GET`  | `/api/health`       | 自我檢查：**真的問一次資料庫**，回方言名稱與玩家數                                |
 
 **資料庫支援 Postgres 與 MySQL 兩種方言**，共用同一份業務邏輯 —— 見 §5。
@@ -258,8 +258,19 @@ Postgres 只要一個參數、在 MySQL 要三個 —— 修法是**每一次出
 >    所以 `best_score` 必須排在拿它比較的 `best_duration_ms`／`best_at` **之後**，否則時長永遠不會
 >    跟著分數更新，而且不會報錯。
 > 2. **不用 `insert ignore`** —— 它會把所有錯誤吞成警告，不只是重複鍵。
-> 3. **不設 `FOUND_ROWS`** —— 那個 flag 會讓刻意的 no-op upsert 回報 `affectedRows = 1`，於是每個
->    重試都被當成新的一局。
+> 3. **一定要關掉 `FOUND_ROWS`** —— `mysql2` 的 `getDefaultFlags()` **預設就開著它**，而它把
+>    `affectedRows` 由「真正寫入的行」改成「**匹配到的**行」，於是刻意的 no-op upsert
+>    （`on duplicate key update run_id = run_id`）在既有列上回報 `1`，每次重試都被當成新的一局。
+>    由 `mysql.ts` 的 `MYSQL_CLIENT_FLAGS = ['-FOUND_ROWS']` 關掉（`mergeFlags` 認得 `-` 前綴），
+>    `tests/dialect.test.ts` 釘住「旗標在、裸的 `FOUND_ROWS` 不在」。這是**跑真的 MySQL 才發現的** ——
+>    假驅動看不出來，Postgres 也完全不受影響。
+
+**榜序是「每個分類各自一份」**，而且必須由**伺服器**決定。三個分類（分數／COMBO／合成）各自獨立取
+最大值，所以一位「高分低連擊」的玩家在 COMBO 榜上不會出現在前 N 名裡；如果伺服器永遠照 `best_score`
+排序，那個分頁就是錯的。`Dialect.boardOrder(category)` 與 `Store.topProfiles(category, …)`／
+`rankOf(probe, category)` 共用同一份 `boardOrderKeys(category, timeOrder)`，所以**名次與列序必然
+同源** —— 兩邊各寫一份排序遲早會漂移，而漂移的症狀（「我明明是第 3 名，榜上第 5」）只有玩家看得到。
+`rankOf` 的 SQL 謂詞就是那串鍵的**前綴相等鏈**。
 
 ### 5.2 平台：EdgeOne 要接哪一個
 
@@ -345,10 +356,10 @@ curl -s 'localhost:3000/api/leaderboard?limit=10'
 
 | 檔案 | 測什麼 | 需要資料庫 |
 | --- | --- | --- |
-| `tests/api.test.ts` | 處理器：開局 → 提交 → 上榜、冪等、速率、憑證、合理性、健康檢查 | ✗ |
-| `tests/dialect.test.ts` | 方言：佔位符、排序、upsert 順序、建表可重複執行、錯誤分類 | ✗ |
-| `tests/sqlStore.test.ts` | 儲存層邏輯：**佔位符數 ＝ 參數數**、冪等的兩條路、交易與回滾、列轉換 | ✗ |
-| `tests/db.integration.test.ts` | 真的 SQL：建表、憑證、最大值、同分名次、JSON 欄位、交易原子性 | **✓ gated** |
+| `tests/api.test.ts` | 處理器：開局 → 提交 → 上榜、冪等、速率、憑證、合理性、健康檢查、每個分頁的排序與自身名次 | ✗ |
+| `tests/dialect.test.ts` | 方言：佔位符、**每個分類各自的榜序**、upsert 順序、連線旗標、建表可重複執行、錯誤分類 | ✗ |
+| `tests/sqlStore.test.ts` | 儲存層邏輯：**佔位符數 ＝ 參數數**、冪等的兩條路、交易與回滾、列轉換、`rankOf` 比的是哪一欄 | ✗ |
+| `tests/db.integration.test.ts` | 真的 SQL：建表、憑證、最大值、同分名次、JSON 欄位、交易原子性、高分低連擊的 COMBO 榜 | **✓ gated** |
 
 ```bash
 npm run typecheck
@@ -364,7 +375,11 @@ TEST_DATABASE_URL='mysql://…'      npx vitest run tests/db.integration.test.ts
 它**預設不跑**（`describe.skipIf`），因為這個 repo 與 CI 不該為了跑測試而背一個資料庫。但
 **單元測試永遠測不到真 SQL**：`sqlStore.test.ts` 的假驅動驗的是「我們產生了什麼」，整合測試驗的是
 「資料庫真的接受它」。兩者的交集才是「能跑」，而那個交集只有在真的連上去之後才存在 —— 尤其是 MySQL
-的 `upsertProfile` 欄位順序，假驅動怎麼測都測不到。
+的 `upsertProfile` 欄位順序與 `FOUND_ROWS` 連線旗標，假驅動怎麼測都測不到（後者已經實測：它讓冪等
+靜靜失效，見 §5.1）。
+
+不想自己準備一個資料庫時，`mysql-memory-server`（devDependency）可以起一個**拋棄式的 MySQL**：
+下載一次、開在隨機空閒埠、`stop()` 就清乾淨。上面那兩個修正就是用它抓到的。
 
 `tests/adapters.test.ts` 另外驗**兩個平台轉接頭得到同一個 `ApiRequest`** —— 那是最直接的「共用
 程式碼」證明。

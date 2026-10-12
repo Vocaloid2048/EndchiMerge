@@ -13,7 +13,7 @@
 
 import { Pool, type PoolClient } from 'pg';
 
-import type { Dialect } from './dialect';
+import { boardOrderKeys, type Dialect } from './dialect';
 import type { Driver, Row, SqlResult } from './types';
 
 /**
@@ -161,7 +161,7 @@ export const postgresDialect: Dialect = {
   /* Postgres 真的回布林，但 `pg` 對某些欄位型別可能給字串，所以兩種都認。 */
   readBool: (value) => value === true || value === 't' || value === 1 || value === '1',
 
-  boardOrder: () => 'best_score desc, best_at asc nulls last, device_id asc',
+  boardOrder: (category) => boardOrderKeys(category, 'best_at asc nulls last'),
 
   insertRunToken: () => `insert into run_tokens (run_id, device_id, token_hash, issued_at, expires_at)
      values ($1, $2, $3, $4::timestamptz, $5::timestamptz)

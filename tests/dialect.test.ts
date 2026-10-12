@@ -21,12 +21,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   Binder,
+  BOARD_CATEGORIES,
   BOARD_ORDER_KEYS,
   dialectFromUrl,
+  isBoardCategory,
   isConnectionError,
   type Dialect,
 } from '../api/_lib/db/dialect';
-import { mysqlDialect } from '../api/_lib/db/mysql';
+import { mysqlDialect, MYSQL_CLIENT_FLAGS } from '../api/_lib/db/mysql';
 import { postgresDialect } from '../api/_lib/db/postgres';
 
 const DIALECTS: readonly Dialect[] = [postgresDialect, mysqlDialect];
@@ -112,7 +114,7 @@ describe('Binder — 佔位符與參數要對得上 / placeholders and params mu
 
 /* ── 榜的排序 / The board order ────────────────────────────────────────────── */
 
-describe('board order — 三個鍵的語意要一致 / the three keys mean the same thing', () => {
+describe('board order — 四個鍵的語意要一致 / the four keys mean the same thing', () => {
   /*
    * 兩邊都必須是「分數降冪 → 同分較早優先 → id 收尾」。只差 `nulls last` 的寫法：MySQL 沒有這個
    * 關鍵字，要用 `best_at is null` 當第一個排序鍵才等價。
@@ -121,22 +123,83 @@ describe('board order — 三個鍵的語意要一致 / the three keys mean the 
    */
   it('orders by score, then time, then id on both dialects', () => {
     for (const dialect of DIALECTS) {
-      const order = dialect.boardOrder();
+      const order = dialect.boardOrder('score');
 
       expect(order).toContain('best_score desc');
       expect(order).toContain('best_at');
       expect(order).toContain('device_id asc');
     }
 
-    expect(postgresDialect.boardOrder()).toContain('nulls last');
-    expect(mysqlDialect.boardOrder()).toContain('best_at is null');
-    expect(mysqlDialect.boardOrder()).not.toContain('nulls last');
+    expect(postgresDialect.boardOrder('score')).toContain('nulls last');
+    expect(mysqlDialect.boardOrder('score')).toContain('best_at is null');
+    expect(mysqlDialect.boardOrder('score')).not.toContain('nulls last');
+  });
+
+  /*
+   * 每個分頁排的是**自己那一欄**。
+   * 這是「榜有三個分頁」這件事在 SQL 上的落點：組合數那一頁若不是以 `best_max_combo` 為主鍵，
+   * 一個分數不高但連擊很長的玩家就永遠不會出現在那一頁。
+   * Each tab ranks on **its own column**. This is where "the board has three tabs" lands in SQL: if the
+   * combo page did not lead with `best_max_combo`, a low-scoring player with a long combo would never
+   * appear on it.
+   */
+  it('ranks each category on its own column', () => {
+    for (const dialect of DIALECTS) {
+      expect(dialect.boardOrder('combo')).toContain('best_max_combo desc');
+      expect(dialect.boardOrder('merges')).toContain('best_merges desc');
+    }
+  });
+
+  /*
+   * 分數分類的主鍵就是 `best_score`，不該再把它當第二個鍵寫一次 —— 重複的鍵不是錯，但它會讓
+   * 「四個鍵」這個形狀對不上，而 `MemoryStore.compareProfiles` 是照那個形狀寫的。
+   * The score board's primary key *is* `best_score`, and it must not be repeated as the second key —
+   * a repeated key is not wrong, but it breaks the "four keys" shape that
+   * `MemoryStore.compareProfiles` is written against.
+   */
+  it('does not repeat the primary key on the score board', () => {
+    expect(postgresDialect.boardOrder('score').match(/best_score/gu)).toHaveLength(1);
+    expect(mysqlDialect.boardOrder('score').match(/best_score/gu)).toHaveLength(1);
+  });
+
+  /*
+   * 三個分類的**決勝鍵必須相同**（時間、然後 id），否則同值時的順序會隨分頁而變，而 `rankOf`
+   * 與 `topProfiles` 只有在共用同一組鍵時才會給出一致的名次。
+   * The three categories must share the same **tie-breakers** (time, then id), or the order of equal
+   * values would change with the tab, and `rankOf` and `topProfiles` only agree when they share keys.
+   */
+  it('uses the same tie-breakers on every category', () => {
+    for (const category of BOARD_CATEGORIES) {
+      expect(postgresDialect.boardOrder(category)).toContain('best_at asc nulls last, device_id asc');
+      expect(mysqlDialect.boardOrder(category)).toContain('best_at is null, best_at asc, device_id asc');
+    }
   });
 
   /* `BOARD_ORDER_KEYS` 是給人看的那份「語意」，不該被某一邊的語法汙染。 */
   it('keeps the shared key list free of dialect syntax', () => {
     expect(BOARD_ORDER_KEYS).toBe('best_score desc, best_at asc, device_id asc');
     expect(BOARD_ORDER_KEYS).not.toContain('nulls');
+  });
+});
+
+/* ── 分類參數 / The category argument ──────────────────────────────────────── */
+
+describe('isBoardCategory — 不認識的值要有明確的處置 / an unknown value needs an answer', () => {
+  it('accepts the three categories', () => {
+    expect(BOARD_CATEGORIES).toHaveLength(3);
+    for (const category of BOARD_CATEGORIES) expect(isBoardCategory(category)).toBe(true);
+  });
+
+  /*
+   * 查詢字串是外部輸入，所以「大小寫不同」、「空字串」、「根本不是字串」都要落在同一邊 ——
+   * 它們都會退回分數榜，而不是讓請求失敗。
+   * The query string is outside input, so a different case, an empty string and a non-string must all
+   * land on the same side: each falls back to the score board rather than failing the request.
+   */
+  it('rejects anything else', () => {
+    for (const value of ['SCORE', 'combo ', 'best', '', null, undefined, 3, {}, ['score']]) {
+      expect(isBoardCategory(value), JSON.stringify(value)).toBe(false);
+    }
   });
 });
 
@@ -253,6 +316,35 @@ describe('schema — 必須可重複執行 / it must be repeatable', () => {
   it('declares the board index on both dialects', () => {
     expect(postgresDialect.schema().join('\n')).toContain('profiles_best_score_idx');
     expect(mysqlDialect.schema().join('\n')).toContain('profiles_best_score_idx');
+  });
+});
+
+/* ── MySQL 連線 flags / MySQL connection flags ─────────────────────────────── */
+
+describe('MySQL 連線 flags / MySQL connection flags', () => {
+  /*
+   * `mysql2` 的 `getDefaultFlags()` **預設就包含 `FOUND_ROWS`**，所以只要沒有人明著把它黑名單掉，
+   * 它就會一直是開的。那個 flag 把 `affectedRows` 從「真的寫入的列數」換成「符合條件的列數」，
+   * 而 `insertScoreSignal` 正是靠 `affectedRows` 判斷這一局是不是新的 —— 開著的話，每一次重試都
+   * 會被當成新的一局。
+   *
+   * 這條測試是「不能無聲拆掉」的那道鎖：真正的行為驗證在 `tests/db.integration.test.ts`（要一個
+   * 真的 MySQL 才會跑），而這一條在沒有資料庫時也會紅。
+   * `mysql2`'s `getDefaultFlags()` **includes `FOUND_ROWS` by default**, so unless it is explicitly
+   * blacklisted the flag is on. It swaps `affectedRows` from "rows actually written" to "rows
+   * matched", and `insertScoreSignal` decides "is this run new?" from exactly that number — with the
+   * flag on, every retry reads as a new run.
+   *
+   * This is the lock that stops it being removed silently. The real behavioural check lives in
+   * `tests/db.integration.test.ts` (which needs a live MySQL); this one also fails with no database.
+   */
+  it('blacklists FOUND_ROWS, which mysql2 enables by default', () => {
+    expect(MYSQL_CLIENT_FLAGS).toContain('-FOUND_ROWS');
+  });
+
+  /* 黑名單靠 `-` 前綴（`mergeFlags()` 只認這種寫法）；忘了前綴就等於要求「開啟」它。 */
+  it('uses the blacklist prefix rather than naming the flag', () => {
+    expect(MYSQL_CLIENT_FLAGS).not.toContain('FOUND_ROWS');
   });
 });
 

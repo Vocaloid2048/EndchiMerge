@@ -26,11 +26,21 @@ import { postgresDialect } from '../api/_lib/db/postgres';
 import type { Driver, Row, SqlResult } from '../api/_lib/db/types';
 import type { RequestRow } from '../api/_lib/requests';
 import { SqlStore } from '../api/_lib/sqlStore';
-import type { RunTokenRow, ScoreRow } from '../api/_lib/store';
+import type { RankProbe, RunTokenRow, ScoreRow } from '../api/_lib/store';
 
 const DIALECTS: readonly Dialect[] = [postgresDialect, mysqlDialect];
 
 const AT = 1_700_000_000_000;
+
+/**
+ * `rankOf` 要問的那一組數字。**三個最大值都要帶** —— 名次是相對於某個分類的，只給分數的話
+ * 另外兩個分頁算出來的名次會是錯的（見 `RankProbe`）。
+ * The numbers `rankOf` asks about. **All three maxima** are carried: a rank is relative to a category,
+ * and handing over only the score would make the other two tabs' ranks wrong (see `RankProbe`).
+ */
+function probe(overrides: Partial<RankProbe> = {}): RankProbe {
+  return { deviceId: 'device-1', score: 900, maxCombo: 12, merges: 30, atMs: AT, ...overrides };
+}
 
 /* ── 假的驅動 / The fake driver ────────────────────────────────────────────── */
 
@@ -161,9 +171,9 @@ describe('SqlStore — 每一條語句的佔位符都要對得上參數 / placeh
       await store.countSubmissionsSince('device-1', AT - 3_600_000);
       await store.saveScore(scoreRow());
       await store.getProfile('device-1');
-      await store.topProfiles(100);
+      await store.topProfiles('score', 100);
       await store.countProfiles();
-      await store.rankOf({ score: 900, atMs: AT, deviceId: 'device-1' });
+      await store.rankOf(probe(), 'score');
       await store.insertRequest(requestRow());
 
       expect(driver.calls.length).toBeGreaterThan(10);
@@ -184,7 +194,7 @@ describe('SqlStore — 每一條語句的佔位符都要對得上參數 / placeh
     const driver = new RecordingDriver();
     const store = new SqlStore(driver, postgresDialect);
 
-    await store.rankOf({ score: 900, atMs: AT, deviceId: 'device-1' });
+    await store.rankOf(probe(), 'score');
 
     const numbers = [...(driver.calls[0]?.sql ?? '').matchAll(/\$(\d+)/gu)].map((m) => Number(m[1]));
     expect(numbers).toEqual([...numbers].sort((a, b) => a - b));
@@ -203,9 +213,9 @@ describe('SqlStore — 每一條語句的佔位符都要對得上參數 / placeh
       const driver = new RecordingDriver();
       const store = new SqlStore(driver, dialect);
 
-      await store.topProfiles(10);
+      await store.topProfiles('score', 10);
 
-      expect(driver.calls[0]?.sql).toContain(dialect.boardOrder());
+      expect(driver.calls[0]?.sql).toContain(dialect.boardOrder('score'));
     }
   });
 
@@ -219,7 +229,7 @@ describe('SqlStore — 每一條語句的佔位符都要對得上參數 / placeh
     const driver = new RecordingDriver();
     const store = new SqlStore(driver, postgresDialect);
 
-    await store.rankOf({ score: 900, atMs: AT, deviceId: 'device-1' });
+    await store.rankOf(probe(), 'score');
 
     const sql = driver.calls[0]?.sql ?? '';
     expect(sql).toContain('best_score >');
@@ -227,6 +237,26 @@ describe('SqlStore — 每一條語句的佔位符都要對得上參數 / placeh
     expect(sql).toContain('best_at <');
     expect(sql).toContain('best_at =');
     expect(sql).toContain('device_id <');
+  });
+
+  /*
+   * 名次必須**跟著分頁走**：查組合數那一頁要比 `best_max_combo`，不是比 `best_score`。少了這一條，
+   * 三個分頁會共用同一個（分數的）名次，摘要那句「你的最佳：N 連 · 第 3 名」就會自相矛盾。
+   * The rank must **follow the tab**: the combo page compares `best_max_combo`, not `best_score`.
+   * Without this all three tabs would share the score rank and the summary's "Nth" would contradict
+   * the value printed beside it.
+   */
+  it('compares the category column in rankOf', async () => {
+    const columns = { score: 'best_score', combo: 'best_max_combo', merges: 'best_merges' } as const;
+
+    for (const category of ['score', 'combo', 'merges'] as const) {
+      const driver = new RecordingDriver();
+      await new SqlStore(driver, postgresDialect).rankOf(probe(), category);
+
+      const sql = driver.calls[0]?.sql ?? '';
+      expect(sql, category).toContain(`${columns[category]} >`);
+      expect(sql, category).toContain(`${columns[category]} =`);
+    }
   });
 
   /* headers 要以 JSON 綁定：Postgres 少了 `::jsonb` 會把它當成一段文字而寫不進 jsonb 欄位。 */
@@ -446,7 +476,7 @@ describe('SqlStore — 列的轉換 / mapping rows', () => {
     const driver = new RecordingDriver();
     driver.reply([{ n: 0 }]);
 
-    expect(await new SqlStore(driver, postgresDialect).rankOf({ score: 900, atMs: AT, deviceId: 'd' })).toBe(1);
+    expect(await new SqlStore(driver, postgresDialect).rankOf(probe({ deviceId: 'd' }), 'score')).toBe(1);
   });
 
   it('reads the token row back with milliseconds', async () => {

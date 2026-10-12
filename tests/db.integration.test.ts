@@ -36,7 +36,7 @@ import { dialectFromUrl, type Dialect } from '../api/_lib/db/dialect';
 import type { Driver } from '../api/_lib/db/types';
 import type { RequestRow } from '../api/_lib/requests';
 import { SqlStore } from '../api/_lib/sqlStore';
-import type { ScoreRow } from '../api/_lib/store';
+import type { ProfileRow, RankProbe, ScoreRow } from '../api/_lib/store';
 
 const TEST_URL = (process.env['TEST_DATABASE_URL'] ?? '').trim();
 const ENABLED = TEST_URL !== '';
@@ -73,6 +73,16 @@ function score(device: string, overrides: Partial<ScoreRow> = {}): ScoreRow {
     atMs: AT,
     ...overrides,
   };
+}
+
+/**
+ * `rankOf` 要問的那一組數字；預設值對應 `score()` 會存出來的 profile。三個最大值都要帶，因為名次
+ * 是相對於某個分類的（見 `RankProbe`）。
+ * The numbers `rankOf` asks about, defaulting to the profile `score()` writes. All three maxima are
+ * carried because a rank is relative to a category (see `RankProbe`).
+ */
+function probe(device: string, overrides: Partial<RankProbe> = {}): RankProbe {
+  return { deviceId: device, score: 900, maxCombo: 5, merges: 30, atMs: AT, ...overrides };
 }
 
 describe.skipIf(!ENABLED)('SqlStore — 真的資料庫 / a real database', () => {
@@ -181,14 +191,14 @@ describe.skipIf(!ENABLED)('SqlStore — 真的資料庫 / a real database', () =
       bestAtMs: AT,
     });
 
-    const board = await store.topProfiles(100);
+    const board = await store.topProfiles('score', 100);
     expect(board.some((entry) => entry.deviceId === device)).toBe(true);
     expect(await store.countProfiles()).toBeGreaterThan(0);
 
     expect(await store.getScore(run.runId)).toMatchObject({ score: 900, verified: true });
 
     /* 名次是 1 起算的。 */
-    expect(await store.rankOf({ score: 900, atMs: AT, deviceId: device })).toBeGreaterThan(0);
+    expect(await store.rankOf(probe(device), 'score')).toBeGreaterThan(0);
   });
 
   /*
@@ -256,8 +266,8 @@ describe.skipIf(!ENABLED)('SqlStore — 真的資料庫 / a real database', () =
     await store.saveScore(score(first, { score: 700, atMs: AT }));
     await store.saveScore(score(second, { score: 700, atMs: AT + 1_000 }));
 
-    const rankFirst = await store.rankOf({ score: 700, atMs: AT, deviceId: first });
-    const rankSecond = await store.rankOf({ score: 700, atMs: AT + 1_000, deviceId: second });
+    const rankFirst = await store.rankOf(probe(first, { score: 700, atMs: AT }), 'score');
+    const rankSecond = await store.rankOf(probe(second, { score: 700, atMs: AT + 1_000 }), 'score');
 
     /* 同分時較早達成的排前面。 */
     expect(rankFirst).toBeLessThan(rankSecond);
@@ -267,10 +277,42 @@ describe.skipIf(!ENABLED)('SqlStore — 真的資料庫 / a real database', () =
      * The rank must **equal** its position on the board — the most direct mirror check: two
      * independently computed queries would diverge exactly on a tie.
      */
-    const board = await store.topProfiles(100);
+    const board = await store.topProfiles('score', 100);
     const positionOnBoard = board.findIndex((entry) => entry.deviceId === first) + 1;
 
     expect(rankFirst).toBe(positionOnBoard);
+  });
+
+  /*
+   * 三個分頁排的是**不同的東西**：一個「分數很低但連擊很長」的玩家必須出現在**組合數榜**上，即使他在
+   * 分數榜上排得很後面。這一條只有在**伺服器自己排序**時才成立 —— 榜若一律按分數排再切前 N 名，
+   * 那個人根本不會被回傳，客戶端再怎麼重排都救不回來。
+   * The three tabs rank **different things**: a player with a **low score but a long combo** must show up
+   * on the **combo board** even when they sit far down the score board. That only holds while the
+   * **server does the ordering** — a board always sorted by score and then sliced never returns them,
+   * and no amount of client-side re-sorting can bring them back.
+   */
+  it('puts a high-combo, low-score player on top of the combo board', async () => {
+    const rival = deviceId('combo-rival');
+    const boss = deviceId('combo-boss');
+
+    await store.saveScore(score(rival, { score: 5_000, maxCombo: 3, merges: 40 }));
+    await store.saveScore(score(boss, { score: 120, maxCombo: 90, merges: 60 }));
+
+    const positionOf = (board: readonly ProfileRow[], id: string): number =>
+      board.findIndex((entry) => entry.deviceId === id);
+
+    const comboBoard = await store.topProfiles('combo', 100);
+    const scoreBoard = await store.topProfiles('score', 100);
+
+    /* 分數榜上排在後面的那一位，在組合數榜上反而排在前面。 */
+    expect(positionOf(comboBoard, boss)).toBeLessThan(positionOf(comboBoard, rival));
+    expect(positionOf(scoreBoard, boss)).toBeGreaterThan(positionOf(scoreBoard, rival));
+
+    /* 名次也跟著分頁走。 */
+    const bossCombo = await store.rankOf(probe(boss, { score: 120, maxCombo: 90, merges: 60 }), 'combo');
+    const rivalCombo = await store.rankOf(probe(rival, { score: 5_000, maxCombo: 3, merges: 40 }), 'combo');
+    expect(bossCombo).toBeLessThan(rivalCombo);
   });
 
   /* ── 速率限制的計數 ────────────────────────────────────────────────────── */
