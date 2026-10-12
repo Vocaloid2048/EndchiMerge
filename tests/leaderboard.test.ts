@@ -63,7 +63,8 @@ function playerRow(
   merges: number,
   at = 1,
 ): LeaderboardEntry {
-  return { id, name: id, score, maxCombo, merges, at };
+  /* 時長預設 0（未知）：這些列只用來擺位，時長本身另有專門的測試。 */
+  return { id, name: id, score, durationMs: 0, maxCombo, merges, at };
 }
 
 /** 驗證失敗的原因；通過時字串 'ok'。讓斷言不必先做型別窄化。 */
@@ -365,6 +366,107 @@ describe('createLocalLeaderboard — 一位玩家一筆 / one row per player', (
     board.setSharing(true);
 
     expect(board.snapshot('score').self).toBeNull();
+  });
+});
+
+describe('createLocalLeaderboard — 時長跟著分數 / the duration follows the score', () => {
+  it('records the duration of the run that set the score', () => {
+    const { board } = makeBoard();
+    board.setSharing(true);
+
+    board.record({ score: 100, durationMs: 30_000, maxCombo: 1, merges: 1 });
+    board.record({ score: 900, durationMs: 240_000, maxCombo: 2, merges: 2 });
+    board.sync();
+
+    expect(board.snapshot('score').entries[0]).toMatchObject({ score: 900, durationMs: 240_000 });
+  });
+
+  /*
+   * 這一條是這個欄位存在的理由：時長與分數**綁在一起**，不像 `maxCombo`／`merges` 各自取最大。
+   * 一局打得久但分數低，只該更新它自己那一項，不該把「最高分那一局」的時間蓋掉 —— 否則 HUD 與
+   * 榜上會出現「900 分 打了 12 分鐘」這種自相矛盾的兩格。
+   * This is why the field exists: the duration is **bound to the score**, unlike `maxCombo`/`merges`
+   * which each take their own maximum. A long low-scoring run should update only its own metric and
+   * leave the best-score run's time alone — otherwise the board shows "900 points, 12 minutes",
+   * two cells contradicting each other.
+   */
+  it('does not let a longer but lower-scoring run overwrite the best run duration', () => {
+    const { board } = makeBoard();
+    board.setSharing(true);
+
+    board.record({ score: 900, durationMs: 120_000, maxCombo: 1, merges: 1 });
+    /* 低分、打得久、連擊長：只該動 maxCombo 與 merges。 */
+    board.record({ score: 100, durationMs: 720_000, maxCombo: 40, merges: 60 });
+    board.sync();
+
+    expect(board.snapshot('score').entries[0]).toMatchObject({
+      score: 900,
+      durationMs: 120_000,
+      maxCombo: 40,
+      merges: 60,
+    });
+  });
+
+  it('keeps the old duration when a call omits it', () => {
+    const { board } = makeBoard();
+    board.setSharing(true);
+
+    board.record({ score: 900, durationMs: 120_000, maxCombo: 1, merges: 1 });
+    board.record({ score: 1_200, maxCombo: 2, merges: 2 });
+    board.sync();
+
+    expect(board.snapshot('score').entries[0]).toMatchObject({ score: 1_200, durationMs: 120_000 });
+  });
+
+  it('tracks a rising score frame by frame, so the stored time is the moment it peaked', () => {
+    const { board } = makeBoard();
+    board.setSharing(true);
+
+    /*
+     * 主迴圈每幀都呼叫 `record()`，所以這是實際的呼叫形態：分數與時間一起往上跑。
+     * `main.ts` 在分數不再上升之後仍會繼續呼叫，留下來的就該是**最後一次刷新**那一刻的時間。
+     * The main loop calls `record()` every frame, so this is the real shape of the calls: score and
+     * time climb together. `main.ts` keeps calling after the score stops rising, and what survives
+     * has to be the time at the **last** improvement.
+     */
+    for (let frame = 1; frame <= 60; frame += 1) {
+      board.record({ score: frame * 10, durationMs: frame * 1_000, maxCombo: 1, merges: 1 });
+    }
+    board.record({ score: 600, durationMs: 120_000, maxCombo: 1, merges: 1 });
+    board.sync();
+
+    expect(board.snapshot('score').entries[0]).toMatchObject({ score: 600, durationMs: 60_000 });
+  });
+
+  it('carries the duration through a save/load round trip', () => {
+    const first = makeBoard();
+    first.board.setSharing(true);
+    first.board.record({ score: 700, durationMs: 90_000, maxCombo: 1, merges: 1 });
+    first.board.sync();
+
+    /*
+     * 用同一個儲存體重開一次：存檔裡的封條與時長都必須活著回來。
+     * Reopen over the same storage: the sealed envelope and the duration both have to survive.
+     */
+    const second = createLocalLeaderboard({
+      storage: first.storage,
+      playerId: 'me',
+      salt: TEST_SALT,
+      now: (): number => 1_700_000_000_000,
+      keys: { entries: 'e', name: 'n', sharing: 's', prompt: 'p', profile: 'pr', device: 'd' },
+    });
+
+    expect(second.snapshot('score').entries[0]).toMatchObject({ score: 700, durationMs: 90_000 });
+  });
+
+  /* 舊存檔（在時長這個欄位出現之前寫的）讀不到時補 0，而不是讓整筆紀錄失效。 */
+  it('treats a row saved before the field existed as an unknown duration', () => {
+    const legacy = { id: 'me', name: '阿爺', score: 500, maxCombo: 1, merges: 1, at: 1 };
+    const { board } = makeBoard(LEADERBOARD_LIMIT, [legacy as unknown as LeaderboardEntry]);
+
+    board.setSharing(true);
+
+    expect(board.snapshot('score').entries[0]).toMatchObject({ score: 500, durationMs: 0 });
   });
 });
 

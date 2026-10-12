@@ -117,8 +117,27 @@ function buildScoreCard(): HTMLElement {
   const card = el('section', 'panel card card--score');
   card.dataset['region'] = 'score';
 
-  const value = el('p', 'card__value', '0');
-  value.dataset['hook'] = 'score-value';
+  /*
+   * 分數與時長是**兩個節點**（使用者定案：時長展示在分數旁邊）。`data-hook="score-value"`
+   * 必須留在只裝數字的那個 `span` 上，因為 `ui/hud.ts` 每一次分數變動都是對它整個覆寫
+   * `textContent` —— 時長若掛在同一個節點裡，會被第一次更新抹掉。這與下面 `card__stat`
+   * 把「標籤」與「分隔號」拆成兩個節點是同一個理由。
+   * Score and duration are **two nodes** (the user's decision: the duration is shown beside the
+   * score). `data-hook="score-value"` has to stay on the span that holds only the number, because
+   * `ui/hud.ts` overwrites its `textContent` outright on every score change — a duration sharing
+   * that node would be wiped by the first update. Same reasoning as splitting a stat's label and
+   * separator below.
+   */
+  const value = el('p', 'card__value');
+
+  const number = el('span', 'card__value-number', '0');
+  number.dataset['hook'] = 'score-value';
+
+  /* 值為空字串時整個節點不佔位（CSS `:empty`），所以開局前不會留下一段空白。 */
+  const duration = el('span', 'card__value-note');
+  duration.dataset['hook'] = 'duration';
+
+  appendChildren(value, number, duration);
 
   const stats = el('dl', 'card__stats');
   for (const [labelKey, hookName] of [

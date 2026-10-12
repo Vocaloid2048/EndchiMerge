@@ -20,6 +20,7 @@ export const yue: Messages = {
   'label.score': '分數',
   'label.bestTry': '最高紀錄',
   'label.merged': '合成次數',
+  'label.duration': '時長',
   'label.next': '下一隻',
   'label.combo': 'COMBO',
   'label.skillList': '技能表',

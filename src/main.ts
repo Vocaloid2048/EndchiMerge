@@ -244,6 +244,8 @@ async function bootstrap(): Promise<void> {
     hud.update({
       nextLevelId: session.upcomingLevelId,
       score: session.score,
+      /* 這一局的時長顯示在分數右邊（使用者定案）。 */
+      durationMs: session.elapsed,
       mergedCount: session.mergedCount,
       /* COMBO 卡：本次投放的合成次數（大數字）＋ 合共得分與倍率（第二行）。 */
       comboCount: session.comboCount,
@@ -264,13 +266,15 @@ async function bootstrap(): Promise<void> {
   let runStartBest = progress.highScore;
 
   /*
-   * 榜單資料層（現階段為本地實作）。UI 只依賴 `LeaderboardSource` 介面 —— 日後接真後端
-   * （使用者定案：Docker 的 Postgres container，或 Vercel 支援的後端＋微資料庫；騰訊雲再後）
-   * 時只要換掉這一行，排行榜彈窗與其餘 UI 都不必改。
+   * 榜單資料層（現階段為本地實作）。UI 只依賴 `LeaderboardSource` 介面 —— 日後接真後端時只要
+   * 換掉這一行，排行榜彈窗與其餘 UI 都不必改。後端定案（使用者，2026-10-12）：**Vercel
+   * Functions ＋ 任何一個 Postgres**，兩邊只以 `DATABASE_URL` 相連，所以資料庫要放雲端託管
+   * （Neon／Supabase）或自架的 NAS 都行，改的是連線字串而不是程式碼。
    * The leaderboard data layer (local today). The UI depends only on the `LeaderboardSource`
-   * interface, so wiring the real backend later (the user's plan: a Docker Postgres container, or
-   * Vercel's backend plus a micro database; Tencent Cloud after that) replaces this one line and
-   * leaves the popup and the rest of the UI untouched.
+   * interface, so wiring the real backend replaces this one line and leaves the popup and the rest
+   * of the UI untouched. The backend decision (the user, 2026-10-12) is **Vercel Functions plus any
+   * Postgres**, joined by nothing but `DATABASE_URL`, so the database can be managed (Neon,
+   * Supabase) or self-hosted on the NAS — the connection string changes, the code does not.
    */
   const leaderboardSource = createLocalLeaderboard({ store: localStore });
 
@@ -302,6 +306,14 @@ async function bootstrap(): Promise<void> {
       score: session.score,
       maxCombo: session.maxCombo,
       merges: session.mergedCount,
+      /*
+       * 時長跟著分數走（見 `LeaderboardEntry.durationMs`）：這裡每幀都在記，所以傳的是「目前為
+       * 止的時間」，最後留下的自然是**創下最高分那一刻**的時間。
+       * The duration follows the score (see `LeaderboardEntry.durationMs`): this records every
+       * frame, so what it passes is "the time so far", and what survives is the time at the moment
+       * the best score was reached.
+       */
+      durationMs: session.elapsed,
     });
   };
 
@@ -522,6 +534,8 @@ async function bootstrap(): Promise<void> {
         syncRun();
         gameOver?.show({
           score: current.score,
+          /* 這一局的時長，顯示在分數右邊那一格。 */
+          durationMs: current.elapsed,
           merged: current.mergedCount,
           /* 到結束這一刻最高分早已被即時記錄，直接讀現值即可。 */
           best: progress.highScore,

@@ -94,6 +94,28 @@
 }
 
 /*
+ * 分數旁邊的時長（使用者定案）。它與大數字同一行、垂直置中（父層已是 flex），但字級與顏色都
+ * 降一級：這是一份**參考**資訊，不該跟分數搶同一個視覺層級。左邊留 14px 讓兩者不會黏在一起。
+ * `.card__value` 的高度（85px）由大數字決定，所以縮小字級不會擠動版面。
+ * 空字串時用 `:empty` 收起 —— 開局前 HUD 尚未拿到時長，不該留一段空白。
+ * The duration beside the score (the user's decision). It shares the line with the big number and is
+ * centred vertically (the parent is already a flex box), but drops one level in both size and
+ * colour: it is **reference** information and must not compete with the score. The 14px left margin
+ * keeps the two from touching. The container's height (85px) is set by the big number, so the
+ * smaller type cannot reflow the card, and `:empty` collapses the note before the HUD has a value.
+ */
+.card__value-note {
+  margin-left: 14px;
+  color: var(--color-fg-muted);
+  font-size: 28px;
+  font-variant-numeric: tabular-nums;
+}
+
+.card__value-note:empty {
+  display: none;
+}
+
+/*
  * 分隔線。設計稿是純白 1px（`1408:2247`）；這裡降到 40% 白，因為設計稿畫在純色底上，
  * 而實際背景是有紋理的漸層圖 —— 全白細線在漸層上會比在設計稿上搶眼得多。
  * The mock draws a solid white hairline; it is dropped to 40% because the mock was drawn

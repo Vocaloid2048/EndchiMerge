@@ -16,9 +16,12 @@
 
 import { i18nAriaLabel, i18nText, type MessageKey } from '../i18n';
 import { appendChildren, el } from './dom';
+import { formatDuration } from './duration';
 
 export interface GameOverSummary {
   score: number;
+  /** 這一局的遊玩時長（模擬時間毫秒）。顯示在分數**右邊那一格**。 */
+  durationMs: number;
   merged: number;
   /** 更新後的歷史最高分。 */
   best: number;
@@ -65,11 +68,19 @@ export function createGameOver(options: GameOverOptions): GameOverView {
   badge.hidden = true;
 
   const score = statRow('label.score');
+  /*
+   * 時長**緊跟在分數右邊**（使用者定案：展示在分數旁邊供參考）。它是這一局的事實，與分數
+   * 同一組；放在分數與合成次數之間，讀起來就是「這一局拿了幾分、打了多久、合成幾次」。
+   * The duration sits **immediately to the right of the score** (the user's decision: show it beside
+   * the score for reference). It is a fact about this run and belongs with the score, so it goes
+   * between the score and the merge count and reads as "this run scored X, took Y, merged Z times".
+   */
+  const duration = statRow('label.duration');
   const merged = statRow('label.merged');
   const best = statRow('label.best');
 
   const stats = el('dl', 'game-over__stats');
-  appendChildren(stats, score.root, merged.root, best.root);
+  appendChildren(stats, score.root, duration.root, merged.root, best.root);
 
   const restart = el('button', 'game-over__restart');
   restart.type = 'button';
@@ -97,6 +108,7 @@ export function createGameOver(options: GameOverOptions): GameOverView {
 
     show(summary: GameOverSummary): void {
       score.value.textContent = String(summary.score);
+      duration.value.textContent = formatDuration(summary.durationMs);
       merged.value.textContent = String(summary.merged);
       best.value.textContent = String(summary.best);
       badge.hidden = !summary.isNewBest;

@@ -27,6 +27,7 @@ export const ja: Messages = {
   'label.score': 'スコア',
   'label.bestTry': 'ハイスコア',
   'label.merged': '合成回数',
+  'label.duration': 'タイム',
   'label.next': 'つぎ',
   'label.combo': 'コンボ',
   'label.skillList': 'スキル一覧',

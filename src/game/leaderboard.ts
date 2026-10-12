@@ -106,6 +106,25 @@ export interface LeaderboardEntry {
   name: string;
   /** 歷史最高分。 */
   score: number;
+  /**
+   * 創下上面那個最高分的**那一局**打了多久（模擬時間毫秒）。
+   * How long **the run that set the score above** lasted, in simulated milliseconds.
+   *
+   * 它與 `maxCombo`／`merges` **不是同一種欄位**：那兩個是各自獨立取最大值（可能來自不同的
+   * 三局），而這個是綁在分數上的 —— 分數刷新時它跟著換，分數沒刷新時它不動。理由是它顯示在
+   * 分數旁邊（使用者定案），旁邊那一格只有在「描述這個分數」時才有意義；如果它也可以來自
+   * 別的一局，那兩格數字就會互相矛盾。
+   * It is **not the same kind of field** as `maxCombo`/`merges`: those are independent maxima that
+   * may come from three different runs, whereas this one is bound to the score — it is replaced
+   * when the score improves and left alone when it does not. The reason is that it is displayed
+   * beside the score (the user's decision), and a value in that slot only means anything if it
+   * describes *that* score; if it could come from another run the two numbers would contradict
+   * each other.
+   *
+   * 舊存檔沒有這個欄位，讀不到時補 0（`0:00` ＝ 未知，不是壞資料）。
+   * Saves written before this field existed parse to 0 — `0:00` reads as "unknown", not as damage.
+   */
+  durationMs: number;
   /** 歷史最高連擊（可能來自另一局）。 */
   maxCombo: number;
   /** 歷史最高單局合成次數（可能來自另一局）。 */
@@ -117,6 +136,13 @@ export interface LeaderboardEntry {
 /** 目前的成績，併入本機紀錄時用。 */
 export interface LeaderboardRun {
   score: number;
+  /**
+   * 這一局的遊玩時長（模擬時間毫秒）。只在**這一局刷新最高分**時才會被寫進紀錄（見
+   * `LeaderboardEntry.durationMs`）。未提供時沿用舊值。
+   * This run's length in simulated milliseconds. It is written into the record **only when this run
+   * improves the best score** (see `LeaderboardEntry.durationMs`); when omitted the old value stays.
+   */
+  durationMs?: number;
   maxCombo: number;
   merges: number;
   /** 覆寫時間戳；未提供時用時鐘。測試用。 */
@@ -275,6 +301,8 @@ interface PlayerProfile {
   playerId: string;
   name: string;
   score: number;
+  /** 最高分那一局的時長；與 `score` 綁在一起（見 `LeaderboardEntry.durationMs`）。 */
+  durationMs: number;
   maxCombo: number;
   merges: number;
   at: number;
@@ -334,7 +362,8 @@ function parseEntry(raw: unknown): LeaderboardEntry | null {
 
   const name = typeof candidate['name'] === 'string' ? candidate['name'] : '';
 
-  return { id, name, score, maxCombo, merges, at };
+  /* 時長是後加的欄位：舊紀錄讀不到就補 0，而不是讓整筆紀錄失效。 */
+  return { id, name, score, durationMs: toCount(candidate['durationMs']) ?? 0, maxCombo, merges, at };
 }
 
 /** 解析紀錄陣列；壞掉一律當作空的。 */
@@ -371,6 +400,7 @@ function parseProfile(raw: unknown): PlayerProfile | null {
     playerId,
     name: typeof candidate['name'] === 'string' ? candidate['name'] : '',
     score,
+    durationMs: toCount(candidate['durationMs']) ?? 0,
     maxCombo,
     merges,
     at,
@@ -394,6 +424,7 @@ function emptyProfile(playerId: string, at: number): PlayerProfile {
     playerId,
     name: '',
     score: 0,
+    durationMs: 0,
     maxCombo: 0,
     merges: 0,
     at,
@@ -422,10 +453,21 @@ function collapseLegacy(rows: readonly LeaderboardEntry[], playerId: string): Le
   const newestName =
     [...rows].sort((a, b) => b.at - a.at).find((row) => row.name !== '')?.name ?? '';
 
+  /*
+   * 時長取自「**創下最高分那一局**」，不是取最長的一局：它與分數綁在一起（見
+   * `LeaderboardEntry.durationMs`），所以折疊出來的這一筆也得讓兩者同源。同分時取較新的那一
+   * 筆，與名字一樣偏新。
+   * The duration comes from **the run that scored highest**, not from the longest run: it is bound
+   * to the score (see `LeaderboardEntry.durationMs`), so the folded row has to keep the two in
+   * agreement. Ties resolve to the newer row, the same bias as the name.
+   */
+  const best = [...rows].sort((a, b) => b.score - a.score || b.at - a.at)[0]!;
+
   return {
     id: playerId,
     name: newestName,
-    score: Math.max(...rows.map((row) => row.score)),
+    score: best.score,
+    durationMs: best.durationMs,
     maxCombo: Math.max(...rows.map((row) => row.maxCombo)),
     merges: Math.max(...rows.map((row) => row.merges)),
     at: Math.max(...rows.map((row) => row.at)),
@@ -438,6 +480,7 @@ function profileFromEntry(entry: LeaderboardEntry, playerId: string): PlayerProf
     playerId,
     name: entry.name,
     score: entry.score,
+    durationMs: entry.durationMs,
     maxCombo: entry.maxCombo,
     merges: entry.merges,
     at: entry.at,
@@ -635,6 +678,7 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
       id: profile.playerId,
       name: displayName,
       score: profile.score,
+      durationMs: profile.durationMs,
       maxCombo: profile.maxCombo,
       merges: profile.merges,
       at: profile.at,
@@ -760,9 +804,24 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
         return false;
       }
 
+      /*
+       * 時長只在**分數真的刷新**時才換（見 `LeaderboardEntry.durationMs`）。所以一局「連擊破紀錄
+       * 但分數沒破」的成績會更新 `maxCombo`，卻**不會**動時長 —— 那格要一直描述它旁邊那個分數，
+       * 拿一局低分但打得久的時間去蓋掉它，兩格就自相矛盾了。`run.durationMs` 未提供時沿用舊值，
+       * 讓「只更新連擊」這種呼叫不必自己把舊值撈出來傳進來。
+       * The duration is replaced **only when the score actually improves** (see
+       * `LeaderboardEntry.durationMs`). A run that beats the combo record without beating the score
+       * therefore updates `maxCombo` and leaves the duration alone: that slot has to keep describing
+       * the score next to it, and overwriting it with a longer but lower-scoring run would make the
+       * two contradict each other. When `run.durationMs` is omitted the old value stands, so a
+       * combo-only update need not fetch and pass it back in.
+       */
+      const beatsScore = score > profile.score;
+
       profile = {
         ...profile,
         score: Math.max(profile.score, score),
+        durationMs: beatsScore ? (toCount(run.durationMs) ?? profile.durationMs) : profile.durationMs,
         maxCombo: Math.max(profile.maxCombo, maxCombo),
         merges: Math.max(profile.merges, merges),
         at: toCount(run.at) ?? now(),

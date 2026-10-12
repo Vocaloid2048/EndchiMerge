@@ -29,6 +29,7 @@ export const en: Messages = {
   'label.score': 'SCORE',
   'label.bestTry': 'BEST TRY',
   'label.merged': 'MERGED',
+  'label.duration': 'TIME',
   'label.next': 'NEXT',
   'label.combo': 'COMBO',
   'label.skillList': 'SKILL LIST',

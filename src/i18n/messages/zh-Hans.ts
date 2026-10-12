@@ -17,6 +17,7 @@ export const zhHans: Messages = {
   'label.score': '分数',
   'label.bestTry': '最高纪录',
   'label.merged': '合成次数',
+  'label.duration': '时长',
   'label.next': '下一颗',
   'label.combo': '连击',
   'label.skillList': '技能列表',
