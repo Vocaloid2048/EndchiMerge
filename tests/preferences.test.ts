@@ -12,10 +12,10 @@
 import { describe, expect, it } from 'vitest';
 import { createPreferencesStore } from '../src/game/preferences';
 import { isLocale } from '../src/i18n/locale';
-import type { ProgressStorage } from '../src/game/progress';
+import type { StorageBackend } from '../src/game/localStore';
 
 /** 記憶體版儲存體；`seed` 用來偽造壞掉的存檔。 */
-class FakeStorage implements ProgressStorage {
+class FakeStorage implements StorageBackend {
   private readonly map = new Map<string, string>();
   failOnWrite = false;
 

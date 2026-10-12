@@ -309,6 +309,13 @@ export const STORAGE_KEYS = {
   playerName: `${STORAGE_PREFIX}:player-name`,
   shareScore: `${STORAGE_PREFIX}:share-score`,
   publishPrompt: `${STORAGE_PREFIX}:publish-prompt`,
+  /**
+   * 本地變更的版本計數（`{ revision, uploaded }`），由 `game/localStore.ts` 單獨保管。
+   * **它不是要上載的資料，是「有沒有東西要上載」的答案。**
+   * The local revision counter (`{ revision, uploaded }`), owned by `game/localStore.ts`. It is
+   * **not uploaded data — it is the answer to "is there anything to upload"**.
+   */
+  revision: `${STORAGE_PREFIX}:revision`,
 } as const;
 
 /** 版面斷點（像素）。低於 tablet 視為手機，低於 desktop 視為平板。 */

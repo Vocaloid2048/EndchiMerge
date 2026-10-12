@@ -9,10 +9,11 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { createProgressStore, type ProgressStorage } from '../src/game/progress';
+import { createProgressStore } from '../src/game/progress';
+import type { StorageBackend } from '../src/game/localStore';
 
 /** 記憶體版的儲存體；可設定在寫入時拋錯，模擬無痕模式。 */
-class FakeStorage implements ProgressStorage {
+class FakeStorage implements StorageBackend {
   private readonly map = new Map<string, string>();
   failOnWrite = false;
 

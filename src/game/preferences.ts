@@ -29,7 +29,7 @@
 
 import { STORAGE_KEYS } from '../core/constants';
 import { detectBrowserLocale, isLocale, type Locale } from '../i18n/locale';
-import type { ProgressStorage } from './progress';
+import { createLocalStore, type LocalStore, type StorageBackend } from './localStore';
 
 /** 偏好的完整內容。 */
 export interface Preferences {
@@ -41,8 +41,15 @@ export interface Preferences {
 }
 
 export interface PreferencesOptions {
-  /** 注入儲存體；未提供時用 `localStorage`，不可用時退回記憶體（不持久化）。 */
-  storage?: ProgressStorage | null;
+  /**
+   * 共用的本地儲存層。偏好**不在同步名單裡**（見 `localStore.ts`），所以這裡的寫入不會推進
+   * `revision`、也不會觸發上載。
+   * The shared local store. Preferences are **not on the sync list** (see `localStore.ts`), so
+   * writes here neither advance `revision` nor trigger an upload.
+   */
+  store?: LocalStore;
+  /** 自行注入儲存體；未提供 `store` 時才用（測試用）。 */
+  storage?: StorageBackend | null;
   /** 覆寫儲存鍵；測試用。 */
   key?: string;
   /**
@@ -62,24 +69,6 @@ export interface PreferencesStore {
   setEndless(on: boolean): void;
   /** 訂閱變更；回傳取消訂閱的函式。 */
   subscribe(listener: () => void): () => void;
-}
-
-/** 讀一個鍵；儲存體拋錯時視為沒有值。 */
-function readItem(storage: ProgressStorage, key: string): string | null {
-  try {
-    return storage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-/** 寫一個鍵；配額爆掉或無痕模式擋寫時不應讓遊戲崩掉，因此吞掉錯誤。 */
-function writeItem(storage: ProgressStorage, key: string, value: string): void {
-  try {
-    storage.setItem(key, value);
-  } catch {
-    /* 寫不進去只代表這次的偏好不會保存，遊戲本身不受影響。 */
-  }
 }
 
 function toBool(value: unknown): boolean {
@@ -110,31 +99,15 @@ function parsePreferences(text: string | null, fallbackLocale: Locale): Preferen
   }
 }
 
-/** 取得預設儲存體；瀏覽器端不可用時回傳 null。 */
-function defaultStorage(): ProgressStorage | null {
-  try {
-    return typeof localStorage === 'undefined' ? null : localStorage;
-  } catch {
-    return null;
-  }
-}
-
 export function createPreferencesStore(options: PreferencesOptions = {}): PreferencesStore {
-  const storage = options.storage === undefined ? defaultStorage() : options.storage;
+  /* 偏好是本機設定，一個鍵都不同步；`syncedKeys: []` 是明示而不是預設值巧合。 */
+  const local =
+    options.store ?? createLocalStore({ storage: options.storage, syncedKeys: [] });
   const key = options.key ?? STORAGE_KEYS.preferences;
   const fallbackLocale = options.initialLocale ?? detectBrowserLocale();
 
-  const initial = storage === null
-    ? { locale: fallbackLocale, rulesEnabled: false, endless: false }
-    : parsePreferences(readItem(storage, key), fallbackLocale);
-
-  let state: Preferences = initial;
+  let state: Preferences = parsePreferences(local.read(key), fallbackLocale);
   const listeners = new Set<() => void>();
-
-  const persist = (): void => {
-    if (storage === null) return;
-    writeItem(storage, key, JSON.stringify(state));
-  };
 
   const notify = (): void => {
     for (const listener of listeners) listener();
@@ -151,7 +124,7 @@ export function createPreferencesStore(options: PreferencesOptions = {}): Prefer
     }
 
     state = next;
-    persist();
+    local.writeJson(key, state);
     notify();
   };
 

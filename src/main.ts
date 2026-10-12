@@ -5,6 +5,7 @@ import { resolveLocalizedName } from './core/localizedName';
 import type { AllConfig } from './core/types';
 import { FrameLoop } from './game/loop';
 import { createLocalLeaderboard, type LeaderboardSource } from './game/leaderboard';
+import { createLocalStore } from './game/localStore';
 import { createPreferencesStore, type PreferencesStore } from './game/preferences';
 import { createProgressStore, type ProgressStore } from './game/progress';
 import { GameSession } from './game/session';
@@ -83,6 +84,16 @@ async function bootstrap(): Promise<void> {
   }
 
   /*
+   * 本地儲存層**只建一次**，三個模組共用（M7-3）。共用才有意義：`revision` 是「有沒有東西
+   * 要上載」的單一答案，各建一個就等於各數一份，而解鎖進度與排行榜偏偏是兩份資料。
+   * The local store is built **once** and shared by all three modules (M7-3). Sharing is the whole
+   * point: `revision` is the single answer to "is there anything to upload", and building one per
+   * module would count separately — while unlock progress and the leaderboard are two different
+   * pieces of it.
+   */
+  const localStore = createLocalStore();
+
+  /*
    * 偏好要**在版面之前**讀：版面建立時就會用 `i18nText` 把每個標籤寫成當下語系的字，所以
    * 語系必須先確定。存檔有值就以存檔為準，沒有則跟隨裝置／瀏覽器語言（見
    * `game/preferences.ts`）。
@@ -90,7 +101,7 @@ async function bootstrap(): Promise<void> {
    * `i18nText` at build time, so the locale has to be settled first. A saved value wins;
    * otherwise the device/browser language decides (see `game/preferences.ts`).
    */
-  const preferences = createPreferencesStore();
+  const preferences = createPreferencesStore({ store: localStore });
   i18n.setLocale(preferences.locale);
   i18n.setDocumentLang();
 
@@ -159,7 +170,7 @@ async function bootstrap(): Promise<void> {
    * lowest id) is always unlocked; without it nothing could ever be dropped.
    */
   const baselineId = Math.min(...config.levels.levels.map((level) => level.id));
-  const progress = createProgressStore({ baseline: [baselineId] });
+  const progress = createProgressStore({ baseline: [baselineId], store: localStore });
 
   /* 名冊在下方才建立，但解鎖事件可能在建立之前就觸發；用可變參考承接。 */
   let meltingList: MeltingList | null = null;
@@ -261,7 +272,7 @@ async function bootstrap(): Promise<void> {
    * Vercel's backend plus a micro database; Tencent Cloud after that) replaces this one line and
    * leaves the popup and the rest of the UI untouched.
    */
-  const leaderboardSource = createLocalLeaderboard();
+  const leaderboardSource = createLocalLeaderboard({ store: localStore });
 
   /**
    * 把**目前這一局**的成績併入本機紀錄。每幀呼叫。

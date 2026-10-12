@@ -24,7 +24,7 @@ import { describe, expect, it } from 'vitest';
 import { seal } from '../src/core/integrity';
 import { createLocalLeaderboard, LEADERBOARD_LIMIT } from '../src/game/leaderboard';
 import type { LeaderboardEntry } from '../src/game/leaderboard';
-import type { ProgressStorage } from '../src/game/progress';
+import type { StorageBackend } from '../src/game/localStore';
 import {
   NAME_MAX_UNITS,
   nameUnits,
@@ -36,7 +36,7 @@ import {
 const TEST_SALT = 'test-salt';
 
 /** 記憶體版的儲存體；可設定在寫入時拋錯，模擬無痕模式。 */
-class FakeStorage implements ProgressStorage {
+class FakeStorage implements StorageBackend {
   private readonly map = new Map<string, string>();
   failOnWrite = false;
 
