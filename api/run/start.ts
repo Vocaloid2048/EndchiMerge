@@ -9,6 +9,6 @@
  */
 
 import { handleRunStart } from '../_lib/handlers';
-import { endpointOf } from '../_lib/runtime';
+import { vercelEndpoint } from '../_lib/adapters/vercel';
 
-export default endpointOf(handleRunStart);
+export default vercelEndpoint(handleRunStart);

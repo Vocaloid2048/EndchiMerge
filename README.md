@@ -168,12 +168,15 @@ EndchiMerge
 │  ├─backend.md                 # 後端：端點、環境變數、資料庫放哪裡、部署
 │  ├─CHANGELOG.md               # 各里程碑的變更紀錄
 │  └─design-main-screen.jpg     # 主畫面設計稿
-├─api                           # Vercel Functions（M9 後端）
+├─api                           # Vercel Functions（M9 後端；平台無關的核心可移植到 EdgeOne）
 │  ├─run/start.ts               # POST /api/run/start — 開局、頒 T2 憑證
 │  ├─score.ts                   # POST /api/score — 提交成績
 │  ├─leaderboard.ts             # GET  /api/leaderboard — 取榜
+│  ├─health.ts                  # GET  /api/health — 真的問一次資料庫
 │  └─_lib                       # 處理器、憑證、上界、儲存層、接收紀錄、外殼
-├─schema.sql                    # 後端四張表（任何 Postgres 皆可）
+│     ├─adapters/               # 接縫一：平台（Vercel 的 req/res、Web 的 Request/Response）
+│     └─db/                     # 接縫二：方言（Postgres／MySQL）＋ 驅動 ＋ Binder
+├─schema.sql                    # 後端四張表（Postgres 版；方言差異見 docs/backend.md §5）
 ├─vercel.json                   # 建置設定與函式逾時
 ├─.env.example                  # 環境變數的鍵名與說明（不放值）
 ├─public                        # 原樣 serve，不經打包器

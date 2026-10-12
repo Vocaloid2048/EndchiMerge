@@ -10,6 +10,6 @@
  */
 
 import { handleScore } from './_lib/handlers';
-import { endpointOf } from './_lib/runtime';
+import { vercelEndpoint } from './_lib/adapters/vercel';
 
-export default endpointOf(handleScore);
+export default vercelEndpoint(handleScore);

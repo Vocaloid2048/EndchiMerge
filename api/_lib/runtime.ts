@@ -15,37 +15,72 @@
  * core handler and collapse unexpected exceptions into a 500, write the receive log (IP plus
  * whitelisted headers) — **including for 4xx/5xx responses**, since rejected requests are precisely
  * what that table is for — and add CORS headers, only when `ALLOWED_ORIGIN` is configured.
+ *
+ * ## 這個檔案**不知道**自己在哪個平台上跑 / This file does not know its platform
+ *
+ * 它只回一個 `Handler`（`ApiRequest` → `ApiResponse`）。接上 Vercel 是
+ * `adapters/vercel.ts`，接上 EdgeOne 是 `adapters/fetch.ts` —— 端點檔案選一個，這裡不用改。
+ * It only returns a `Handler` (`ApiRequest` → `ApiResponse`). Wiring it to Vercel is
+ * `adapters/vercel.ts` and to EdgeOne is `adapters/fetch.ts`; the endpoint file picks one and nothing
+ * here changes.
  */
 
+import { connectionNotesFor, createStore } from './db';
+import type { Driver } from './db/types';
 import { loadConfig, type Config } from './env';
 import type { CoreHandler, Deps } from './handlers';
-import { createVercelHandler, fail, type ApiRequest, type ApiResponse, type Handler } from './http';
-import { PgStore } from './pgStore';
+import { fail, type ApiRequest, type ApiResponse, type Handler } from './http';
 import { buildRequestRow, clientIp } from './requests';
 
 /**
  * 模組層級的相依快取。
  * Dependency cache at module scope.
  *
- * Vercel 會重用同一個實例來處理多個請求，所以設定與連線池只該建一次。快取住在模組層級（而不是
- * 在處理器裡面 new），是為了讓同一個實例的請求共用一個連線池 —— 每個請求一個池子的話，很快就會
- * 把資料庫的連線數用光。
- * Vercel reuses one instance for several requests, so the config and the pool are built once. The cache
- * lives at module scope rather than inside the handler so requests on one instance share a single pool:
- * a pool per request exhausts the database's connection limit quickly.
+ * 執行環境會重用同一個實例來處理多個請求（Vercel 與 EdgeOne 皆然），所以設定與連線池只該建一次。
+ * 快取住在模組層級（而不是在處理器裡面 new），是為了讓同一個實例的請求共用一個連線池 —— 每個請求
+ * 一個池子的話，很快就會把資料庫的連線數用光。
+ * The runtime reuses one instance for several requests (Vercel and EdgeOne alike), so the config and
+ * the pool are built once. The cache lives at module scope rather than inside the handler so requests
+ * on one instance share a single pool: a pool per request exhausts the database's connection limit
+ * quickly.
  */
 let deps: Deps | null = null;
+
+/** 目前這個實例的驅動；`closeDependencies` 與測試要用。 */
+let activeDriver: Driver | null = null;
 
 function dependencies(): Deps {
   if (deps === null) {
     const config = loadConfig();
-    deps = { config, store: new PgStore(config), now: () => Date.now() };
+
+    /*
+     * 連線字串的建議只印一次（相依只建一次）。這些**不是**錯誤：它們不阻止後端啟動，只是把「之後
+     * 會出事」變成現在就看得到的一行字。
+     * Connection-string advice, printed once (the dependency is built once). These are **not** errors:
+     * they do not stop the backend, they just turn "this will hurt later" into a line you can see now.
+     */
+    for (const note of connectionNotesFor(config.dbDialect, config.databaseUrl)) {
+      console.warn(`[api] ${note}`);
+    }
+
+    const { store, driver } = createStore(config);
+    activeDriver = driver;
+    deps = { config, store, now: () => Date.now() };
   }
 
   return deps;
 }
 
-/** 測試或本機工具用：換一組相依（或清掉快取）。 */
+/** 測試或本機工具用：換一組相依（或清掉快取與連線池）。 */
+export async function closeDependencies(): Promise<void> {
+  const driver = activeDriver;
+  activeDriver = null;
+  deps = null;
+
+  if (driver !== null) await driver.close();
+}
+
+/** 同步版本：只換相依，不管連線池（測試用）。 */
 export function setDependencies(next: Deps | null): void {
   deps = next;
 }
@@ -56,11 +91,11 @@ function corsHeaders(request: ApiRequest, config: Config): Record<string, string
   if (origin === undefined) return {};
 
   /*
-   * 空清單 ＝ 只接受同源（正式部署的預設：前端與 API 都在 Vercel 上）。此時**不回應** CORS 標頭，
+   * 空清單 ＝ 只接受同源（正式部署的預設：前端與 API 都在同一邊）。此時**不回應** CORS 標頭，
    * 瀏覽器就會自己擋下跨來源的讀取 —— 這是預設安全的那一邊。
-   * An empty list means same-origin only, which is the production default (front end and API both on
-   * Vercel). No CORS header is emitted, so the browser blocks cross-origin reads by itself — the safe
-   * side of the default.
+   * An empty list means same-origin only, the production default (front end and API on the same side).
+   * No CORS header is emitted, so the browser blocks cross-origin reads by itself — the safe side of
+   * the default.
    */
   if (config.allowedOrigins.length === 0) return {};
 
@@ -117,7 +152,7 @@ async function logRequest(
   }
 }
 
-/** 一個可部署的端點。 */
+/** 一個可部署的端點；**平台無關**（見檔頭）。 */
 export function endpoint(core: CoreHandler): Handler {
   return async (request: ApiRequest): Promise<ApiResponse> => {
     const current = dependencies();
@@ -148,9 +183,4 @@ export function endpoint(core: CoreHandler): Handler {
       headers: { ...corsHeaders(request, current.config), ...(handled.response.headers ?? {}) },
     };
   };
-}
-
-/** 端點檔案的預設匯出：`export default endpointOf(handleScore)`。 */
-export function endpointOf(core: CoreHandler) {
-  return createVercelHandler(endpoint(core));
 }

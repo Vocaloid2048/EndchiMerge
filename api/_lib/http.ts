@@ -2,13 +2,24 @@
  * 端點用的最小 HTTP 抽象。
  * The minimal HTTP abstraction the endpoints are written against.
  *
- * 這裡刻意**不依賴 `@vercel/node`**：處理器只認得 `ApiRequest` → `ApiResponse` 這個形狀，Vercel
- * 只是其中一個轉接頭（`createVercelHandler`）。好處有三個：單元測試可以直接餵一個物件呼叫處理
- * 器（不必起 HTTP、不必有 Vercel CLI）、換執行環境只換轉接頭、而型別檢查與部署平台解耦。
- * This deliberately **does not depend on `@vercel/node`**: a handler only knows the `ApiRequest` →
- * `ApiResponse` shape, and Vercel is one adapter among possible others (`createVercelHandler`). Three
- * benefits: tests call a handler with a plain object (no HTTP, no Vercel CLI), swapping runtimes
+ * 這裡刻意**不依賴任何平台**：處理器只認得 `ApiRequest` → `ApiResponse` 這個形狀，而 Vercel、
+ * EdgeOne、本機測試各自只是一個**轉接頭**（見 `adapters/`）。好處有三個：單元測試可以直接餵一個
+ * 物件呼叫處理器（不必起 HTTP、不必有平台 CLI）、換執行環境只換轉接頭、而型別檢查與部署平台解耦。
+ * This deliberately **depends on no platform**: a handler only knows the `ApiRequest` → `ApiResponse`
+ * shape, and Vercel, EdgeOne and a local test are each just an **adapter** (see `adapters/`). Three
+ * benefits: tests call a handler with a plain object (no HTTP, no platform CLI), swapping runtimes
  * swaps one adapter, and type-checking is decoupled from the deploy platform.
+ *
+ * ## 為什麼要分成兩個形狀而不是直接用 `Request`／`Response`
+ * ## Why two shapes instead of using `Request` / `Response` directly
+ *
+ * 因為**不是所有平台都用 Web 標準**：Vercel 的 Node 函式給的是 `req`／`res` 這種 Node 物件。若核心
+ * 直接吃 `Request`，Vercel 這邊就得先「反過來」把 Node 物件包成 `Request` —— 多一層轉換、多一處能
+ * 出錯的地方。核心吃自己的形狀，兩個方向都只是**前向**轉接。
+ * Because **not every platform speaks the Web standard**: a Vercel Node function hands you Node's
+ * `req` / `res`. If the core took a `Request`, the Vercel side would have to wrap Node objects *into*
+ * a `Request` — one more conversion and one more place to get it wrong. The core takes its own shape,
+ * so both directions are forward adapters.
  */
 
 export interface ApiRequest {
@@ -35,6 +46,8 @@ export interface JsonObject {
   readonly [key: string]: unknown;
 }
 
+/* ── 回應 ──────────────────────────────────────────────────────────────────── */
+
 /** 一個成功回應。 */
 export function ok(body: JsonObject, headers?: Record<string, string>): ApiResponse {
   return { status: 200, body, ...(headers === undefined ? {} : { headers }) };
@@ -59,6 +72,8 @@ export function methodNotAllowed(allowed: readonly string[]): ApiResponse {
   };
 }
 
+/* ── 請求正規化（給轉接頭用）/ Request normalisation (used by the adapters) ── */
+
 /** 把 `Headers`-like 的東西正規化成小寫鍵的普通物件；陣列值取第一個。 */
 export function normaliseHeaders(
   raw: Readonly<Record<string, string | string[] | undefined>>,
@@ -73,17 +88,33 @@ export function normaliseHeaders(
   return headers;
 }
 
-/** 從 URL 組出查詢參數；壞 URL 一律當作沒有參數。 */
-function parseQuery(url: string): URLSearchParams {
-  const index = url.indexOf('?');
-  if (index < 0) return new URLSearchParams();
+/**
+ * 把「可能是字串的主體」收斂成值。
+ * Coerce a possibly-string body into a value.
+ *
+ * Vercel 對 JSON 主體會先解析成物件，但其他型別（以及 fetch 那邊讀 `text()` 的結果）還是字串，
+ * 所以在**兩個轉接頭共用的地方**補一次。不是 JSON 就當作沒有主體：端點只收 JSON，形狀不對會在
+ * 欄位驗證那關被擋下。
+ * Vercel parses a JSON body into an object for us, but other content types (and the `text()` result on
+ * the fetch side) are still strings, so this is done once in the **place the two adapters share**.
+ * Anything that is not JSON becomes "no body": the endpoints only accept JSON, and a wrong shape is
+ * caught by field validation.
+ */
+export function coerceBody(raw: unknown): unknown {
+  if (typeof raw !== 'string') return raw ?? null;
+
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
 
   try {
-    return new URLSearchParams(url.slice(index + 1));
+    return JSON.parse(trimmed);
   } catch {
-    return new URLSearchParams();
+    /* 不是 JSON 就當作沒有主體（見上面）。 */
+    return null;
   }
 }
+
+/* ── 欄位讀取 ──────────────────────────────────────────────────────────────── */
 
 /** 讀一個欄位必須是普通物件；否則回 `null`。 */
 export function asObject(value: unknown): JsonObject | null {
@@ -125,79 +156,4 @@ export function readInteger(
   if (value < min || value > max) return null;
 
   return value;
-}
-
-/* ── Vercel 轉接頭 ───────────────────────────────────────────────────────────
- * 只用結構型別描述 Vercel 的 req/res，所以不需要 `@vercel/node` 這個相依：我們用到的欄位就是
- * 這幾個，而少一個相依就是少一份部署時要對齊的版本。
- * Vercel's req/res are described structurally only, so `@vercel/node` is not a dependency: these are
- * the fields we use, and one fewer dependency is one fewer version to line up at deploy time.
- */
-
-interface VercelRequestLike {
-  readonly method?: string;
-  readonly url?: string;
-  readonly headers: Readonly<Record<string, string | string[] | undefined>>;
-  readonly body?: unknown;
-  readonly socket?: { readonly remoteAddress?: string };
-}
-
-interface VercelResponseLike {
-  statusCode: number;
-  setHeader(name: string, value: string): void;
-  end(chunk?: string): void;
-}
-
-/** Vercel 對 JSON 主體會先解析成物件；其他型別可能還是字串，這裡補一次。 */
-function normaliseBody(raw: unknown): unknown {
-  if (typeof raw !== 'string') return raw ?? null;
-
-  const trimmed = raw.trim();
-  if (trimmed === '') return null;
-
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    /* 不是 JSON 就當作沒有主體：端點只收 JSON，形狀不對會在欄位驗證那關被擋下。 */
-    return null;
-  }
-}
-
-/** 把一個處理器接成 Vercel 的 Node 函式。 */
-export function createVercelHandler(handler: Handler) {
-  return async function vercelHandler(req: VercelRequestLike, res: VercelResponseLike) {
-    const url = req.url ?? '';
-
-    const request: ApiRequest = {
-      method: (req.method ?? 'GET').toUpperCase(),
-      path: url.split('?')[0] ?? '',
-      query: parseQuery(url),
-      headers: normaliseHeaders(req.headers),
-      body: normaliseBody(req.body),
-      remoteAddress: req.socket?.remoteAddress ?? '',
-    };
-
-    let response: ApiResponse;
-
-    try {
-      response = await handler(request);
-    } catch (error) {
-      /*
-       * 未預期的例外一律轉成 500，而且**只把訊息寫進伺服器日誌**。把內部錯誤訊息回給客戶端會
-       * 洩漏實作細節（連線字串、SQL 片段），而且是那種會出現在截圖裡的細節。
-       * An unexpected exception becomes a 500 with the message written **only to the server log**.
-       * Returning internal messages to clients leaks implementation details (connection strings, SQL
-       * fragments) — the kind of detail that ends up in a screenshot.
-       */
-      console.error('[api] unhandled error', error);
-      response = fail(500, 'internal_error', 'internal error');
-    }
-
-    res.statusCode = response.status;
-    for (const [name, value] of Object.entries(response.headers ?? {})) {
-      res.setHeader(name, value);
-    }
-
-    res.end(JSON.stringify(response.body));
-  };
 }

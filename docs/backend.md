@@ -17,38 +17,54 @@
 | `POST` | `/api/run/start`    | 開一局：伺服器鑄一張短期憑證（T2 的關鍵）                                   |
 | `POST` | `/api/score`        | 提交成績：驗憑證 → 驗時間 → 驗合理性 → 寫榜                                |
 | `GET`  | `/api/leaderboard`  | 取榜（`?limit=N`，預設 100、上限 200），附查詢者的自身名次                     |
+| `GET`  | `/api/health`       | 自我檢查：**真的問一次資料庫**，回方言名稱與玩家數                                |
+
+**資料庫支援 Postgres 與 MySQL 兩種方言**，共用同一份業務邏輯 —— 見 §5。
+**The database supports both Postgres and MySQL**, sharing one copy of the business logic — see §5.
 
 **架構不變**（`design.md` §6.1）：local-first。遊玩中只寫本地，破紀錄時非同步推送；開局載入時拉
 伺服器 profile 合併。
 
 > ⚠️ **客戶端尚未接上**。`src/game/leaderboard.ts` 目前仍走**本地**的 `LeaderboardSource`；
-> `sync()` 是早就預留好的接縫（見 §7）。伺服器端已經可以用，但要等客戶端換成 HTTP 實作之後，
+> `sync()` 是早就預留好的接縫（見 §8）。伺服器端已經可以用，但要等客戶端換成 HTTP 實作之後，
 > 榜上才會真的出現別的裝置的成績。
 
 ### 檔案佈局
 
 ```
 api/
-  run/start.ts        薄轉接頭：export default endpointOf(handleRunStart)
-  score.ts            薄轉接頭：export default endpointOf(handleScore)
-  leaderboard.ts      薄轉接頭：export default endpointOf(handleLeaderboard)
+  run/start.ts        端點：export default vercelEndpoint(handleRunStart)
+  score.ts            端點：export default vercelEndpoint(handleScore)
+  leaderboard.ts      端點：export default vercelEndpoint(handleLeaderboard)
+  health.ts           端點：export default vercelEndpoint(handleHealth)
   _lib/
-    env.ts            環境變數 → Config（純函式，啟動時驗完）
-    http.ts           ApiRequest / ApiResponse、欄位讀取、Vercel 轉接
+    handlers.ts       四個端點的核心邏輯（不含平台細節）
+    runtime.ts        外殼：設定、接收紀錄、CORS、500 收斂；**平台無關**
+    http.ts           ApiRequest / ApiResponse / 欄位讀取；**平台無關**
+    adapters/
+      vercel.ts       Node 的 req/res → ApiRequest（＋ vercelEndpoint）
+      fetch.ts        Web 的 Request/Response → ApiRequest（＋ EdgeOne 具名匯出）
+    db/
+      types.ts        Driver：query(sql, params) → { rows, affected }、transaction
+      dialect.ts      **兩個方言之間所有差異的唯一去處** ＋ Binder
+      postgres.ts     pg 驅動 ＋ Postgres 方言
+      mysql.ts        mysql2 驅動 ＋ MySQL 方言
+      index.ts        方言 → 驅動 → 儲存層的組裝點、ensureSchema
+    sqlStore.ts       方言驅動的儲存層（邏輯只寫一次）
+    store.ts          Store 介面 ＋ MemoryStore（測試用）
     tokens.ts         簽章、驗章、指紋、run_id 產生
     limits.ts         上界（從遊戲配置推導）＋ 合理性檢查
     requests.ts       客戶端 IP、標頭白名單、接收紀錄列的組裝
-    store.ts          Store 介面 ＋ MemoryStore（測試用）
-    pgStore.ts        Store 的 Postgres 實作（模組層級連線池）
-    handlers.ts       三個端點的核心邏輯（不含平台細節）
-    runtime.ts        外殼：設定、接收紀錄、CORS、500 收斂
-schema.sql            四張表（任何 Postgres 皆可）
+    env.ts            環境變數 → Config（純函式，啟動時驗完）
+schema.sql            人看的 Postgres 版 schema（與程式的一致性由測試守住，見 §7）
 vercel.json           建置設定與函式逾時
 .env.example          環境變數的鍵名與說明（**只放鍵名，不放值**）
+scripts/migrate.ts    npm run db:migrate —— 建表
 ```
 
 **分層的理由**：端點檔案只匯出一行，所有邏輯住 `_lib`。這樣單元測試可以**不碰資料庫**直接呼叫
-處理器（餵 `MemoryStore` ＋ 注入時鐘），見 `tests/api.test.ts`。
+處理器（餵 `MemoryStore` ＋ 注入時鐘），見 `tests/api.test.ts`。**平台**與**方言**各自只有一個接縫，
+所以要換掉任何一個都只動一個檔案。
 
 ---
 
@@ -110,11 +126,12 @@ T2 的價值在**頒發時刻**：伺服器在開局時記下時間，於是提�
 
 | 變數                     | 必要 | 預設          | 說明                                                     |
 | ---------------------- | -- | ----------- | ------------------------------------------------------ |
-| `DATABASE_URL`         | ✅  | —           | 任何 Postgres。Neon 請用帶 **`-pooler`** 的主機名                  |
+| `DATABASE_URL`         | ✅  | —           | 任何 **Postgres 或 MySQL**。Neon 請用帶 **`-pooler`** 的主機名        |
+| `DB_DIALECT`           |    | 從 URL 推斷     | `postgres` / `mysql`；看不出 scheme 或猜錯時才需要填                 |
 | `RUN_TOKEN_SECRET`     | ✅  | —           | **≥ 32 字元**，短於此會被當成缺漏（短秘密等於沒有秘密）                       |
 | `IP_STORAGE_MODE`      |    | `truncated` | `raw` / `truncated`（IPv4→/24、IPv6→/48）/ `hashed`（帶秘密 HMAC） |
 | `IP_HASH_SECRET`       |    | 退回 token 秘密 | 與前者分開：輪替時機不同                                           |
-| `ALLOWED_ORIGIN`       |    | 空（只同源）      | 前端不在 Vercel 上時必填（例如騰訊 EdgeOne Pages）                     |
+| `ALLOWED_ORIGIN`       |    | 空（只同源）      | 前端不在同一個網域時必填（例如前端在騰訊 EdgeOne Pages）                     |
 | `SUBMISSIONS_PER_HOUR` |    | `20`        | 每裝置每小時提交上限（含被退回的）                                      |
 | `RUNS_PER_HOUR`        |    | `120`       | 每裝置每小時開局上限（防無限鑄造憑證）                                    |
 
@@ -161,55 +178,158 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
 | 選項              | 型態           | 備註                                       |
 | --------------- | ------------ | ---------------------------------------- |
-| **Neon**（推薦）    | Serverless Postgres | 免費層寬鬆、**內建 pooler**、分支／時光回溯；Vercel 原生整合    |
-| **Supabase**    | Postgres ＋ 周邊 | 帶 Auth／Storage／Realtime；這個專案用不到那些，但也不妨礙    |
+| **Neon**（推薦）    | Serverless **Postgres** | 免費層寬鬆、**內建 pooler**、分支／時光回溯；Vercel 原生整合    |
+| **Supabase**    | **Postgres** ＋ 周邊 | 帶 Auth／Storage／Realtime；這個專案用不到那些，但也不妨礙    |
 | **Upstash**     | Redis        | 是 KV 不是 SQL，**不適用**本專案（榜要排序與聚合）           |
 
 從 Marketplace 開一個 Neon，Vercel 會**自動把 `DATABASE_URL` 注入**專案的環境變數，不必手抄。
 所以「在 Vercel 架小型資料庫」的正解是：**在 Vercel 的 Marketplace 開一個 Neon**，而不是找
 Vercel 自家的東西。
 
+> ⚠️ **Neon 是 Postgres，不是 MySQL。** Vercel Marketplace 上的 Neon 與 Supabase 都只提供
+> **PostgreSQL** 協議。所以「Vercel ＋ Neon」與「騰訊免費 MySQL」是**兩個不同的方言**，而那正是
+> 這個後端同時實作兩個方言、並把差異抽成 `Dialect` 的原因（見 §5）。
+> ⚠️ **Neon is Postgres, not MySQL.** Both Neon and Supabase on the Vercel Marketplace speak only
+> **PostgreSQL**. So "Vercel + Neon" and "Tencent's free MySQL" are **two different dialects** — which
+> is exactly why this backend implements both and folds the differences into `Dialect` (see §5).
+
 ### Q3：那到底該選哪個？
 
 | 情境                    | 建議                                                       |
 | --------------------- | -------------------------------------------------------- |
 | **公開站正式部署**           | **Neon**（Marketplace 開，免費層起步）。內建 pooler、無動態 IP 問題、零維運 |
-| **本機開發／測試**           | 本地 Docker 容器或 NAS（見 §5）                                   |
-| **自架版發行（Docker 三容器）** | NAS 上的 Postgres ＋ PgBouncer，`design.md` §6.1 / Q15 的方向      |
+| **騰訊／國內部署**           | 腾讯云 MySQL 免費版或 TDSQL-C（`DB_DIALECT=mysql`），配 EdgeOne Pages Function |
+| **本機開發／測試**           | 本地 Docker 容器或 NAS（見 §6）                                   |
+| **自架版發行（Docker 三容器）** | NAS 上的 Postgres 或 MySQL ＋ 連線池，`design.md` §6.1 / Q15 的方向    |
 
-> 這對應 `design.md` 的 **Q10（DB 選型）**：建議定為 **Neon**，其他 Postgres 保持可換（`pgStore.ts`
-> 刻意只用標準 SQL）。**Q15（託管分工）** 仍未完全收斂，但本後端兩個方向都支援 —— 差別只是
-> `DATABASE_URL`。
+> 這對應 `design.md` 的 **Q10（DB 選型）**：Vercel 走 **Neon**、騰訊走 **MySQL**，兩者都支援。
+> **Q15（託管分工）** 因此更進一步收斂：可移植性現在不只是 「換一個環境變數」，而是「換一個環境變數
+> ＋ 一個轉接頭」。
 
 ---
 
-## 5. 部署到 Vercel
+## 5. 共用程式碼：兩個方言、兩個平台
+
+這一節是整個後端設計的**理由**。同一個後端要跑在四個角落，而它們兩兩不同：
+
+|           | 執行環境                      | 資料庫                                   |
+| --------- | ------------------------- | ------------------------------------- |
+| **Vercel** | Node 函式（`req`/`res`）      | Neon ＝ **Postgres**                   |
+| **EdgeOne** | Web 標準（`Request`/`Response`） | 腾讯云 **MySQL**（免費版／TDSQL-C）           |
+| **自架**     | Node ＋ Docker             | 兩者皆可（`DATABASE_URL` 決定）               |
+
+所以切成**兩個接縫**，各自只有一個檔案要知道差異：
+
+| 接縫 | 位置 | 換掉它要動什麼 |
+| --- | --- | --- |
+| **平台** | `adapters/` | 一個檔案（`vercel.ts` / `fetch.ts`） |
+| **方言** | `db/` | 一個檔案（`postgres.ts` / `mysql.ts`） |
+
+中間的一切 —— `handlers.ts` 的反作弊、`sqlStore.ts` 的榜的邏輯、`requests.ts` 的標頭白名單 —— **一行
+都不用重複**。這不是「順便」：重複的邏輯會漂移，而漂移的症狀是「Vercel 上正常、騰訊上分數算錯」，
+那是最難查的一種 bug。
+
+### 5.1 方言：差異集中在 `Dialect`
+
+| 項目 | Postgres | MySQL |
+| --- | --- | --- |
+| 佔位符 | `$1, $2` | `?` |
+| 時間型別 | `timestamptz` | `datetime(3)`（UTC） |
+| 時間參數 | ISO 字串 ＋ `::timestamptz` | `Date` 物件 |
+| 讀時間 | `extract(epoch …) * 1000` | `Date.getTime()` |
+| 布林 | `true` / `false` | `1` / `0` |
+| JSON | `jsonb` | `json` |
+| 唯一鍵衝突 | `on conflict … do nothing` | `on duplicate key update` |
+| 插入是否成功 | `returning` 的行數 | `affectedRows` |
+| 空值排序 | `nulls last` | 沒有，要寫 `best_at is null` 排在前面 |
+| `count(*)` | 回 bigint（字串）→ 要 `::int` | 回數字 |
+
+`Dialect` 提供「語法」，`sqlStore.ts` 提供「邏輯」。語法分成兩種：三個寫入語句形狀差太多，各自寫在
+自己的方言裡；其餘的 SELECT 用 `Binder` 產生。
+
+**`Binder` 是同一份 SQL 能同時餵兩邊的關鍵。** 兩種佔位符的差異不只是文字：`$1` 可以引用多次而只傳
+一份值，`?` 是**位置性**的、每次出現都吃掉一個參數。所以 `rankOf` 裡「同一個分數出現三次」在
+Postgres 只要一個參數、在 MySQL 要三個 —— 修法是**每一次出現都綁一次**，Postgres 那邊多幾個沒必要
+的參數，換來兩邊共用一份 SQL 文字。`tests/dialect.test.ts` 與 `tests/sqlStore.test.ts` 都有針對
+「佔位符數 ＝ 參數數」的斷言。
+
+> **三個容易出事的細節，都有測試守住：**
+> 1. **`upsertProfile` 的欄位順序在 MySQL 是有意義的** —— `on duplicate key update` 由左至右求值，
+>    所以 `best_score` 必須排在拿它比較的 `best_duration_ms`／`best_at` **之後**，否則時長永遠不會
+>    跟著分數更新，而且不會報錯。
+> 2. **不用 `insert ignore`** —— 它會把所有錯誤吞成警告，不只是重複鍵。
+> 3. **不設 `FOUND_ROWS`** —— 那個 flag 會讓刻意的 no-op upsert 回報 `affectedRows = 1`，於是每個
+>    重試都被當成新的一局。
+
+### 5.2 平台：EdgeOne 要接哪一個
+
+EdgeOne Pages 有**兩種**函式，差別決定了能不能連資料庫：
+
+| | Edge Functions | **Node Functions** |
+| --- | --- | --- |
+| 執行環境 | V8 isolate（邊緣節點） | **完整 Node.js**（中心化機房） |
+| 冷啟動 | 毫秒級 | 秒級 |
+| npm 生態 | 受限 | **完整支援** |
+| 能連資料庫 | **不能**（無 TCP socket） | **可以**（EdgeOne 官方 MySQL 模板用 `mysql2`） |
+| 呼叫形狀 | `export onRequestGet = async (ctx) => Response` | 同左（`ctx.request` 是標準 `Request`） |
+
+**所以 EdgeOne 那邊要用 Node Functions**：它跑完整的 Node.js，`mysql2` 與 `pg` 都能用，我們的
+`db/` 那一層可以整包照搬。Edge Functions（V8）沒有 TCP，接了也沒用。
+
+接上去只要一行（`node-functions/api/score.js`）：
+
+```js
+import { handleScore } from '../../api/_lib/handlers';
+import { endpoint } from '../../api/_lib/runtime';
+import { createEdgeOneHandlers } from '../../api/_lib/adapters/fetch';
+
+export const { onRequestGet, onRequestPost, onRequestOptions } =
+  createEdgeOneHandlers(endpoint(handleScore));
+```
+
+三個具名匯出指向**同一個**處理器是刻意的：方法判斷只有一處（在處理器裡），三個平台入口不會各自
+漂移 —— 用錯方法會拿到 405，而不是「路由不存在」。
+
+**EdgeOne/邊緣環境要記得**：`ALLOWED_ORIGIN` 要填前端的網域（預設只接受同源）；`DB_DIALECT=mysql`；
+`DATABASE_URL` 指向腾讯云 MySQL。
+
+## 6. 部署到 Vercel
 
 1. **建資料庫**：Vercel 專案 → Storage → Marketplace → **Neon** → 建一個免費資料庫。Vercel 會自動
    把 `DATABASE_URL`（帶 `-pooler`）注入環境變數。
-2. **建表**：把 `schema.sql` 套到那個資料庫。
+2. **建表**（兩種方式，選一個）：
    ```bash
-   psql "$DATABASE_URL" -f schema.sql
+   npm run db:migrate                       # 讀 .env 的 DATABASE_URL，兩個方言都支援
+   psql "$DATABASE_URL" -f schema.sql       # 或直接用 Postgres 客戶端套 schema.sql
    ```
+   `db:migrate` 走的是 `db/` 那一層的 `ensureSchema`，所以它與程式**保證**一致，而 `schema.sql`
+   是人看的參考（兩者的一致性由測試守住）。
 3. **加秘密**：Vercel → Project Settings → Environment Variables 填 `RUN_TOKEN_SECRET`（≥ 32 字元）。
    其餘選填見 `.env.example`。
-4. **部署**：推上 Git，Vercel 依 `vercel.json` 建置（`npm run build` → `dist`）。三個端點自動生效。
-5. **前端若不在 Vercel 上**：把前端的網域填進 `ALLOWED_ORIGIN`，否則瀏覽器會擋下回應。
+4. **部署**：推上 Git，Vercel 依 `vercel.json` 建置（`npm run build` → `dist`）。四個端點自動生效。
+5. **確認**：打開 `/api/health` —— 它會真的問一次資料庫。回 `{ ok: true, database: "postgres", players: N }`
+   就是通了；`503` 是連不上（檢查 `DATABASE_URL` 與 Neon 的 IP allowlist），`500` 是表沒建好
+   （回頭跑第 2 步）。
+6. **前端若不在同一個網域**：把前端的網域填進 `ALLOWED_ORIGIN`，否則瀏覽器會擋下回應。
 
-**本機開發**（任何 Postgres 皆可）：
+**本機開發**（任何 Postgres 或 MySQL 皆可）：
 
 ```bash
 # 用 Docker 起一個 local Postgres
 docker run -d --name endchi-pg -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:16
 export DATABASE_URL="postgresql://postgres:dev@localhost:5432/postgres"
 export RUN_TOKEN_SECRET="$(node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))")"
-psql "$DATABASE_URL" -f schema.sql
+
+npm run db:migrate      # 建表
 npm run dev
 ```
 
 驗證：
 
 ```bash
+curl -s localhost:3000/api/health
+# {"ok":true,"database":"postgres","players":0,"at":...}
+
 # 開一局應該拿到一張憑證
 curl -s localhost:3000/api/run/start -X POST -H 'content-type: application/json' \
   -d '{"deviceId":"dev-00000000-1111"}'
@@ -219,34 +339,59 @@ curl -s 'localhost:3000/api/leaderboard?limit=10'
 
 ---
 
-## 6. 測試
+## 7. 測試
 
-後端測試**不需要資料庫**：端點只依賴 `Store` 介面，測試餵它 `MemoryStore`（`api/_lib/store.ts`）。
-所以「開局 → 提交 → 上榜」整條路徑跑在毫秒內，而且驗的是**真的處理器**，不是替身。
+四層，**前三層不需要資料庫**：
+
+| 檔案 | 測什麼 | 需要資料庫 |
+| --- | --- | --- |
+| `tests/api.test.ts` | 處理器：開局 → 提交 → 上榜、冪等、速率、憑證、合理性、健康檢查 | ✗ |
+| `tests/dialect.test.ts` | 方言：佔位符、排序、upsert 順序、建表可重複執行、錯誤分類 | ✗ |
+| `tests/sqlStore.test.ts` | 儲存層邏輯：**佔位符數 ＝ 參數數**、冪等的兩條路、交易與回滾、列轉換 | ✗ |
+| `tests/db.integration.test.ts` | 真的 SQL：建表、憑證、最大值、同分名次、JSON 欄位、交易原子性 | **✓ gated** |
 
 ```bash
-npm run typecheck          # 含 api/（tsconfig.api.json）
-npx vitest run tests/api.test.ts
+npm run typecheck
+npx vitest run                # 前三層；整合層自動跳過
+
+# 想把整合層也跑起來（**指向一個拋棄式的實例**）
+TEST_DATABASE_URL='postgresql://…' npx vitest run tests/db.integration.test.ts
+TEST_DATABASE_URL='mysql://…'      npx vitest run tests/db.integration.test.ts
 ```
 
-`tests/api.test.ts` 覆蓋：設定的缺漏與預設、上界與配置同步、憑證的簽／驗／防竄改、時間的單邊
-檢查、接收紀錄的位址正規化與**憑證永不入庫**、以及端到端（開局 → 提交 → 上榜、冪等重試、速率
-限制、裝置不符、過期、偽造）。
+### 為什麼整合測試是 gated 的
 
-`MemoryStore` 與 `PgStore` 都符合 `Store` 介面 —— 測試檔結尾有 `const storeContract: Store =
-new MemoryStore()`，讓「介面改了但實作沒跟上」在型別檢查就爆。
+它**預設不跑**（`describe.skipIf`），因為這個 repo 與 CI 不該為了跑測試而背一個資料庫。但
+**單元測試永遠測不到真 SQL**：`sqlStore.test.ts` 的假驅動驗的是「我們產生了什麼」，整合測試驗的是
+「資料庫真的接受它」。兩者的交集才是「能跑」，而那個交集只有在真的連上去之後才存在 —— 尤其是 MySQL
+的 `upsertProfile` 欄位順序，假驅動怎麼測都測不到。
+
+`tests/adapters.test.ts` 另外驗**兩個平台轉接頭得到同一個 `ApiRequest`** —— 那是最直接的「共用
+程式碼」證明。
+
+### `schema.sql` 與程式的一致性
+
+`schema.sql` 是人看的 Postgres 參考（可以直接 `psql -f`），而真正的來源是 `db/postgres.ts` 的
+`schema()`。兩者若漂移，測試會紅 —— 這是沿用這個專案既有的做法（比對 `limits.ts` 與
+`levels.json` 的那一條同樣的道理）：**與其靠註解提醒，不如讓測試自己讀回來比對**。
+
+`MemoryStore` 與 `SqlStore` 都符合 `Store` 介面 —— `tests/api.test.ts` 結尾有
+`const storeContract: Store = new MemoryStore()`，讓「介面改了但實作沒跟上」在型別檢查就爆。
 
 ---
 
-## 7. 待辦與接縫
+## 8. 待辦與接縫
 
 - **客戶端接上 HTTP**：把 `src/game/leaderboard.ts` 的 `createLocalLeaderboard` 換成走
   `/api/leaderboard` 與 `/api/score` 的實作。`sync()` 這個方法就是為此預留的；`LeaderboardSource`
   介面維持不變，玩家側的程式碼不用動。
+- **EdgeOne 骨架**：轉接層（`adapters/fetch.ts` 的 `createEdgeOneHandlers`）已經做好並有測試，但
+  尚未建立 `node-functions/` 目錄、`edgeone` 設定與部署流程。要上的時候見 §5.2。
 - **分析事件**：`design.md` §6.8 的 `events` 表與上報還沒做（schema 也還沒建）。
 - **完整名稱驗證**：`handlers.ts` 的 `sanitiseName` 目前只做最低限度清洗（去控制／零寬字元、
   夾長度）。§6.4 的完整管線（32 加權單位、NFKC、字元白名單、七層關鍵詞摺疊）是後續工作，而且
   必須**客戶端與伺服器共用同一份實作** —— 兩邊各寫一套會出現「客戶端放行、伺服器退回」的錯誤。
 - **`profile/sync` 與 `profile/name`**：`design.md` §6.6 列的另外兩個端點尚未實作。
-- **`_lib/store.ts` 的 `PgStore` 尚未在真實 Postgres 上跑過**：目前只經 `pgStore.ts` 的 SQL 與
-  `MemoryStore` 的行為對齊驗證。第一次接真資料庫時要先跑一次 §5 的建表與端到端。
+- **整合測試尚未在任何真資料庫上跑過**：`tests/db.integration.test.ts` 已經寫好，但這個環境沒有
+  Docker 或 `psql`，所以兩個方言都還沒被真的執行過。**第一次部署前請務必跑一次**（見 §7）——
+  尤其是 MySQL 那條路。

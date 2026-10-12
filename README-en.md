@@ -173,12 +173,15 @@ EndchiMerge
 │  ├─backend.md                 # Backend: endpoints, env vars, where the DB lives, deploy
 │  ├─CHANGELOG.md               # What each milestone delivered
 │  └─design-main-screen.jpg     # Main screen design
-├─api                           # Vercel Functions (the M9 backend)
+├─api                           # Vercel Functions (the M9 backend; the core ports to EdgeOne)
 │  ├─run/start.ts               # POST /api/run/start — start a run, mint a T2 token
 │  ├─score.ts                   # POST /api/score — submit a score
 │  ├─leaderboard.ts             # GET  /api/leaderboard — fetch the board
+│  ├─health.ts                  # GET  /api/health — really asks the database
 │  └─_lib                       # Handlers, tokens, bounds, store, request log, shell
-├─schema.sql                    # The four backend tables (any Postgres)
+│     ├─adapters/               # Seam 1: platform (Vercel req/res, Web Request/Response)
+│     └─db/                     # Seam 2: dialect (Postgres / MySQL), drivers, Binder
+├─schema.sql                    # The four backend tables (Postgres copy; see docs/backend.md §5)
 ├─vercel.json                   # Build settings and function timeout
 ├─.env.example                  # Environment variable names and notes (no values)
 ├─public                        # Served verbatim, never bundled

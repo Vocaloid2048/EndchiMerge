@@ -9,9 +9,9 @@
 
 ## 未發佈 — M9 後端（Vercel Functions ＋ Postgres）與每局時長（2026-10-12）
 
-> 本節涵蓋 `85e99dc`（客戶端顯示每局時長，已提交）與其後**尚未提交**的後端骨架（分支
-> `feat-backend`）。反作弊**只做 T2**（伺服器頒發的短期憑證），T1 對稱簽章與 T3 伺服器端重放
-> 皆不做（使用者定案）。
+> 本節涵蓋 `85e99dc`（客戶端顯示每局時長）與分支 `feat-backend` 上的後端（`3d5520f` 骨架，
+> 以及其後的**可攜性重構**：兩個平台、兩個方言）。反作弊**只做 T2**（伺服器頒發的短期憑證），
+> T1 對稱簽章與 T3 伺服器端重放皆不做（使用者定案）。
 
 ### 新增 — 每局遊玩時長，顯示在分數旁邊（`85e99dc`）
 
@@ -83,13 +83,74 @@
   **Vercel 已無自家小型資料庫**（Vercel Postgres 已退場遷往 Neon，現只有 Marketplace）；公開站
   **建議 Neon**。
 
+### 新增 — 可攜性：兩個平台、兩個方言，一份業務邏輯
+
+使用者要求「留意未來需要和 EdgeOne 和騰訊免費資料庫服務共用代碼」，所以這一版把**兩個會各自漂移
+的地方**各收成一個接縫；接縫之間（`handlers.ts`、`sqlStore.ts`、`requests.ts`）的邏輯只寫一次。
+
+> ⚠️ **先更正一個前提**：Neon 是 **Postgres**，而騰訊的免費資料庫是 **MySQL**。兩者方言不同，所以
+> **兩個方言都得做**，做一個不足以「共用」。以下就是兩者共存的作法 —— 換供應商不必改業務邏輯。
+
+**接縫一 —— 平台（`api/_lib/adapters/`）**
+
+| 平台                     | 檔案                  | 轉接什麼                                            |
+| ---------------------- | ------------------- | ----------------------------------------------- |
+| Vercel                 | `adapters/vercel.ts` | Node 的 `req`／`res` → `ApiRequest`（結構型別，不依賴 `@vercel/node`） |
+| EdgeOne／任何 Fetch 平台    | `adapters/fetch.ts`  | Web 標準 `Request`／`Response`                      |
+
+兩者都指向**同一個** `endpoint(core)`，所以「方法檢查」只有一份。`vercelEndpoint(core)` 就是
+`createVercelHandler(endpoint(core))`，端點檔自己講明跑在哪個平台。EdgeOne 則另有具名匯出
+（`onRequestGet`／`onRequestPost`／`onRequestOptions`），三者都走同一條 route。
+
+**接縫二 —— 方言（`api/_lib/db/dialect.ts`）**
+
+`Dialect` 是兩個方言**所有**差異的唯一去處：
+
+| 差異     | Postgres                | MySQL                  |
+| ------ | ----------------------- | ---------------------- |
+| 佔位符    | `$1`                    | `?`（位置式）               |
+| 時間型別   | `timestamptz`           | `datetime(3)`          |
+| 時間參數   | ISO 字串 ＋ `::timestamptz` | `Date` 物件              |
+| 讀時間    | `extract(epoch…)`       | `Date.getTime()`       |
+| 布林     | `true`／`false`          | `1`／`0`                |
+| JSON   | `jsonb`                 | `json`                 |
+| upsert | `on conflict … do nothing` | `on duplicate key update` |
+| 寫入訊號   | `returning` 的列           | `affectedRows`         |
+| NULL 排序 | `nulls last`            | `is null`              |
+| `count(*)` | 補 `::int`              | 原樣                     |
+
+- **`Binder` 是「同一條 SQL 餵兩個方言」的關鍵**：綁值並回傳對應佔位符，**每次出現各綁一次** ——
+  `$1` 可以重複用，`?` 不行。所以 SQL 字串只寫一份，佔位符由 Binder 生成。
+- **三個 MySQL 陷阱**（都在程式裡留了註解，且各有測試守住）：
+  - `on duplicate key update` **由左往右求值**，所以 `best_score` **必須排在**
+    `best_duration_ms`／`best_at` **之後**，否則「時長跟著分數走」會靜靜地永遠不觸發。
+  - **禁用 `insert ignore`** —— 它把所有錯誤都吞成 warning，不只是重複鍵。
+  - **不可開 `CLIENT_FOUND_ROWS`** —— 開了會讓刻意空轉的 `on duplicate key update run_id = run_id`
+    回報 `affectedRows = 1`，於是每次重試都像新的一局，冪等當場失效。
+  - 另外：`charset: utf8mb4`（否則 emoji 入不了庫）、`timezone: 'Z'`（否則日期位移到行程的本地時區）。
+- **`Driver` 介面**收掉驅動差異：`query(sql, params) → { rows, affected }`、`transaction(run)`
+  （已在交易中就只執行，不疊一層）、`close()`。`api/_lib/sqlStore.ts`（`SqlStore implements Store`）
+  取代了原本的 `pgStore.ts` —— 因為介面沒變，`tests/api.test.ts` 那些記憶體測試一行都不用改。
+
 ### 測試與驗證
 
-- typecheck ✅、vitest **555/555** ✅、build ✅。
+- typecheck ✅、vitest **622 通過 / 11 略過** ✅、build ✅。
 - 新增 `tests/duration.test.ts`（4 條）、`tests/api.test.ts`（46 條）；`tests/leaderboard.test.ts`
   新增「時長跟著分數」6 條。
 - `tests/api.test.ts` 的後端測試**完全不需要資料庫**：餵 `MemoryStore` ＋ 注入時鐘，毫秒內跑完
   「開局 → 提交 → 上榜」，驗的是真的處理器。
+- 可攜性分**四層**測，前三層都不需要資料庫：
+  - `tests/adapters.test.ts`（17 條）：兩個平台的轉接頭對**同一個**處理器產出**相同**的
+    `ApiRequest`；`allow` 標頭能活著穿過轉接層。
+  - `tests/dialect.test.ts`（25 條）：Binder 佔位符／參數對齊、榜序、寫入語句形狀（含 MySQL 欄位
+    順序）、**DDL 可重複執行**、兩方言的表集合相同，以及 `schema.sql` 與程式**逐句一致**。
+  - `tests/sqlStore.test.ts`（19 條）：用錄影驅動（`RecordingDriver`）跑整個儲存層 —— 通用斷言
+    「每句的佔位符數 = 參數個數」，兩邊的冪等訊號、交易包覆與回滾、列映射。
+  - `tests/db.integration.test.ts`（12 條，**只有設了 `TEST_DATABASE_URL` 才跑**）：真資料庫上的
+    往返、「時長跟著分數」、冪等、被拒的局、同分排名、計數、JSON 標頭、交易原子性。
+- **`schema.sql` 的一致性由測試守住**：檔案裡那份是給人看的（可以直接 `psql -f`），真正的來源是
+  `db/postgres.ts` 的 `schema()`；測試把檔案讀回來逐句比對，漂移就會紅 —— 這是沿用本專案
+  比對 `limits.ts` 與 `levels.json` 的同一手法。
 - 無頭瀏覽器實測（`duration.mjs`）：HUD 時長 `0:01 → 0:04` 會走、結算卡四格
   （分數 9 ／ 時長 0:11 ／ 合成次數 6 ／ 最高紀錄 9）、無溢出、卡片在畫布內。
 
@@ -97,7 +158,12 @@
 
 - **客戶端尚未接上後端**：`src/game/leaderboard.ts` 仍走本地 `LeaderboardSource`，
   `sync()` 是預留的接縫。伺服器端可用，但要換成 HTTP 實作後榜上才會出現別的裝置。
-- **`PgStore` 尚未在真實 Postgres 上跑過**：目前只經 SQL 與 `MemoryStore` 的行為對齊驗證。
+- **`SqlStore` 尚未在真實 MySQL 上跑過**：Postgres 路徑已在真庫上驗證過（整合測試），MySQL
+  目前只經 SQL 形狀、錄影驅動與方言一致性驗證 —— 要上騰訊雲之前應先指一個拋棄式 MySQL 跑一次
+  整合測試（`TEST_DATABASE_URL=mysql://…`）。
+- **EdgeOne 只做了轉接層**（使用者的定案）：`adapters/fetch.ts` 與 `createEdgeOneHandlers` 都在、
+  也有測試，但**尚未部署到 EdgeOne** 驗證；屆時要選 **Node Functions** 而非 Edge Functions
+  （後者是 V8 isolate、沒有 TCP，`mysql2`／`pg` 在裡面不能用）。
 - **分析事件**（`design.md` §6.8 的 `events` 表與上報）未做；`profile/sync` 與 `profile/name` 未做。
 - **完整名稱驗證**：`sanitiseName` 只做最低限度清洗；§6.4 的完整管線（32 加權單位、NFKC、七層
   關鍵詞摺疊）待做，且必須客戶端與伺服器**共用同一份實作**。

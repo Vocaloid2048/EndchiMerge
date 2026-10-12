@@ -16,11 +16,26 @@
  * default, rate limiting is on by default, and no cross-origin request is allowed by default.
  */
 
+import { dialectFromUrl, type DialectName } from './db/dialect';
+
 /** IP 要怎麼落庫。 */
 export type IpStorageMode = 'raw' | 'truncated' | 'hashed';
 
 export interface Config {
   readonly databaseUrl: string;
+  /**
+   * 連線字串講的是哪一種 SQL。
+   * Which flavour of SQL the connection string speaks.
+   *
+   * 由 `DB_DIALECT` 決定；沒設定時**從連線字串的 scheme 猜**（`postgres://` → Postgres、
+   * `mysql://` → MySQL）。猜的理由是讓最常見的設定「只填一個 `DATABASE_URL` 就能跑」；但猜錯時
+   * 錯誤訊息會很難懂（拿 MySQL 的 `?` 去餵 Postgres），所以 `DB_DIALECT` 永遠可以覆寫。
+   * Decided by `DB_DIALECT`, or **inferred from the connection string's scheme** when unset
+   * (`postgres://` → Postgres, `mysql://` → MySQL). Inferring means the common case needs nothing but
+   * a `DATABASE_URL`; but a wrong guess produces a confusing error (MySQL's `?` fed to Postgres), so
+   * `DB_DIALECT` always overrides.
+   */
+  readonly dbDialect: DialectName;
   readonly runTokenSecret: string;
   readonly ipStorage: IpStorageMode;
   /**
@@ -72,6 +87,27 @@ function readIpStorage(raw: string | undefined): IpStorageMode {
 }
 
 /**
+ * 讀方言：`DB_DIALECT` 優先，認不出來就從連線字串猜。
+ * Read the dialect: `DB_DIALECT` wins, and anything unrecognised falls back to the connection string.
+ *
+ * 認不出來的值**不報錯**，改走猜測 —— 與其他選填欄位同一條規則（一個錯字不該讓後端起不來）。但
+ * 這裡比別的欄位更需要 `DB_DIALECT`：猜錯的後果是 SQL 語法錯誤，而那種錯誤訊息不會告訴你「是你把
+ * MySQL 的 `?` 餵給了 Postgres」。
+ * An unrecognised value **does not fail**; it falls back to inference, matching every other optional
+ * field (a typo should not stop the backend). But `DB_DIALECT` matters more here than elsewhere: a
+ * wrong guess produces SQL syntax errors, and those messages do not say "you fed MySQL's `?` to
+ * Postgres".
+ */
+function readDialect(raw: string | undefined, url: string): DialectName {
+  const value = (raw ?? '').trim().toLowerCase();
+
+  if (value === 'mysql' || value === 'mariadb') return 'mysql';
+  if (value === 'postgres' || value === 'postgresql' || value === 'pg') return 'postgres';
+
+  return dialectFromUrl(url);
+}
+
+/**
  * 從一份環境變數讀出設定。**純函式** —— 測試不必碰 `process.env`，也不會互相污染。
  * Read the configuration out of an environment map. **Pure**, so tests never touch `process.env`
  * and cannot leak into each other.
@@ -96,6 +132,7 @@ export function readConfig(env: Readonly<Record<string, string | undefined>>): C
     ok: true,
     config: {
       databaseUrl,
+      dbDialect: readDialect(env['DB_DIALECT'], databaseUrl),
       runTokenSecret,
       ipStorage: readIpStorage(env['IP_STORAGE_MODE']),
       ipHashSecret: (env['IP_HASH_SECRET'] ?? '').trim() || runTokenSecret,

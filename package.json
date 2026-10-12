@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "db:migrate": "node --env-file-if-exists=.env --import tsx scripts/migrate.ts",
     "sign": "node scripts/sign-assets.mjs public/assets/character",
     "sign:check": "node scripts/sign-assets.mjs --check public/assets/character",
     "prepare": "node scripts/install-git-hooks.mjs"
@@ -19,12 +20,14 @@
     "@types/matter-js": "^0.20.2",
     "@types/node": "^26.6.5",
     "@types/pg": "^8.23.1",
+    "tsx": "^4.23.15",
     "typescript": "~5.9.2",
     "vite": "^7.1.3",
     "vitest": "^5.0.3"
   },
   "dependencies": {
     "matter-js": "^0.20.0",
+    "mysql2": "^3.24.5",
     "pg": "^8.23.1",
     "poly-decomp": "^0.3.0"
   }

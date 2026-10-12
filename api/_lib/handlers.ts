@@ -27,6 +27,7 @@
 
 import type { ApiRequest, ApiResponse, JsonObject } from './http';
 import { asObject, fail, methodNotAllowed, ok, readInteger, readString } from './http';
+import { isConnectionError } from './db/dialect';
 import type { Config } from './env';
 import { MAX_RUN_MS } from './env';
 import { checkClaimedDuration, checkRationality } from './limits';
@@ -441,4 +442,51 @@ export const handleLeaderboard: CoreHandler = async (request, deps) => {
   }
 
   return { response: ok({ ok: true, total, entries, self }), deviceId, runId: null };
+};
+
+/* ── GET /api/health ──────────────────────────────────────────────────────── */
+
+/**
+ * 健康檢查：**真的去問一次資料庫**，不是回一個寫死的 200。
+ * A health check that **actually asks the database**, rather than returning a hard-coded 200.
+ *
+ * 它刻意跑 `countProfiles()` 而不是 `select 1`：前者同時證明「連得上」與「表建好了」，而後者只證明
+ * 連得上 —— 一個忘了跑遷移的部署會很有精神地回答 `select 1`。
+ * It deliberately runs `countProfiles()` rather than `select 1`: the former proves both "reachable" and
+ * "the tables exist", while the latter only proves reachable — a deployment that forgot to run the
+ * migration would answer `select 1` quite happily.
+ *
+ * 失敗時分兩種：**連不上**回 503（基礎設施的事，重試有意義），**語法或 schema 錯**回 500（程式或
+ * 遷移的事，重試沒有意義）。兩者混成一個碼會讓前者看起來像後者的 bug。
+ * Failures split in two: **unreachable** answers 503 (an infrastructure matter, retrying is
+ * meaningful) and a **syntax or schema error** answers 500 (a code or migration matter, retrying is
+ * not). Collapsing them into one code makes the first look like a bug in the second.
+ */
+export const handleHealth: CoreHandler = async (request, deps) => {
+  if (request.method !== 'GET') {
+    return { response: methodNotAllowed(['GET']), deviceId: null, runId: null };
+  }
+
+  try {
+    const players = await deps.store.countProfiles();
+
+    return {
+      response: ok({ ok: true, database: deps.config.dbDialect, players, at: deps.now() }),
+      deviceId: null,
+      runId: null,
+    };
+  } catch (error) {
+    const unreachable = isConnectionError(error);
+    console.error('[api] health check failed', error);
+
+    return {
+      response: fail(
+        unreachable ? 503 : 500,
+        unreachable ? 'database_unreachable' : 'database_error',
+        unreachable ? 'the database is unreachable' : 'the database rejected the query',
+      ),
+      deviceId: null,
+      runId: null,
+    };
+  }
 };

@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import {
+  handleHealth,
   handleLeaderboard,
   handleRunStart,
   handleScore,
@@ -51,6 +52,7 @@ const GOOD_RUN = { score: 900, merges: 30, drops: 40, maxCombo: 5, durationMs: 6
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
     databaseUrl: 'postgresql://user:pass@host/db',
+    dbDialect: 'postgres',
     runTokenSecret: SECRET,
     ipStorage: 'truncated',
     ipHashSecret: 'h'.repeat(48),
@@ -720,6 +722,84 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
     expect(sanitiseName('阿\u200b爺\u202e')).toBe('阿爺');
     expect(sanitiseName('  spaced  ')).toBe('spaced');
     expect(sanitiseName('x'.repeat(80))).toHaveLength(32);
+  });
+});
+
+/* ── 健康檢查 ─────────────────────────────────────────────────────────────── */
+
+/** 一個 `countProfiles` 會拋錯的 store；用來驗 503／500 的分流。 */
+class BrokenStore extends MemoryStore {
+  constructor(private readonly failure: unknown) {
+    super();
+  }
+
+  override async countProfiles(): Promise<number> {
+    throw this.failure;
+  }
+}
+
+describe('health — 真的問一次資料庫 / it really asks', () => {
+  it('reports the dialect and the player count', async () => {
+    const { deps } = makeDeps();
+
+    const result = await handleHealth(request('GET', null), deps);
+
+    expect(result.response.status).toBe(200);
+    expect(result.response.body).toMatchObject({ ok: true, database: 'postgres', players: 0 });
+    /* 訊息裡**不得**出現連線字串或任何設定值。 */
+    expect(JSON.stringify(result.response.body)).not.toContain('postgresql://');
+  });
+
+  it('reports the dialect that is actually configured', async () => {
+    const { deps } = makeDeps({ dbDialect: 'mysql' });
+
+    expect((await handleHealth(request('GET', null), deps)).response.body).toMatchObject({
+      database: 'mysql',
+    });
+  });
+
+  /*
+   * 分流是這一條的重點：**連不上**是基礎設施的事（503，重試有意義），**SQL 有問題**是程式或遷移的
+   * 事（500，重試沒有意義）。混成一個碼會讓「資料庫掛了」看起來像「程式有 bug」。
+   * The split is the point: **unreachable** is infrastructure (503, retrying helps) and **bad SQL** is
+   * code or migration (500, retrying does not). One code for both makes "the database is down" look
+   * like "the code has a bug".
+   */
+  it('answers 503 when the database is unreachable', async () => {
+    const config = makeConfig();
+    const deps: Deps = {
+      config,
+      store: new BrokenStore(Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' })),
+      now: () => 0,
+    };
+
+    const result = await handleHealth(request('GET', null), deps);
+
+    expect(result.response.status).toBe(503);
+    expect(result.response.body).toMatchObject({ error: { code: 'database_unreachable' } });
+  });
+
+  it('answers 500 when the database rejects the query', async () => {
+    const deps: Deps = {
+      config: makeConfig(),
+      store: new BrokenStore(Object.assign(new Error('relation "profiles" does not exist'), {
+        code: '42P01',
+      })),
+      now: () => 0,
+    };
+
+    const result = await handleHealth(request('GET', null), deps);
+
+    expect(result.response.status).toBe(500);
+    expect(result.response.body).toMatchObject({ error: { code: 'database_error' } });
+    /* 內部訊息只進日誌，不回給客戶端。 */
+    expect(JSON.stringify(result.response.body)).not.toContain('profiles');
+  });
+
+  it('refuses a non-GET', async () => {
+    const { deps } = makeDeps();
+
+    expect((await handleHealth(request('POST', {}), deps)).response.status).toBe(405);
   });
 });
 
