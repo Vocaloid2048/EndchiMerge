@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.api.tsbuildinfo",
+
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+
+    /*
+     * 只掛 Node 的型別。後端跑在 Node 執行期（Vercel Functions 的預設），用 `node:crypto` 算 HMAC、
+     * 用 `process.env` 讀設定，所以明確寫出來比靠自動載入清楚 —— 而且這也讓 `src` 的瀏覽器程式碼
+     * 不會意外拿到 Node 的全域變數。
+     * Node types only. The backend runs on the Node runtime (Vercel Functions' default), using
+     * `node:crypto` for the HMAC and `process.env` for configuration, so naming it is clearer than
+     * relying on auto-inclusion — and it keeps `src`'s browser code from accidentally seeing Node
+     * globals.
+     */
+    "types": ["node"]
+  },
+  "include": ["api"]
+}

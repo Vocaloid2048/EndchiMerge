@@ -165,8 +165,17 @@ EndchiMerge
 │  ├─gameplay.md                # 合成、連擊、溢位、解鎖的規則與調參速查
 │  ├─rendering.md               # 繪製順序與外觀調參地圖
 │  ├─asset-signatures.md        # 素材元數據簽名機制
+│  ├─backend.md                 # 後端：端點、環境變數、資料庫放哪裡、部署
 │  ├─CHANGELOG.md               # 各里程碑的變更紀錄
 │  └─design-main-screen.jpg     # 主畫面設計稿
+├─api                           # Vercel Functions（M9 後端）
+│  ├─run/start.ts               # POST /api/run/start — 開局、頒 T2 憑證
+│  ├─score.ts                   # POST /api/score — 提交成績
+│  ├─leaderboard.ts             # GET  /api/leaderboard — 取榜
+│  └─_lib                       # 處理器、憑證、上界、儲存層、接收紀錄、外殼
+├─schema.sql                    # 後端四張表（任何 Postgres 皆可）
+├─vercel.json                   # 建置設定與函式逾時
+├─.env.example                  # 環境變數的鍵名與說明（不放值）
 ├─public                        # 原樣 serve，不經打包器
 │  ├─config                     # 遊戲配置（外部化，改完不需重新 build）
 │  │  ├─levels.json             # 合成鏈 10 級與各級物理參數
@@ -236,7 +245,7 @@ EndchiMerge
 │  └─workflows                  # CI（素材簽名後備驗證）
 ├─index.html
 ├─package.json
-├─tsconfig.json / tsconfig.app.json / tsconfig.node.json / tsconfig.test.json
+├─tsconfig.json / tsconfig.app.json / tsconfig.node.json / tsconfig.test.json / tsconfig.api.json
 ├─vite.config.ts
 └─vitest.config.ts
 ```

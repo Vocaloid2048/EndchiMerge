@@ -19,5 +19,14 @@
     "noFallthroughCasesInSwitch": true,
     "noImplicitOverride": true
   },
-  "include": ["src", "tests", "vitest.config.ts"]
+  /*
+   * `api` 也在這裡：測試會直接匯入後端處理器（見 `tests/api.test.ts`），而 TypeScript 需要那些檔案
+   * 在同一個 program 裡才編得過。`tsconfig.api.json` 另外單獨檢查一次，所以後端的型別不會因為
+   * 「測試剛好沒碰到」而漏掉。
+   * `api` is included here too: tests import the backend handlers directly (see
+   * `tests/api.test.ts`), and TypeScript needs those files in the same program. `tsconfig.api.json`
+   * checks them separately, so a backend type error cannot slip through just because no test happens to
+   * touch it.
+   */
+  "include": ["src", "tests", "api", "vitest.config.ts"]
 }

@@ -170,8 +170,17 @@ EndchiMerge
 │  ├─gameplay.md                # Merge / combo / overflow / unlock rules and tuning map
 │  ├─rendering.md               # Draw order and the visual tuning map
 │  ├─asset-signatures.md        # How character asset metadata signing works
+│  ├─backend.md                 # Backend: endpoints, env vars, where the DB lives, deploy
 │  ├─CHANGELOG.md               # What each milestone delivered
 │  └─design-main-screen.jpg     # Main screen design
+├─api                           # Vercel Functions (the M9 backend)
+│  ├─run/start.ts               # POST /api/run/start — start a run, mint a T2 token
+│  ├─score.ts                   # POST /api/score — submit a score
+│  ├─leaderboard.ts             # GET  /api/leaderboard — fetch the board
+│  └─_lib                       # Handlers, tokens, bounds, store, request log, shell
+├─schema.sql                    # The four backend tables (any Postgres)
+├─vercel.json                   # Build settings and function timeout
+├─.env.example                  # Environment variable names and notes (no values)
 ├─public                        # Served verbatim, never bundled
 │  ├─config                     # Game configuration (externalised, no rebuild needed)
 │  │  ├─levels.json             # The 10-level merge chain and per-level physics
@@ -241,7 +250,7 @@ EndchiMerge
 │  └─workflows                  # CI (asset signature backstop)
 ├─index.html
 ├─package.json
-├─tsconfig.json / tsconfig.app.json / tsconfig.node.json / tsconfig.test.json
+├─tsconfig.json / tsconfig.app.json / tsconfig.node.json / tsconfig.test.json / tsconfig.api.json
 ├─vite.config.ts
 └─vitest.config.ts
 ```
