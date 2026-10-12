@@ -1,6 +1,6 @@
 /**
- * SQL 方言：**Postgres 與 MySQL 之間所有差異的唯一去處**。
- * The SQL dialect: the **single home for every difference between Postgres and MySQL**.
+ * SQL 方言：**各資料庫之間所有差異的唯一去處**。
+ * The SQL dialect: the **single home for every difference between the databases**.
  *
  * ## 為什麼要有這一層 / Why this layer exists
  *
@@ -21,23 +21,32 @@
  *
  * ## 方言之間的差異，一覽 / The differences, at a glance
  *
- * | 項目 | Postgres | MySQL |
- * | --- | --- | --- |
- * | 佔位符 | `$1, $2` | `?` |
- * | 時間型別 | `timestamptz` | `datetime(3)`（UTC） |
- * | 時間參數 | ISO 字串 ＋ `::timestamptz` | `Date` 物件 |
- * | 讀時間 | `extract(epoch from …) * 1000` | `Date.getTime()` |
- * | 布林 | `true` / `false` | `1` / `0` |
- * | JSON | `jsonb` | `json` |
- * | 唯一鍵衝突 | `on conflict … do nothing` | `on duplicate key update` |
- * | 插入是否成功 | `returning` 的行數 | `affectedRows` |
- * | 空值排序 | `nulls last` | 沒有，要寫 `col is null, col` |
- * | `count(*)` | 回 bigint（字串）→ 要 `::int` | 回數字 |
+ * | 項目 | Postgres | MySQL | SQLite |
+ * | --- | --- | --- | --- |
+ * | 佔位符 | `$1, $2` | `?` | `?` |
+ * | 時間型別 | `timestamptz` | `datetime(3)`（UTC） | `integer`（UTC 毫秒） |
+ * | 時間參數 | ISO 字串 ＋ `::timestamptz` | `Date` 物件 | 整數 |
+ * | 讀時間 | `extract(epoch from …) * 1000` | `Date.getTime()` | 原樣 |
+ * | 布林 | `true` / `false` | `1` / `0` | `1` / `0` |
+ * | JSON | `jsonb` | `json` | `text` |
+ * | 唯一鍵衝突 | `on conflict … do nothing` | `on duplicate key update` | `on conflict … do nothing` |
+ * | 插入是否成功 | `returning` 的行數 | `affectedRows` | `returning` 的行數 |
+ * | 空值排序 | `nulls last` | 沒有，要寫 `col is null, col` | `nulls last` |
+ * | `count(*)` | 回 bigint（字串）→ 要 `::int` | 回數字 | 回數字 |
+ * | 逐列最大值 | `greatest(a, b)` | `greatest(a, b)` | `max(a, b)` |
+ *
+ * 第三個方言（SQLite）只服務**本機開發** —— 它是「一個檔案」而不是「一個服務」，所以開發與測試不必
+ * 先起一個資料庫，而這也是這個 seam 第一次真的被用來加一個方言（`sqlStore.ts` 一行都沒有動）。它
+ * 自己的取捨與限制寫在 `sqlite.ts` 的檔頭。
+ * The third dialect (SQLite) serves **local development only**: it is "a file" rather than "a service",
+ * so development and tests need no database running first — and this is the first time the seam was
+ * actually used to add a dialect (`sqlStore.ts` did not change by a single line). Its own trade-offs
+ * and limits are documented at the top of `sqlite.ts`.
  */
 
 import type { Driver } from './types';
 
-export type DialectName = 'postgres' | 'mysql';
+export type DialectName = 'postgres' | 'mysql' | 'sqlite';
 
 /** 一個方言要回答的所有問題。 */
 export interface Dialect {
@@ -257,11 +266,31 @@ export function boardOrderKeys(category: BoardCategory, timeOrder: string): stri
  */
 export const BOARD_ORDER_KEYS = 'best_score desc, best_at asc, device_id asc';
 
-/** 從連線字串猜方言（沒有明講 `DB_DIALECT` 時）。 */
+/**
+ * 從連線字串猜方言（沒有明講 `DB_DIALECT` 時）。
+ * Guess the dialect from the connection string (when `DB_DIALECT` is not set).
+ *
+ * 預設是 Postgres：這是**正式環境**的選擇，而猜錯的兩種後果不對稱 —— 猜成 Postgres 但其實是
+ * SQLite，會在開發機上立刻看到一行「語法錯誤」；猜成 SQLite 而連的是資料庫服務，會拿到看起來像檔案
+ * 權限問題的 `SQLITE_CANTOPEN`（而且可能是在線上才發現）。
+ * The default is Postgres because that is the **production** choice, and the two ways of guessing wrong
+ * are not symmetric: guessing Postgres for a SQLite file shows a syntax error on a developer's machine
+ * immediately, while guessing SQLite for a database service gives a `SQLITE_CANTOPEN` that reads like a
+ * file-permission problem — possibly discovered in production.
+ */
 export function dialectFromUrl(url: string): DialectName {
   const scheme = url.slice(0, url.indexOf(':')).toLowerCase();
 
   if (scheme === 'mysql' || scheme === 'mysql2' || scheme === 'mariadb') return 'mysql';
+
+  /*
+   * `sqlite:` 與 `sqlite3:` 都認（後者是 `better-sqlite3`／部分工具沿用的舊寫法）。這個 scheme 底下沒
+   * 有意義的 `//` 或 `:`，所以不必再解析下去 —— 路徑怎麼取由 `sqlite.ts` 的 `sqlitePathFromUrl` 負責。
+   * Both `sqlite:` and `sqlite3:` are accepted (the latter is the spelling `better-sqlite3` and some
+   * tools still use). Nothing under this scheme parses as `//` or `:`, so there is no reason to look
+   * further — extracting the path is `sqlitePathFromUrl`'s job in `sqlite.ts`.
+   */
+  if (scheme === 'sqlite' || scheme === 'sqlite3') return 'sqlite';
 
   return 'postgres';
 }

@@ -13,6 +13,15 @@
  *      an easy thing to miss.
  *   2. **In MySQL `best_score` must come after `best_duration_ms`** — the one place where the
  *      "duration follows the score" rule silently breaks on MySQL (see `Dialect.upsertProfile`).
+ *
+ * ## 這裡的迴圈都跑**三個**方言 / Every loop here walks **three** dialects
+ *
+ * `DIALECTS` 是這份檔案的主軸：任何一條「每個方言都該成立」的斷言都應該走它，而不是只挑 Postgres 與
+ * MySQL 兩個寫死。SQLite 加進來時，這一招讓它自動被十幾條既有斷言覆蓋 —— 這也是它能短短幾行就接上的
+ * 原因。
+ * `DIALECTS` is this file's spine: anything that must hold "for every dialect" walks it rather than
+ * naming Postgres and MySQL by hand. When SQLite was added, that is what swept it into a dozen existing
+ * assertions — and why wiring it took so few lines.
  */
 
 import { readFileSync } from 'node:fs';
@@ -30,16 +39,39 @@ import {
 } from '../api/_lib/db/dialect';
 import { mysqlDialect, MYSQL_CLIENT_FLAGS } from '../api/_lib/db/mysql';
 import { postgresDialect } from '../api/_lib/db/postgres';
+import { sqliteDialect, sqlitePathFromUrl } from '../api/_lib/db/sqlite';
 
-const DIALECTS: readonly Dialect[] = [postgresDialect, mysqlDialect];
+const DIALECTS: readonly Dialect[] = [postgresDialect, mysqlDialect, sqliteDialect];
 
-/** 這個方言的語句用了幾個參數位置。 */
+/**
+ * 這個方言的語句用了幾個參數位置。
+ * How many parameter positions a statement uses in this dialect.
+ *
+ * 判斷「哪一種佔位符」看的是 `ph()` 的回應，不是方言的名字 —— 名字是標籤，`ph()` 才是行為，而
+ * 這份檔案要驗的正是行為。
+ * Which placeholder it is comes from `ph()` rather than the dialect's name: the name is a label and
+ * `ph()` is the behaviour, and behaviour is what this file checks.
+ */
 function placeholderCount(sql: string, dialect: Dialect): number {
-  if (dialect.name === 'mysql') return (sql.match(/\?/gu) ?? []).length;
+  if (dialect.ph(1) === '?') return (sql.match(/\?/gu) ?? []).length;
 
   const numbers = [...sql.matchAll(/\$(\d+)/gu)].map((match) => Number(match[1]));
 
   return numbers.length === 0 ? 0 : Math.max(...numbers);
+}
+
+/**
+ * 「取歷史最大」的那個呼叫。
+ * The "take the greater of the two" call.
+ *
+ * 三個方言寫法不同（SQLite 沒有 `greatest`，用的是 `max` 的兩參數形式），但**形狀必須一樣**：拿
+ * 資料庫裡的值跟新值比，而不是相信客戶端宣稱的數字。
+ * The three dialects spell it differently (SQLite has no `greatest` and uses the two-argument `max`),
+ * but the **shape must match**: compare against the stored value rather than trusting what the client
+ * claimed.
+ */
+function greaterCall(column: string): RegExp {
+  return new RegExp(`(?:greatest|max)\\(profiles\\.${column}\\b`, 'iu');
 }
 
 /* ── 佔位符與參數 ─────────────────────────────────────────────────────────── */
@@ -102,13 +134,30 @@ describe('Binder — 佔位符與參數要對得上 / placeholders and params mu
     expect(mysql.bindTime(1_700_000_000_000)).toBe('?');
     expect(mysql.bindJson('{}')).toBe('?');
     expect(mysql.params).toHaveLength(2);
+
+    /* SQLite 與 MySQL 同形：`?` 就是 `?`，沒有 cast 這種東西。 */
+    const sqlite = new Binder(sqliteDialect);
+    expect(sqlite.bindTime(1_700_000_000_000)).toBe('?');
+    expect(sqlite.bindJson('{}')).toBe('?');
+    expect(sqlite.params).toHaveLength(2);
   });
 
-  /* 值的**型別**也換掉了：Postgres 收 ISO 字串，MySQL 收 `Date`（見 `Dialect.ts`）。 */
+  /* 值的**型別**也換掉了：Postgres 收 ISO 字串，MySQL 收 `Date`，SQLite 收整數（見 `Dialect.ts`）。 */
   it('converts the time value itself, not just the placeholder', () => {
     expect(postgresDialect.ts(0)).toBe('1970-01-01T00:00:00.000Z');
     expect(mysqlDialect.ts(0)).toBeInstanceOf(Date);
     expect((mysqlDialect.ts(0) as Date).toISOString()).toBe('1970-01-01T00:00:00.000Z');
+
+    /*
+     * SQLite 的欄位就是「UTC 毫秒」這個整數，所以 `ts()` 原樣回傳。這一條同時釘住「不會有人手癢把它
+     * 改成 `Date`」—— 改了的話 `node:sqlite` 會直接拋錯（它不收 `Date`），開發機上立刻看得到。
+     * SQLite's column *is* the UTC-millisecond integer, so `ts()` returns it unchanged. This also pins
+     * down "nobody helpfully turns it into a `Date`" — doing so makes `node:sqlite` throw outright (it
+     * takes no `Date`), which is visible on the developer's machine immediately.
+     */
+    expect(sqliteDialect.ts(0)).toBe(0);
+    expect(sqliteDialect.ts(1_700_000_000_000)).toBe(1_700_000_000_000);
+    expect(typeof sqliteDialect.ts(1_700_000_000_000)).toBe('number');
   });
 });
 
@@ -116,23 +165,42 @@ describe('Binder — 佔位符與參數要對得上 / placeholders and params mu
 
 describe('board order — 四個鍵的語意要一致 / the four keys mean the same thing', () => {
   /*
-   * 兩邊都必須是「分數降冪 → 同分較早優先 → id 收尾」。只差 `nulls last` 的寫法：MySQL 沒有這個
-   * 關鍵字，要用 `best_at is null` 當第一個排序鍵才等價。
-   * Both must be "score descending → earlier first → id last", and they differ only in nulls-last
-   * spelling: MySQL has no such keyword and needs `best_at is null` as a preceding sort key.
+   * 三邊都必須是「分數降冪 → 同分較早優先 → id 收尾」。只差 `nulls last` 的寫法：MySQL 沒有這個
+   * 關鍵字，要用 `best_at is null` 當第一個排序鍵才等價；Postgres 與 SQLite 都有（SQLite 是 3.30 起，
+   * Node 22 內建的是 3.51）。
+   * All three must be "score descending → earlier first → id last", differing only in nulls-last
+   * spelling: MySQL has no such keyword and needs `best_at is null` as a preceding sort key, while
+   * Postgres and SQLite both have it (in SQLite since 3.30; Node 22 bundles 3.51).
    */
-  it('orders by score, then time, then id on both dialects', () => {
+  it('orders by score, then time, then id on every dialect', () => {
     for (const dialect of DIALECTS) {
       const order = dialect.boardOrder('score');
 
-      expect(order).toContain('best_score desc');
-      expect(order).toContain('best_at');
-      expect(order).toContain('device_id asc');
+      expect(order, dialect.name).toContain('best_score desc');
+      expect(order, dialect.name).toContain('best_at');
+      expect(order, dialect.name).toContain('device_id asc');
     }
 
     expect(postgresDialect.boardOrder('score')).toContain('nulls last');
+    expect(sqliteDialect.boardOrder('score')).toContain('nulls last');
     expect(mysqlDialect.boardOrder('score')).toContain('best_at is null');
     expect(mysqlDialect.boardOrder('score')).not.toContain('nulls last');
+  });
+
+  /*
+   * MySQL 不能用 `nulls last`，那就是它**唯一**該出現 `is null` 的地方。SQLite 若哪天被人照抄成
+   * MySQL 的寫法，這一條會紅 —— 而那個寫法在 SQLite 上是多餘的（本來就支援 `nulls last`），多出來的
+   * 那個鍵還會讓排序變成兩份實作。
+   * MySQL cannot use `nulls last`, and that is the **only** place it should show up. If SQLite ever
+   * gets copied from MySQL's spelling this fails — it would be redundant there (nulls last is native),
+   * and the extra key would make the ordering two implementations instead of one.
+   */
+  it('spells nulls last natively on Postgres and SQLite, and only simulates it on MySQL', () => {
+    for (const dialect of [postgresDialect, sqliteDialect]) {
+      expect(dialect.boardOrder('score'), dialect.name).not.toContain('best_at is null');
+    }
+
+    expect(mysqlDialect.boardOrder('score')).toContain('best_at is null');
   });
 
   /*
@@ -158,8 +226,9 @@ describe('board order — 四個鍵的語意要一致 / the four keys mean the s
    * `MemoryStore.compareProfiles` is written against.
    */
   it('does not repeat the primary key on the score board', () => {
-    expect(postgresDialect.boardOrder('score').match(/best_score/gu)).toHaveLength(1);
-    expect(mysqlDialect.boardOrder('score').match(/best_score/gu)).toHaveLength(1);
+    for (const dialect of DIALECTS) {
+      expect(dialect.boardOrder('score').match(/best_score/gu), dialect.name).toHaveLength(1);
+    }
   });
 
   /*
@@ -171,6 +240,7 @@ describe('board order — 四個鍵的語意要一致 / the four keys mean the s
   it('uses the same tie-breakers on every category', () => {
     for (const category of BOARD_CATEGORIES) {
       expect(postgresDialect.boardOrder(category)).toContain('best_at asc nulls last, device_id asc');
+      expect(sqliteDialect.boardOrder(category)).toContain('best_at asc nulls last, device_id asc');
       expect(mysqlDialect.boardOrder(category)).toContain('best_at is null, best_at asc, device_id asc');
     }
   });
@@ -206,8 +276,16 @@ describe('isBoardCategory — 不認識的值要有明確的處置 / an unknown 
 /* ── 寫入語句 / The writes ─────────────────────────────────────────────────── */
 
 describe('writes — 形狀差異 / shape differences', () => {
-  it('uses on conflict on Postgres and on duplicate key on MySQL', () => {
+  /*
+   * 兩邊都用「衝突就什麼都不做」的冪等插入，但**寫法不同**：Postgres 與 SQLite 是
+   * `on conflict … do nothing`（標準 SQL），MySQL 只有 `on duplicate key update`。
+   * Both do an idempotent "on conflict, do nothing" insert, but the **spelling differs**: Postgres and
+   * SQLite use `on conflict … do nothing` (standard SQL) while MySQL only has `on duplicate key
+   * update`.
+   */
+  it('uses on conflict on Postgres and SQLite, and on duplicate key on MySQL', () => {
     expect(postgresDialect.insertRunToken()).toContain('on conflict (run_id) do nothing');
+    expect(sqliteDialect.insertRunToken()).toContain('on conflict (run_id) do nothing');
     expect(mysqlDialect.insertRunToken()).toContain('on duplicate key update run_id = run_id');
   });
 
@@ -224,9 +302,35 @@ describe('writes — 形狀差異 / shape differences', () => {
     }
   });
 
-  it('reports the insert via returning on Postgres and affected rows on MySQL', () => {
+  /*
+   * `insertScore` 的佔位符數量要**等於** `sqlStore.insertScore` 綁的參數數量（13 個）。兩邊一旦對不
+   * 上，Postgres 會說「參數不足」，而 MySQL 與 SQLite 會把後面的值**錯位**吃進去 —— 後者不會報錯，
+   * 只會寫進一組看似合理但完全錯誤的數字。
+   * The number of placeholders in `insertScore` must **equal** the number of parameters
+   * `sqlStore.insertScore` binds (13). Once the two disagree, Postgres says "not enough parameters"
+   * while MySQL and SQLite shift the values along — the latter raises nothing and simply writes a
+   * plausible-looking, entirely wrong set of numbers.
+   */
+  it('takes one placeholder per bound column, including the submission time', () => {
+    for (const dialect of DIALECTS) {
+      expect(placeholderCount(dialect.insertScore(), dialect), dialect.name).toBe(13);
+      /* 時間是第 13 個 —— 靠 DDL 的預設值會讓 `SqlStore` 與 `MemoryStore` 分歧（見 `sqlStore.ts`）。 */
+      expect(dialect.insertScore(), dialect.name).toContain('created_at');
+    }
+  });
+
+  it('reports the insert via returning on Postgres and SQLite, and affected rows on MySQL', () => {
     expect(postgresDialect.insertScore()).toContain('returning run_id');
     expect(postgresDialect.insertScoreSignal).toBe('rows');
+
+    /*
+     * SQLite 的 `returning` 是 3.35 起（Node 22 內建 3.51），所以它與 Postgres 走同一條路 —— 不必碰
+     * MySQL 那個 `affectedRows` 與 `FOUND_ROWS` 的地雷。
+     * SQLite's `returning` arrived in 3.35 (Node 22 bundles 3.51), so it takes Postgres's path and
+     * never goes near MySQL's `affectedRows` / `FOUND_ROWS` minefield.
+     */
+    expect(sqliteDialect.insertScore()).toContain('returning run_id');
+    expect(sqliteDialect.insertScoreSignal).toBe('rows');
 
     expect(mysqlDialect.insertScore()).not.toContain('returning');
     expect(mysqlDialect.insertScoreSignal).toBe('affected');
@@ -260,16 +364,50 @@ describe('writes — 形狀差異 / shape differences', () => {
     expect(scoreAt).toBeGreaterThan(bestAtAt);
   });
 
-  /* Postgres 不受順序影響（`excluded` 永遠是新的一列），但兩個方言都必須有那三個條件分支。 */
-  it('guards the duration behind the score on both dialects', () => {
+  /*
+   * 三個方言都必須有那三個條件分支，而且三個數值都是以「**資料庫裡的值**與新值取大」寫入 —— 不是
+   * `values(best_score)` 那種「相信客戶端送來的數字」。
+   * All three must carry those three conditional branches, and all three numbers must be written as
+   * the **greater of the stored value and the new one** — never as "trust the number the client sent".
+   */
+  it('guards the duration behind the score, and takes the greater value, on every dialect', () => {
     for (const dialect of DIALECTS) {
       const sql = dialect.upsertProfile();
 
-      expect(sql).toContain('best_duration_ms');
-      expect(sql).toContain('best_at');
-      /* 兩個最小值都用「取歷史最大」，不靠客戶端宣稱。 */
-      expect(sql.toLowerCase()).toContain('greatest');
+      expect(sql, dialect.name).toContain('best_duration_ms');
+      expect(sql, dialect.name).toContain('best_at');
+      expect(sql, dialect.name).toMatch(greaterCall('best_score'));
+      expect(sql, dialect.name).toMatch(greaterCall('best_max_combo'));
+      expect(sql, dialect.name).toMatch(greaterCall('best_merges'));
     }
+  });
+
+  /*
+   * SQLite 沒有 `greatest` —— 那在 SQLite 上是一個**語法錯誤**，不是「行為不同」。這一條把它釘住：
+   * 上面那條會接受兩種寫法，這條指定誰用哪一種。
+   * SQLite has no `greatest` — there it is a **syntax error**, not a behavioural difference. This pins
+   * which dialect uses which: the test above accepts either spelling, this one says who gets which.
+   */
+  it('uses max() on SQLite and greatest() elsewhere', () => {
+    expect(sqliteDialect.upsertProfile()).toMatch(/max\(profiles\.best_score\b/iu);
+    expect(sqliteDialect.upsertProfile()).not.toMatch(/greatest/iu);
+
+    for (const dialect of [postgresDialect, mysqlDialect]) {
+      expect(dialect.upsertProfile(), dialect.name).toMatch(/greatest\(profiles\.best_score\b/iu);
+    }
+  });
+
+  /*
+   * `created_at` 與 `updated_at` 是 `insert` 自己生的（`sqlStore.upsertProfile` 只綁 7 個參數），所以每
+   * 個方言都要有「現在」的表達式 —— 而 SQLite 沒有 `now()`。
+   * `created_at` and `updated_at` are produced by the `insert` itself (`sqlStore.upsertProfile` binds
+   * exactly seven parameters), so every dialect needs its own "right now" — and SQLite has no `now()`.
+   */
+  it('produces the current time without a bound parameter', () => {
+    expect(postgresDialect.upsertProfile()).toContain('now()');
+    expect(mysqlDialect.upsertProfile()).not.toContain('now()');
+    expect(sqliteDialect.upsertProfile()).toContain("strftime('%s','now')");
+    expect(sqliteDialect.upsertProfile()).not.toContain('now()');
   });
 });
 
@@ -279,43 +417,156 @@ describe('schema — 必須可重複執行 / it must be repeatable', () => {
   /*
    * 沒有 `if not exists` 的話，第二次執行（或本機先跑過一次再部署）就會炸在建表上。`ensureSchema`
    * 的整個設計就建立在這一條上面，所以它是這份檔案裡最重要的一條。
+   *
+   * MySQL 那一邊比較特別：它的索引是 `create table` 語句**的一部分**（`CREATE INDEX` 沒有
+   * `IF NOT EXISTS`），所以那一條語句本身就是「可重複執行」的完整要求。
    * Without `if not exists` the second run (or a local run before a deploy) explodes on the CREATE.
    * `ensureSchema`'s whole design rests on this, which makes it the most important test in the file.
+   *
+   * MySQL is the odd one out: its indexes are **part of** the `create table` statement (`CREATE INDEX`
+   * has no `IF NOT EXISTS`), so that one statement carries the whole repeatability requirement.
    */
-  it('uses only create … if not exists on both dialects', () => {
+  it('uses only create … if not exists on every dialect', () => {
     for (const dialect of DIALECTS) {
       const statements = dialect.schema();
 
-      expect(statements.length).toBeGreaterThan(0);
+      expect(statements.length, dialect.name).toBeGreaterThan(0);
 
       for (const statement of statements) {
-        expect(statement.toLowerCase().replace(/\s+/gu, ' ')).toContain('if not exists');
+        expect(statement.toLowerCase().replace(/\s+/gu, ' '), dialect.name).toContain(
+          'if not exists',
+        );
       }
     }
   });
 
-  /* 兩個方言要建出**同一組表** —— 少一張就是某個端點在其中一邊會 500。 */
-  it('creates the same set of tables on both dialects', () => {
+  /* 三個方言要建出**同一組表** —— 少一張就是某個端點在其中一邊會 500。 */
+  it('creates the same set of tables on every dialect', () => {
     const tablesOf = (dialect: Dialect): string[] =>
       dialect
         .schema()
         .flatMap((statement) => [...statement.matchAll(/create table if not exists\s+[`"]?(\w+)/giu)])
-        .map((match) => match[1] ?? '')
-        .sort();
+        .map((match) => match[1] ?? '');
 
-    expect(tablesOf(postgresDialect)).toEqual(['profiles', 'requests', 'run_tokens', 'scores']);
-    expect(tablesOf(mysqlDialect)).toEqual(tablesOf(postgresDialect));
+    expect(tablesOf(postgresDialect).sort()).toEqual([
+      'profiles',
+      'requests',
+      'run_tokens',
+      'scores',
+    ]);
+
+    /* 排序過才比 —— `requests` 在 MySQL 那份是排在最後的，那是它的可讀性順序，不是語意。 */
+    for (const dialect of [mysqlDialect, sqliteDialect]) {
+      expect([...tablesOf(dialect)].sort(), dialect.name).toEqual(tablesOf(postgresDialect).sort());
+    }
   });
 
   /*
    * MySQL 的建表語句把索引寫在**表內**（MySQL 的 `CREATE INDEX` 沒有 `IF NOT EXISTS`，分開寫就無法
-   * 重複執行），所以那一邊的索引不會出現在 `create index` 形式的語句裡。
+   * 重複執行），所以那一邊的索引不會出現在 `create index` 形式的語句裡。SQLite 則與 Postgres 一樣是
+   * 獨立的 `create index if not exists`。
    * MySQL puts indexes **inside** the table (its `CREATE INDEX` has no `IF NOT EXISTS`, so separate
    * statements could not be re-run), so that side's indexes never appear as `create index` statements.
+   * SQLite, like Postgres, writes them as standalone `create index if not exists`.
    */
-  it('declares the board index on both dialects', () => {
-    expect(postgresDialect.schema().join('\n')).toContain('profiles_best_score_idx');
-    expect(mysqlDialect.schema().join('\n')).toContain('profiles_best_score_idx');
+  it('declares the board index on every dialect', () => {
+    for (const dialect of DIALECTS) {
+      expect(dialect.schema().join('\n'), dialect.name).toContain('profiles_best_score_idx');
+    }
+  });
+
+  /*
+   * 未通過檢查的提交仍然佔速率限制的額度，所以 `scores` 上的那個部分索引（`where verified`）不是裝飾
+   * —— 三個方言都必須有這個索引，否則「先送一堆假成績」在某一邊會變成免費。
+   *
+   * ⚠️ 但**只有 Postgres 與 SQLite 是部分索引**：MySQL 沒有 `where` 這種寫法，它的版本索引所有列。
+   * 那不是錯（索引大一點而已），但把它當成「三個都一樣」就會在調校時看錯方向，所以測試講明白。
+   * Rejected submissions still consume the rate limit, so that index on `scores` (`where verified`) is
+   * not decoration: all three need it, or "spam fake scores first" becomes free on one of them.
+   *
+   * ⚠️ But **only Postgres and SQLite make it partial**: MySQL has no `where` clause there and indexes
+   * every row. That is not wrong (merely a larger index), but treating the three as identical would
+   * point any tuning work the wrong way, so the test says it out loud.
+   */
+  it('declares the scores index on every dialect, partial where the dialect allows it', () => {
+    for (const dialect of DIALECTS) {
+      expect(dialect.schema().join('\n'), dialect.name).toContain('scores_verified_score_idx');
+    }
+
+    for (const dialect of [postgresDialect, sqliteDialect]) {
+      expect(dialect.schema().join('\n'), dialect.name).toContain('where verified');
+    }
+
+    expect(mysqlDialect.schema().join('\n')).not.toContain('where verified');
+  });
+
+  /*
+   * ⚠️ `scores` **不可以**有外鍵指向 `profiles`，而且這一條是**功能性**的，不是風格問題。
+   *
+   * 它原本有（`references profiles … on delete cascade`），而它會讓兩個完全正常的寫入失敗：
+   *   1. 新裝置的第一次提交 —— `saveScore` 先寫 `scores` 才寫 `profiles`，順序不能反（冪等由 `scores`
+   *      那一句的結果決定），所以寫入時還沒有父列；
+   *   2. 被退回的提交 —— `verified = false` 的局**故意**不建 profile（要留審計痕跡但不進榜），所以它
+   *      永遠沒有父列，有外鍵就等於「不准留檔」。
+   *
+   * 這條測試是那條路徑唯一的守門人：真庫上的行為驗證在 `tests/db.integration.test.ts`（新裝置第一次
+   * 提交、以及被退回的局有沒有寫進去），而這一條在**沒有資料庫**時也會紅。
+   * ⚠️ `scores` must **not** carry a foreign key to `profiles`, and this is a **functional** rule
+   * rather than a matter of style.
+   *
+   * It used to (`references profiles … on delete cascade`), and that made two entirely normal writes
+   * fail: a new device's first submission (`saveScore` writes `scores` before `profiles` and cannot
+   * swap that order, since idempotency comes from the first statement's result, so there is no parent
+   * row yet) and a rejected submission (a `verified = false` run **deliberately** creates no profile —
+   * the audit trail is kept and the board is not touched — so it can never have a parent, which makes
+   * the key mean "refuse to record it").
+   *
+   * This is the only gate on that path that needs no database; the behavioural check lives in
+   * `tests/db.integration.test.ts` (a new device's first submission, and whether a rejected run gets
+   * written), and this one goes red without any database at all.
+   */
+  it('never points a foreign key from scores at profiles', () => {
+    for (const dialect of DIALECTS) {
+      const ddl = dialect.schema().join('\n').toLowerCase();
+
+      expect(ddl, dialect.name).not.toContain('references profiles');
+      expect(ddl, dialect.name).not.toMatch(/\bforeign key\b/u);
+    }
+  });
+});
+
+/* ── SQLite 的路徑與驅動 / SQLite's path and driver ────────────────────────── */
+
+describe('sqlitePathFromUrl — 從連線字串取檔案路徑 / extracting the file path', () => {
+  /*
+   * SQLite 的連線字串沒有 host 這個概念，所以 `//` 不代表「跳過一個主機名」而是「路徑從下一個字元
+   * 開始」。這一組案例把三種寫法都釘住，因為開發者會寫的是**最短的那一種**（`sqlite:.mysql/endchi.db`）。
+   * A SQLite connection string has no concept of a host, so `//` does not mean "skip a host name" but
+   * "the path starts at the next character". These cases pin all three spellings down, because the one
+   * a developer actually types is the **shortest** (`sqlite:.mysql/endchi.db`).
+   */
+  it('accepts a bare path after the scheme', () => {
+    expect(sqlitePathFromUrl('sqlite:.mysql/endchi.db')).toBe('.mysql/endchi.db');
+    expect(sqlitePathFromUrl('sqlite:/tmp/x.db')).toBe('/tmp/x.db');
+  });
+
+  it('strips the URL separator once', () => {
+    /* `//` 與 `///` 都只剝一層：`///` 剩下的那個 `/` 是 POSIX 的根目錄，不是多餘的分隔符。 */
+    expect(sqlitePathFromUrl('sqlite://rel/x.db')).toBe('rel/x.db');
+    expect(sqlitePathFromUrl('sqlite:///tmp/x.db')).toBe('/tmp/x.db');
+    /* Windows 磁碟機：`sqlite://E:/x.db` → `E:/x.db`（不可以被剝成 `/x.db`）。 */
+    expect(sqlitePathFromUrl('sqlite://E:/x.db')).toBe('E:/x.db');
+  });
+
+  /* 記憶體資料庫是測試的預設，而它有兩個等價的寫法。 */
+  it('keeps the in-memory marker recognisable', () => {
+    expect(sqlitePathFromUrl('sqlite::memory:')).toBe(':memory:');
+    expect(sqlitePathFromUrl(':memory:')).toBe(':memory:');
+  });
+
+  /* 沒有 scheme 時原樣當路徑 —— 這讓 `createSqliteDriver` 也能直接收一個檔案路徑。 */
+  it('treats a plain path as a path', () => {
+    expect(sqlitePathFromUrl('.mysql/endchi.db')).toBe('.mysql/endchi.db');
   });
 });
 
@@ -422,6 +673,17 @@ describe('reads — 驅動回來的值 / values coming back from the driver', ()
     /* MySQL 回來是 `Date`（`timezone: 'Z'`，見 `mysql.ts`）。 */
     expect(mysqlDialect.readTime(new Date(1_700_000_000_000))).toBe(1_700_000_000_000);
     expect(mysqlDialect.readTime(null)).toBeNull();
+
+    /*
+     * SQLite 回來就已經是毫秒整數（欄位就是那個整數），所以 `readTime` 只是把 `null` 擋掉。三個方言的
+     * **回傳型別**在這一行之後就統一了 —— 上面的三種輸入，下面 `sqlStore` 拿到的是同一個數字。
+     * SQLite comes back as the millisecond integer already (that *is* the column), so `readTime` only
+     * has to guard `null`. After this line the three dialects' **return types** are identical: three
+     * different inputs above, one number for `sqlStore` below.
+     */
+    expect(sqliteDialect.readTime(1_700_000_000_000)).toBe(1_700_000_000_000);
+    expect(sqliteDialect.readTime(0)).toBe(0);
+    expect(sqliteDialect.readTime(null)).toBeNull();
   });
 
   it('reads a MySQL datetime string as UTC, not as local time', () => {
@@ -433,30 +695,51 @@ describe('reads — 驅動回來的值 / values coming back from the driver', ()
   });
 
   /*
-   * 布林：Postgres 回真的 `true`／`false`，MySQL 回 `tinyint(1)` 的 1／0。混用的話 `verified` 會變成
-   * 「1 是真、0 也是真」（因為 `0` 是 truthy 的字串），於是未通過的提交也會進榜。
-   * Booleans: Postgres returns real `true` / `false`, MySQL returns `tinyint(1)`'s 1 / 0. Mixed up,
-   * `verified` becomes "1 is true and so is 0" (since the string `'0'` is truthy) and rejected
-   * submissions would land on the board.
+   * 布林：Postgres 回真的 `true`／`false`，MySQL 回 `tinyint(1)` 的 1／0，SQLite 回 `integer` 的 1／0
+   * （因為 `node:sqlite` 不收支數值）。混用的話 `verified` 會變成「1 是真、0 也是真」（因為 `0` 是
+   * truthy 的字串），於是未通過的提交也會進榜。
+   * Booleans: Postgres returns real `true` / `false`, MySQL returns `tinyint(1)`'s 1 / 0 and SQLite the
+   * `integer` 1 / 0 (`node:sqlite` takes no boolean). Mixed up, `verified` becomes "1 is true and so is
+   * 0" (since the string `'0'` is truthy) and rejected submissions would land on the board.
    */
   it('reads a boolean from either representation', () => {
     expect(postgresDialect.readBool(true)).toBe(true);
     expect(postgresDialect.readBool(false)).toBe(false);
 
-    expect(mysqlDialect.readBool(1)).toBe(true);
-    expect(mysqlDialect.readBool(0)).toBe(false);
-    expect(mysqlDialect.readBool('0')).toBe(false);
-    expect(mysqlDialect.readBool(false)).toBe(false);
+    for (const dialect of [mysqlDialect, sqliteDialect]) {
+      expect(dialect.readBool(1), dialect.name).toBe(true);
+      expect(dialect.readBool(0), dialect.name).toBe(false);
+      expect(dialect.readBool('0'), dialect.name).toBe(false);
+      expect(dialect.readBool(false), dialect.name).toBe(false);
+      /* `null`（欄位可空時）不可以被當成 true —— 那會讓「沒有這個欄位」變成「通過檢查」。 */
+      expect(dialect.readBool(null), dialect.name).toBe(false);
+    }
   });
 
-  it('coerces counts to numbers on both dialects', () => {
-    expect(postgresDialect.readNumber('42')).toBe(42);
-    expect(mysqlDialect.readNumber(42)).toBe(42);
-    expect(postgresDialect.readNumber(undefined)).toBe(0);
+  it('coerces counts to numbers on every dialect', () => {
+    for (const dialect of DIALECTS) {
+      expect(dialect.readNumber('42'), dialect.name).toBe(42);
+      expect(dialect.readNumber(42), dialect.name).toBe(42);
+      expect(dialect.readNumber(undefined), dialect.name).toBe(0);
+    }
 
-    /* Postgres 的 count 要 `::int` 才會是數字而不是字串。 */
+    /* Postgres 的 count 要 `::int` 才會是數字而不是字串；另外兩個本來就是數字，不必動。 */
     expect(postgresDialect.countInt('count(*)')).toBe('count(*)::int');
     expect(mysqlDialect.countInt('count(*)')).toBe('count(*)');
+    expect(sqliteDialect.countInt('count(*)')).toBe('count(*)');
+  });
+
+  /*
+   * 時間欄位的 SELECT 表達式。Postgres 要從 `timestamptz` 換算，另外兩個欄位本身就是毫秒。
+   * 這一條負責擋住「有人把 Postgres 的 `extract(epoch …)` 照抄到 SQLite」——那不會報錯，只會回 null。
+   * The SELECT expression for a time column. Postgres converts from `timestamptz` while the other two
+   * store milliseconds outright. This catches "someone copied Postgres's `extract(epoch …)` into
+   * SQLite", which would not throw — it would return null.
+   */
+  it('reads the time column without converting on MySQL and SQLite', () => {
+    expect(postgresDialect.epochMs('best_at')).toContain('extract(epoch from');
+    expect(mysqlDialect.epochMs('best_at')).toBe('best_at');
+    expect(sqliteDialect.epochMs('best_at')).toBe('best_at');
   });
 });
 
@@ -471,13 +754,38 @@ describe('dialectFromUrl — 猜方言 / guessing the flavour', () => {
   });
 
   /*
-   * 認不出來時回 Postgres 是刻意的保守選擇：那是目前正式部署用的方言，而猜錯的代價在文件裡講明了。
+   * SQLite 認的是 `sqlite:` 與 `sqlite3:` 兩個 scheme。兩者都要，因為 `sqlite3` 是 `better-sqlite3`
+   * 與一些 CLI 沿用的寫法，而**認錯 scheme 的後果是把一個檔案路徑餵給 Postgres**。
+   * SQLite answers to both `sqlite:` and `sqlite3:`. Both are needed because `sqlite3` is the spelling
+   * `better-sqlite3` and some CLIs use, and **getting the scheme wrong feeds a file path to Postgres**.
+   */
+  it('recognises both sqlite spellings, whatever the path looks like', () => {
+    expect(dialectFromUrl('sqlite:.mysql/endchi.db')).toBe('sqlite');
+    expect(dialectFromUrl('sqlite:///tmp/x.db')).toBe('sqlite');
+    expect(dialectFromUrl('sqlite::memory:')).toBe('sqlite');
+    expect(dialectFromUrl('sqlite3:/tmp/x.db')).toBe('sqlite');
+    expect(dialectFromUrl('SQLITE:.mysql/endchi.db')).toBe('sqlite');
+  });
+
+  /*
+   * 認不出來時回 Postgres 是刻意的保守選擇：那是正式部署用的方言，而猜錯的代價在文件裡講明了。
+   *
+   * `libsql://` 是刻意留在這一邊的例子：Turso／libSQL 是**託管的 SQLite**，語法上與這個方言幾乎一樣，
+   * 但它走的是 HTTP 而不是一個檔案，所以在這裡必須當成「還不支援」——把它猜成 Postgres 會在連線時大聲
+   * 失敗，比猜成 SQLite 然後在某個 API 形狀不同時靜靜出錯好。真要接的話是同一個 `Driver` 換一個實作
+   * （見 `sqlite.ts` 檔頭）。
    * Returning Postgres for anything unrecognised is the deliberately conservative choice: it is the
-   * dialect the current deployment uses, and the cost of guessing wrong is documented.
+   * dialect the deployment uses, and the cost of guessing wrong is documented.
+   *
+   * `libsql://` is the deliberate example of what stays on that side: Turso / libSQL is **hosted
+   * SQLite** and its syntax is nearly this dialect's, but it speaks HTTP rather than opening a file, so
+   * here it must count as "not supported yet" — guessing Postgres fails loudly at connect time, which
+   * beats guessing SQLite and then quietly breaking on an API difference. Supporting it means the same
+   * `Driver` with another implementation (see the header of `sqlite.ts`).
    */
   it('defaults to postgres when the scheme is unfamiliar', () => {
-    expect(dialectFromUrl('sqlite:///tmp/x.db')).toBe('postgres');
     expect(dialectFromUrl('')).toBe('postgres');
+    expect(dialectFromUrl('libsql://x.turso.io')).toBe('postgres');
   });
 
   /* 池化參數不該影響判斷（Neon 的 `-pooler` 主機名帶著查詢字串）。 */

@@ -52,9 +52,26 @@ create index if not exists profiles_best_score_idx
 -- One row per submission. `run_id` is unique, which is what makes the endpoint **idempotent**: a
 -- network retry of the same run does not double-count, and replaying an old `run_id` just returns
 -- the same verdict.
+--
+-- ⚠️ `device_id` **刻意不是**外鍵（它原本是 `references profiles … on delete cascade`，那是錯的）。
+-- 那條外鍵會擋掉兩個完全正常的寫入：
+--   1. **新裝置的第一次提交**。`saveScore` 先寫 `scores` 再寫 `profiles`，順序不能反 ——
+--      「這一局是不是新的」是由 `scores` 那一句的結果決定的。所以寫入的那一刻還沒有父列。
+--   2. **被退回的提交**。`verified = false` 的局故意不建 profile（見下方註解與 design.md §6.7），
+--      於是它永遠沒有父列；有外鍵就等於「拒絕留審計痕跡」，而那正是要留的東西。
+-- 反過來說那條外鍵買不到任何東西：沒有任何地方刪除 profile，`on delete cascade` 是裝飾品。所以這裡
+-- 不再宣告它，三個方言（Postgres／MySQL／SQLite）也就此一致。
+-- ⚠️ `device_id` is **deliberately not** a foreign key (it used to be
+-- `references profiles … on delete cascade`, and that was wrong). The key would block two entirely
+-- normal writes: a new device's first submission (`saveScore` writes `scores` before `profiles`, and
+-- the order cannot be swapped because whether the run is new is decided by that statement's result),
+-- and a rejected submission (a `verified = false` run purposely creates no profile, per design.md
+-- §6.7, so it can never have a parent — with the key, recording the audit trail becomes impossible).
+-- And the key buys nothing in return: nothing deletes a profile, so `on delete cascade` is
+-- decoration. It is therefore not declared here, which also makes Postgres, MySQL and SQLite agree.
 create table if not exists scores (
   run_id       uuid primary key,
-  device_id    text        not null references profiles (device_id) on delete cascade,
+  device_id    text        not null,
   display_name text        not null default '',
   score        integer     not null,
   duration_ms  integer     not null,

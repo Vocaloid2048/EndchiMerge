@@ -5,7 +5,8 @@
   "type": "module",
   "description": "EndchiMerge（方團團大作戰）— a browser-based physics merge puzzle game. Unofficial fan project.",
   "scripts": {
-    "dev": "vite",
+    "dev": "node --env-file-if-exists=.env --import tsx scripts/dev.ts",
+    "dev:web": "vite",
     "typecheck": "tsc -b",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",

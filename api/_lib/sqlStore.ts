@@ -198,6 +198,18 @@ export class SqlStore implements Store {
       row.verified,
       row.rejected,
       row.clientIp,
+      /*
+       * `atMs` 一定要綁進去。`scores.created_at` 有三個用途 —— 審計時間、速率限制的視窗
+       * （`countSubmissionsSince`）、以及 `getScore` 讀回來的 `atMs` —— 而 `MemoryStore` 三處都用呼叫端
+       * 傳進來的值。漏掉這個參數不會有任何錯誤：資料庫會用自己的時鐘填預設值，於是兩個 store 實作靜靜
+       * 地不一致，而單元測試走的正是 `MemoryStore`，看不到這件事。
+       * `atMs` must be bound. `scores.created_at` serves three purposes — the audit time, the rate-limit
+       * window (`countSubmissionsSince`) and the `atMs` that `getScore` reads back — and `MemoryStore`
+       * uses the caller's value for all three. Dropping this parameter raises nothing: the database fills
+       * in its own clock, so the two store implementations drift apart silently, and the unit tests run
+       * against `MemoryStore` and never see it.
+       */
+      this.dialect.ts(row.atMs),
     ]);
 
     /*

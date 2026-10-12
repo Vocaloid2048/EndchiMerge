@@ -240,10 +240,19 @@ export const mysqlDialect: Dialect = {
      values (?, ?, ?, ?, ?)
      on duplicate key update run_id = run_id`,
 
+  /*
+   * `created_at` 也是綁進去的（不是 `utc_timestamp(3)`）：這一欄是速率限制的依據與審計時間，而
+   * `MemoryStore` 用的是呼叫端傳進來的 `atMs` —— 靠資料庫的時鐘會讓兩個 store 實作分歧。理由與
+   * `postgres.ts` 那一份相同，連字數都一樣是刻意的：三份並排看時要是同一件事。
+   * `created_at` is bound here too (rather than `utc_timestamp(3)`): the column backs the rate limit and
+   * the audit trail, and `MemoryStore` uses the caller's `atMs` — leaning on the database clock would
+   * make the two store implementations diverge. Same reasoning as `postgres.ts`'s copy, and the
+   * deliberately identical wording is the point: side by side, all three should read as one thing.
+   */
   insertScore: () => `insert into scores (
        run_id, device_id, display_name, score, duration_ms, merges, drops, max_combo,
-       version, verified, rejected, client_ip
-     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       version, verified, rejected, client_ip, created_at
+     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      on duplicate key update run_id = run_id`,
 
   /* MySQL 沒有 `RETURNING`，改看 `affectedRows`（見 `MysqlDriver.query`）。 */
@@ -290,6 +299,15 @@ export const mysqlDialect: Dialect = {
    * case-sensitive**, hence deterministic — `device_id` is the board's final tie-break, and a
    * case-insensitive collation would let the order of two fully-tied rows depend on collation
    * internals.
+   *
+   * ⚠️ `scores` **沒有**外鍵指向 `profiles`，這是刻意的：新裝置的第一次提交（`saveScore` 先寫
+   * `scores` 才寫 `profiles`）與被退回的提交（`verified = false`，故意不建 profile）都會被外鍵擋掉，
+   * 而那個外鍵買不到任何東西（沒有任何地方刪除 profile）。完整理由寫在 `postgres.ts` 的 `scores`
+   * 建表語句上方。
+   * ⚠️ `scores` has **no** foreign key to `profiles`, deliberately: a new device's first submission
+   * (`saveScore` writes `scores` before `profiles`) and a rejected one (`verified = false`, which
+   * purposely creates no profile) would both be rejected by it, and the key buys nothing (nothing
+   * deletes a profile). The full reasoning sits above the `scores` statement in `postgres.ts`.
    */
   schema: () => [
     `create table if not exists \`profiles\` (
@@ -322,9 +340,7 @@ export const mysqlDialect: Dialect = {
        \`created_at\`   datetime(3)  not null default utc_timestamp(3),
        primary key (\`run_id\`),
        key \`scores_device_idx\` (\`device_id\`, \`created_at\` desc),
-       key \`scores_verified_score_idx\` (\`score\` desc),
-       constraint \`scores_device_fk\` foreign key (\`device_id\`)
-         references \`profiles\` (\`device_id\`) on delete cascade
+       key \`scores_verified_score_idx\` (\`score\` desc)
      ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_bin`,
     `create table if not exists \`run_tokens\` (
        \`run_id\`     char(36)     not null,

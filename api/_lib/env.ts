@@ -28,12 +28,13 @@ export interface Config {
    * Which flavour of SQL the connection string speaks.
    *
    * 由 `DB_DIALECT` 決定；沒設定時**從連線字串的 scheme 猜**（`postgres://` → Postgres、
-   * `mysql://` → MySQL）。猜的理由是讓最常見的設定「只填一個 `DATABASE_URL` 就能跑」；但猜錯時
-   * 錯誤訊息會很難懂（拿 MySQL 的 `?` 去餵 Postgres），所以 `DB_DIALECT` 永遠可以覆寫。
+   * `mysql://` → MySQL、`sqlite:` → SQLite）。猜的理由是讓最常見的設定「只填一個 `DATABASE_URL`
+   * 就能跑」；但猜錯時錯誤訊息會很難懂（拿 MySQL 的 `?` 去餵 Postgres），所以 `DB_DIALECT` 永遠可以
+   * 覆寫。
    * Decided by `DB_DIALECT`, or **inferred from the connection string's scheme** when unset
-   * (`postgres://` → Postgres, `mysql://` → MySQL). Inferring means the common case needs nothing but
-   * a `DATABASE_URL`; but a wrong guess produces a confusing error (MySQL's `?` fed to Postgres), so
-   * `DB_DIALECT` always overrides.
+   * (`postgres://` → Postgres, `mysql://` → MySQL, `sqlite:` → SQLite). Inferring means the common case
+   * needs nothing but a `DATABASE_URL`; but a wrong guess produces a confusing error (MySQL's `?` fed
+   * to Postgres), so `DB_DIALECT` always overrides.
    */
   readonly dbDialect: DialectName;
   readonly runTokenSecret: string;
@@ -97,12 +98,17 @@ function readIpStorage(raw: string | undefined): IpStorageMode {
  * field (a typo should not stop the backend). But `DB_DIALECT` matters more here than elsewhere: a
  * wrong guess produces SQL syntax errors, and those messages do not say "you fed MySQL's `?` to
  * Postgres".
+ *
+ * `sqlite` 也認得（本機開發用）—— 它的三種寫法都收，因為 `SQLITE`／`sqlite3` 都可能有人填。
+ * `sqlite` is recognised too (for local development), in all three spellings, since someone may well
+ * write `SQLITE` or `sqlite3`.
  */
 function readDialect(raw: string | undefined, url: string): DialectName {
   const value = (raw ?? '').trim().toLowerCase();
 
   if (value === 'mysql' || value === 'mariadb') return 'mysql';
   if (value === 'postgres' || value === 'postgresql' || value === 'pg') return 'postgres';
+  if (value === 'sqlite' || value === 'sqlite3') return 'sqlite';
 
   return dialectFromUrl(url);
 }

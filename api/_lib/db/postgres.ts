@@ -167,10 +167,21 @@ export const postgresDialect: Dialect = {
      values ($1, $2, $3, $4::timestamptz, $5::timestamptz)
      on conflict (run_id) do nothing`,
 
+  /*
+   * ⚠️ `created_at` 是**綁進去的**，不是靠 DDL 的 `default now()`。這一欄是速率限制的依據
+   * （`countSubmissionsSince`）與審計時間，而 `MemoryStore` 用的是呼叫端傳進來的 `atMs` —— 靠
+   * 預設值的話兩個 store 的實作就會分歧，而那個分歧只有在真的連上資料庫時才看得出來（本機與單元測試
+   * 一律走 `MemoryStore`）。
+   * ⚠️ `created_at` is **bound**, not left to the DDL's `default now()`. That column is what the rate
+   * limit counts (`countSubmissionsSince`) and what the audit trail records, and `MemoryStore` uses the
+   * `atMs` the caller passed — relying on the default would make the two store implementations diverge,
+   * and that divergence only shows up against a real database (local runs and unit tests all go through
+   * `MemoryStore`).
+   */
   insertScore: () => `insert into scores (
        run_id, device_id, display_name, score, duration_ms, merges, drops, max_combo,
-       version, verified, rejected, client_ip
-     ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       version, verified, rejected, client_ip, created_at
+     ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::timestamptz)
      on conflict (run_id) do nothing
      returning run_id`,
 
@@ -207,9 +218,44 @@ export const postgresDialect: Dialect = {
      )`,
     `create index if not exists profiles_best_score_idx
        on profiles (best_score desc, best_at asc)`,
+    /*
+     * ⚠️ `scores.device_id` **刻意不是**外鍵。它原本是（`references profiles … on delete cascade`），
+     * 那是錯的，而且錯得會擋掉兩個正常路徑：
+     *
+     *   1. **新裝置的第一次提交永遠失敗。** `sqlStore.saveScore` 先寫 `scores` 再寫 `profiles` ——
+     *      順序不能反，因為「這一局是不是新的」是由 `scores` 那一句的結果決定的（冪等）。所以寫入的
+     *      那一刻 `profiles` 裡還沒有這一列，外鍵當場拒絕。
+     *   2. **被退回的提交根本寫不進去。** `verified = false` 的局**故意**不建 profile（design.md §6.7：
+     *      留審計痕跡但不進榜），於是它永遠沒有父列。有外鍵就等於「拒絕留檔」，而那正是要留的東西。
+     *
+     * 反過來看，那個外鍵**買不到任何東西**：整個程式沒有任何地方刪除 profile，所以
+     * `on delete cascade` 是裝飾品，而它唯一可觀察的效果就是拒絕合法的寫入。
+     *
+     * 這三條加起來的結論是「這不是取捨，是矛盾」—— 所以拿掉它，並且讓三個方言一致（約束是最容易在
+     * 不同引擎上出現不同錯誤碼的東西，正是 `Dialect` 這一層想避免的）。
+     * ⚠️ `scores.device_id` is **deliberately not** a foreign key. It used to be
+     * (`references profiles … on delete cascade`) and that was wrong in a way that blocks two normal
+     * paths:
+     *
+     *   1. **A new device's first submission always fails.** `sqlStore.saveScore` writes `scores` before
+     *      `profiles`, and the order cannot be swapped because whether the run is new is decided by that
+     *      first statement's result (idempotency). At the moment of the insert there is therefore no
+     *      parent row, and the key rejects it.
+     *   2. **A rejected submission cannot be written at all.** A run with `verified = false`
+     *      **deliberately** creates no profile (design.md §6.7: keep an audit trail, keep it off the
+     *      board), so it can never have a parent. With the key in place that means "refuse to record
+     *      it", which is the one thing that must not happen.
+     *
+     * Looked at the other way, the key **buys nothing**: nothing in the codebase deletes a profile, so
+     * `on delete cascade` is decoration, and its only observable effect was rejecting legitimate writes.
+     *
+     * Together those add up to "this is not a trade-off, it is a contradiction", so the key is gone —
+     * and all three dialects agree (constraints are the thing most likely to fail with different error
+     * codes per engine, which is exactly what the `Dialect` layer exists to avoid).
+     */
     `create table if not exists scores (
        run_id       uuid primary key,
-       device_id    text        not null references profiles (device_id) on delete cascade,
+       device_id    text        not null,
        display_name text        not null default '',
        score        integer     not null,
        duration_ms  integer     not null,
