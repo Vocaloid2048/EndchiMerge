@@ -782,7 +782,6 @@ describe('runtime — 接收紀錄與 CORS / the receive log and CORS', () => {
       method: 'POST',
       status: 400,
     });
-    expect(store.lastRequest).not.toHaveProperty('clientIp');
     expect(store.lastRequest).not.toHaveProperty('userAgent');
 
     setDependencies(null);

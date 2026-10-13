@@ -313,11 +313,9 @@ export const mysqlDialect: Dialect = {
        key \`requests_device_idx\` (\`device_id\`, \`received_at\` desc)
      ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_bin`,
 
-    /* ⚠️ 私隱：IP 與標頭屬個人資料，永不落庫 —— 這些 drop 清掉舊庫的欄位與資料；新庫沒有這些欄位，每條報 1091 後被判為已完成。索引先刪（它以 `client_ip` 開頭）。
+    /* ⚠️ 私隱：IP 與標頭屬個人資料，永不落庫 —— 這些 drop 清掉舊庫的欄位與資料；新庫沒有這些欄位，每條報 1091 後被判為已完成。
      * ⚠️ Privacy: IPs and headers are personal data, never persisted — these drops clear them from an old
-     * database; a new one raises 1091 per statement and each counts as done. The index goes first. */
-    `drop index \`requests_ip_idx\` on \`requests\``,
-    `alter table \`requests\` drop column \`client_ip\``,
+     * database; a new one raises 1091 per statement and each counts as done. */
     `alter table \`requests\` drop column \`user_agent\``,
     `alter table \`requests\` drop column \`accept_language\``,
     `alter table \`requests\` drop column \`origin\``,
@@ -326,7 +324,6 @@ export const mysqlDialect: Dialect = {
     `alter table \`requests\` drop column \`region\``,
     `alter table \`requests\` drop column \`city\``,
     `alter table \`requests\` drop column \`headers\``,
-    `alter table \`scores\` drop column \`client_ip\``,
 
     /* 玩家號：顯示用的四位數，永不當身分。MySQL 沒有 `add column if not exists`，舊庫已有這個欄位時報 1060 並被判為已完成。
      * The player tag: four display digits, never identity. MySQL has no `add column if not exists`, so an

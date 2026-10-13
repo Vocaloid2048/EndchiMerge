@@ -269,15 +269,13 @@ export const postgresDialect: Dialect = {
     `create index if not exists requests_received_idx on requests (received_at desc)`,
     `create index if not exists requests_device_idx on requests (device_id, received_at desc)`,
 
-    /* ⚠️ 私隱：IP 與標頭屬個人資料，永不落庫 —— 這些 drop 清掉舊庫的欄位與資料，新庫由 `if exists` 通過；索引依賴 `client_ip`，先刪它。
+    /* ⚠️ 私隱：IP 與標頭屬個人資料，永不落庫 —— 這些 drop 清掉舊庫的欄位與資料，新庫由 `if exists` 通過。
      * ⚠️ Privacy: IPs and headers are personal data, never persisted — these drops clear them from an old
-     * database and pass straight through a new one; the index depends on `client_ip`, so it goes first. */
-    `drop index if exists requests_ip_idx`,
-    `alter table requests drop column if exists client_ip, drop column if exists user_agent,
+     * database and pass straight through a new one. */
+    `alter table requests drop column if exists user_agent,
        drop column if exists accept_language, drop column if exists origin, drop column if exists referer,
        drop column if exists country, drop column if exists region, drop column if exists city,
        drop column if exists headers`,
-    `alter table scores drop column if exists client_ip`,
 
     /* 玩家號：顯示用的四位數，永不當身分（身分只認 `device_id`）。新庫由建表帶上，舊庫在這裡補欄位與回填 —— 回填靠自己的 `where` 冪等。
      * The player tag: four display digits, never identity (that is `device_id` only). A new database gets

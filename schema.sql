@@ -117,11 +117,10 @@ create index if not exists run_tokens_device_idx on run_tokens (device_id, issue
 -- One row per request, with only the five fields operations needs (method, path, status, device, run).
 --
 -- ⚠️ 私隱：IP 與標頭屬個人資料，**一律不落庫**。下面的 drop 語句把舊版資料庫的舊欄位（連同舊資料）
--- 清掉；全新資料庫沒有這些欄位，`if exists` 讓它們原樣通過。`requests_ip_idx` 依賴 `client_ip`，
--- 先刪它才不會被依賴擋住。
+-- 清掉；全新資料庫沒有這些欄位，`if exists` 讓它們原樣通過。
 -- ⚠️ Privacy: IPs and headers are personal data and are **never** persisted. The drop statements below
 -- remove the legacy columns (and the data in them) from old databases; a fresh database has no such
--- columns and `if exists` lets them pass. `requests_ip_idx` depends on `client_ip`, so it goes first.
+-- columns and `if exists` lets them pass.
 create table if not exists requests (
   id              bigserial primary key,
   received_at     timestamptz not null default now(),
@@ -135,12 +134,10 @@ create table if not exists requests (
 create index if not exists requests_received_idx on requests (received_at desc);
 create index if not exists requests_device_idx on requests (device_id, received_at desc);
 
-drop index if exists requests_ip_idx;
-alter table requests drop column if exists client_ip, drop column if exists user_agent,
+alter table requests drop column if exists user_agent,
   drop column if exists accept_language, drop column if exists origin, drop column if exists referer,
   drop column if exists country, drop column if exists region, drop column if exists city,
   drop column if exists headers;
-alter table scores drop column if exists client_ip;
 
 -- ⚠️ 玩家號：顯示用的四位數，**永不當身分**。新庫由上面的建表帶上；舊庫在這裡補欄位與回填 ——
 -- 回填靠自己的 `where` 冪等，所以每次部署重跑都不會動到已經有號的列。

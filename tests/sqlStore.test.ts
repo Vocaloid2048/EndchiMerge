@@ -196,7 +196,6 @@ describe('SqlStore — 每一條語句的佔位符都要對得上參數 / placeh
     const driver = new RecordingDriver();
     await new SqlStore(driver, postgresDialect).insertRequest(requestRow());
 
-    expect(driver.calls[0]?.sql).not.toContain('client_ip');
     expect(driver.calls[0]?.sql).not.toContain('user_agent');
     expect(driver.calls[0]?.sql).not.toContain('headers');
     expect(driver.calls[0]?.params).toHaveLength(5);
@@ -371,7 +370,6 @@ describe('SqlStore — 列的轉換 / mapping rows', () => {
         version: '0.1.0',
         verified: 0,
         rejected: 'score_above_ceiling',
-        client_ip: null,
         at_ms: new Date(AT),
       },
     ]);

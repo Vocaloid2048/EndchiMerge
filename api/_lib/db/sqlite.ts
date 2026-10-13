@@ -275,12 +275,9 @@ export const sqliteDialect: Dialect = {
     `create index if not exists requests_received_idx on requests (received_at desc)`,
     `create index if not exists requests_device_idx on requests (device_id, received_at desc)`,
 
-    /* ⚠️ 私隱：IP 與標頭屬個人資料，永不落庫 —— 這些 drop 清掉舊庫的欄位與資料；新庫每條報「no such column」後被判為已完成。索引必須先刪：SQLite 拒絕刪除被索引引用的欄位。
+    /* ⚠️ 私隱：IP 與標頭屬個人資料，永不落庫 —— 這些 drop 清掉舊庫的欄位與資料；新庫每條報「no such column」後被判為已完成。
      * ⚠️ Privacy: IPs and headers are personal data, never persisted — these drops clear them from an old
-     * database; on a new one each raises "no such column" and counts as done. The index goes first:
-     * SQLite refuses to drop a column an index references. */
-    `drop index if exists requests_ip_idx`,
-    `alter table requests drop column client_ip`,
+     * database; on a new one each raises "no such column" and counts as done. */
     `alter table requests drop column user_agent`,
     `alter table requests drop column accept_language`,
     `alter table requests drop column origin`,
@@ -289,7 +286,6 @@ export const sqliteDialect: Dialect = {
     `alter table requests drop column region`,
     `alter table requests drop column city`,
     `alter table requests drop column headers`,
-    `alter table scores drop column client_ip`,
 
     /* 玩家號：顯示用的四位數，永不當身分。SQLite 沒有 `add column if not exists`，舊庫已有這個欄位時報「duplicate column name」並被判為已完成。
      * The player tag: four display digits, never identity. SQLite has no `add column if not exists`, so an

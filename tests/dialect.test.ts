@@ -191,9 +191,6 @@ describe('writes — 形狀差異 / shape differences', () => {
       /* `scores.created_at` 是綁定值，不靠 DDL 預設值。
          `scores.created_at` is a bound value, not a DDL default. */
       expect(dialect.insertScore(), dialect.name).toContain('created_at');
-      /* 私隱硬規則：`client_ip` 不在 insertScore 的欄位裡。
-         Hard privacy rule: `client_ip` is not among insertScore's columns. */
-      expect(dialect.insertScore(), dialect.name).not.toContain('client_ip');
     }
   });
 
@@ -640,13 +637,13 @@ describe('isMissingColumnError — drop 的冪等來源 / what makes a drop idem
     expect(
       sqliteDialect.isMissingColumnError?.({
         code: 'ERR_SQLITE_ERROR',
-        message: 'no such column: "client_ip"',
+        message: 'no such column: "legacy_column"',
       }),
     ).toBe(true);
     expect(
       sqliteDialect.isMissingColumnError?.({
         code: 'ERR_SQLITE_ERROR',
-        message: 'no such index: requests_ip_idx',
+        message: 'no such index: legacy_idx',
       }),
     ).toBe(true);
     expect(

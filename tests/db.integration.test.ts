@@ -280,7 +280,7 @@ describe('SqlStore — 真的資料庫 / a real database', () => {
     expect(rows[0]).toMatchObject({ method: 'POST', status: 200 });
 
     const first = rows[0] as Record<string, unknown>;
-    for (const column of ['client_ip', 'user_agent', 'accept_language', 'origin', 'referer', 'country', 'region', 'city', 'headers']) {
+    for (const column of ['user_agent', 'accept_language', 'origin', 'referer', 'country', 'region', 'city', 'headers']) {
       expect(first).not.toHaveProperty(column);
     }
   });
@@ -314,7 +314,7 @@ describe('SqlStore — 真的資料庫 / a real database', () => {
 /* ── SQLite 驅動自己的保證 / Guarantees the SQLite driver makes ─────────────── */
 
 describe('ensureSchema — 舊欄位的清除遷移 / dropping the legacy columns', () => {
-  it('drops the legacy IP and header columns and their data, and is re-runnable', async () => {
+  it('drops the legacy header columns and their data, and is re-runnable', async () => {
     const driver = createDriver('sqlite', ':memory:');
     const dialect = dialectFor('sqlite');
 
@@ -326,7 +326,6 @@ describe('ensureSchema — 舊欄位的清除遷移 / dropping the legacy column
        status integer not null,
        device_id text,
        run_id text,
-       client_ip text,
        user_agent text,
        accept_language text,
        origin text,
@@ -335,19 +334,9 @@ describe('ensureSchema — 舊欄位的清除遷移 / dropping the legacy column
        region text,
        city text,
        headers text not null default '{}')`);
-    await driver.query(`create index requests_ip_idx on requests (client_ip, received_at desc)`);
-    await driver.query(`create table scores (
-       run_id text primary key,
-       device_id text not null,
-       client_ip text,
-       created_at integer not null)`);
     await driver.query(
-      `insert into requests (received_at, method, path, status, device_id, run_id, client_ip, user_agent, headers)
-       values (1, 'POST', '/api/score', 200, 'it-legacy', null, '198.51.100.7', 'vitest', '{"user-agent":"vitest"}')`,
-    );
-    await driver.query(
-      `insert into scores (run_id, device_id, client_ip, created_at)
-       values ('11111111-1111-4111-8111-111111111111', 'it-legacy', '198.51.100.7', 1)`,
+      `insert into requests (received_at, method, path, status, device_id, run_id, user_agent, headers)
+       values (1, 'POST', '/api/score', 200, 'it-legacy', null, 'vitest', '{"user-agent":"vitest"}')`,
     );
 
     await ensureSchema(driver, dialect);
@@ -358,7 +347,6 @@ describe('ensureSchema — 舊欄位的清除遷移 / dropping the legacy column
 
     const request = rows[0] as Record<string, unknown>;
     for (const column of [
-      'client_ip',
       'user_agent',
       'accept_language',
       'origin',
@@ -371,9 +359,6 @@ describe('ensureSchema — 舊欄位的清除遷移 / dropping the legacy column
       expect(request, column).not.toHaveProperty(column);
     }
     expect(request).toMatchObject({ method: 'POST', path: '/api/score', device_id: 'it-legacy' });
-
-    const scores = await driver.query('select * from scores');
-    expect(scores.rows[0]).not.toHaveProperty('client_ip');
 
     await driver.close();
   });

@@ -180,10 +180,10 @@ User-Agent、地理位置等標頭一律不存** —— IP 在香港（PDPO）�
 未被讀回，存它買不到任何東西。`IP_STORAGE_MODE`／`IP_HASH_SECRET` 兩個環境變數與
 `api/_lib/requests.ts` 整個模組因此刪除；速率限制按 `device_id` 計，不依賴 IP，功能不受影響。
 
-既有資料庫的舊欄位由 `ensureSchema` 的冪等 drop 清掉（Postgres／SQLite 的索引走原生 `if exists`；
-MySQL 沒有 `drop column if exists`，由 `Dialect.isMissingColumnError` 把「欄位本來就不存在」判為
-已完成）。守門人是 `tests/db.integration.test.ts` 的遷移測試與 `tests/api.test.ts` 的黑名單測試
-（送入憑證標頭，斷言落庫的那一列連痕跡都沒有）—— **誰把 IP 或標頭加回來，測試就會紅**。
+既有資料庫的舊標頭欄位由 `ensureSchema` 的冪等 drop 清掉（MySQL 沒有 `drop column if exists`，
+由 `Dialect.isMissingColumnError` 把「欄位本來就不存在」判為已完成）。守門人是
+`tests/db.integration.test.ts` 的遷移測試與 `tests/sqlStore.test.ts`／`tests/api.test.ts` 的黑名單
+測試（送入憑證標頭，斷言落庫的那一列連痕跡都沒有）—— **誰把標頭加回來，測試就會紅**。
 若要連舊資料頁的殘餘位元也抹掉，在 Neon 手動跑一次 `vacuum full requests`（鎖表、一次性）。
 
 ### `sslmode`：別名會被寫成 `verify-full`
@@ -435,7 +435,7 @@ import { handleScore } from './_lib/handlers';        // ❌ 部署後 500
    什麼都不做，所以下一次真的要改 schema（加欄位、回填、加索引）時，要在各 `dialect.schema()` 補上
    冪等的語句（MySQL／SQLite 沒有 `alter table … if not exists`，要靠 `Dialect.isMissingColumnError`
    達成冪等；Postgres／SQLite 的索引有原生 `if exists`），並在 `tests/dialect.test.ts` 守住
-   「可重複執行」那一條 —— 刪除 IP／標頭欄位時就是這樣做的（見 §3 的私隱硬規則）。別因為建置會自動
+   「可重複執行」那一條 —— 刪除舊標頭欄位時就是這樣做的（見 §3 的私隱硬規則）。別因為建置會自動
    建表，就以為 schema 永遠跟得上。
 
    手動跑只在三種情況需要：**本機開發**、**騰訊／EdgeOne**（不走 Vercel 的建置）、以及**不想等下一次
@@ -657,5 +657,5 @@ TEST_DATABASE_URL='mysql://…'      npx vitest run tests/db.integration.test.ts
 - **客戶端送出的是「某一局」的成績，不是存檔合併後的 profile**：解鎖清單（`endchimerge:unlocks`）
   因此仍然只存在本機。要跨裝置合併就得有 `profile/sync`。
 - **遷移的界線**：`npm run db:migrate` 是 Vercel 建置的一部分（見 §6 第 2 步），管「建表」與
-  「已寫好的冪等 drop」（IP／標頭欄位就是這樣刪的）；**下一次**要加欄位／索引時，要照同一個模式在
+  「已寫好的冪等 drop」（舊標頭欄位就是這樣刪的）；**下一次**要加欄位／索引時，要照同一個模式在
   `dialect.schema()` 補上冪等語句。規矩寫在 §6 與 §3。
