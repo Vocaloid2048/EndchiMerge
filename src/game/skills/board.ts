@@ -1,13 +1,6 @@
 /**
- * 技能與棋盤之間的介面。
- * The interface between a skill and the board.
- *
- * 技能類別**不認識** `GameSession`、也不認識 Matter.js：它們只看到這幾個動作。這樣
- * `src/game/skills/` 可以獨立測試（餵一個假的棋盤），而 `GameSession` 也可以在不改技能
- * 程式碼的情況下換掉實作細節。
- * Skill classes know **neither** `GameSession` nor Matter.js — only these few actions. That
- * keeps `src/game/skills/` testable with a fake board and lets `GameSession` change its
- * implementation details without touching a single skill.
+ * 技能與棋盤之間的介面：技能類別不認識 `GameSession` 也不認識 Matter.js，只看得到這幾個動作。
+ * The interface between a skill and the board: skills know neither `GameSession` nor Matter.js — only these actions.
  */
 
 /**
@@ -15,68 +8,85 @@
  * One target a skill can select — a single dumpling on the board.
  */
 export interface BoardTarget {
-  /** 剛體識別碼；技能只把它當成不透明的代號傳回去。 */
+  /**
+   * 剛體識別碼；技能只把它當成不透明的代號傳回去。
+   * The body id; skills pass it back as an opaque token.
+   */
   id: number;
-  /** 等級編號（畫面與除錯用）。 */
   levelId: number;
-  /** 圓心 X，虛擬單位。 */
   x: number;
-  /** 圓心 Y，虛擬單位。 */
   y: number;
-  /** 碰撞半徑，虛擬單位。 */
   radius: number;
 }
 
-/** 浮動的請求參數。 */
+/**
+ * 浮動的請求參數。
+ * Parameters of a float request.
+ */
 export interface FloatRequest {
-  /** 作用時間，毫秒。 */
   durationMs: number;
-  /** 向上加速度相對重力的倍率。 */
   liftFactor: number;
   /**
-   * 追趕倍率（可省略，預設由 `FloatSkill` 決定）：浮動期間**仍落在天花板帶下方**的顆粒，
-   * 每步額外獲得此倍率重力的向上力，直到它抵達天花板帶為止。
-   * Catch-up factor (optional): while afloat, any body still **below the ceiling band** gets an
-   * extra upward force of this many gravities each step, until it reaches the band.
+   * 追趕倍率（可省略）：浮動期間仍落在天花板帶下方的顆粒，每步額外獲得此倍率重力的向上力。
+   * Catch-up factor (optional): while afloat, bodies still below the ceiling band gain this many extra gravities upward each step.
    */
   catchupFactor?: number;
 }
 
-/** 搖晃的請求參數。 */
+/**
+ * 搖晃的請求參數。
+ * Parameters of a shake request.
+ */
 export interface ShakeRequest {
-  /** 作用時間，毫秒。 */
   durationMs: number;
-  /** 容器往復擺動的圈數。 */
   revolutions: number;
-  /** 位移幅度相對容器寬度的比例（已由技能夾在硬上限內）。 */
+  /**
+   * 位移幅度相對容器寬度的比例（已由技能夾在硬上限內）。
+   * The displacement amplitude as a fraction of the container width (already clamped by the skill).
+   */
   radiusFactor: number;
-  /** 擺動軸相對水平線的傾角，度（0 ＝ 純水平地震）。 */
+  /**
+   * 擺動軸相對水平線的傾角，度（0 ＝ 純水平地震）。
+   * The swing axis' tilt from horizontal, in degrees (0 ＝ a purely horizontal quake).
+   */
   axisTiltDeg: number;
-  /** 持續向上力，以水平衝量峰值為比例。 */
   upwardFactor: number;
 }
 
 /**
- * 技能可以對棋盤做的動作。
- * The actions a skill may perform on the board.
- *
- * 每一個動作都由 `GameSession` 實作；技能只負責「決定要做什麼、用什麼參數」。
- * `GameSession` implements every one of them; a skill only decides *what* to do and *with
- * which parameters*.
+ * 技能可以對棋盤做的動作；全部由 `GameSession` 實作，技能只決定「做什麼、用什麼參數」。
+ * The actions a skill may perform on the board; `GameSession` implements them all — a skill only decides what to do and with which parameters.
  */
 export interface SkillBoard {
-  /** 場上所有可以被選取的目標（＝已經落下的方團團）。 */
+  /**
+   * 場上所有可以被選取的目標（＝已經落下的方團團）。
+   * Every selectable target on the board (all dropped dumplings).
+   */
   readonly targets: readonly BoardTarget[];
-  /** 移除一顆方團團；回傳是否真的移除了。 */
+  /**
+   * 移除一顆方團團；回傳是否真的移除了。
+   * Removes one dumpling; returns whether it was actually removed.
+   */
   removeTarget(id: number): boolean;
-  /** 交換兩顆方團團的位置，並對周邊施加 `disturbance` 的擾動。 */
+  /**
+   * 交換兩顆方團團的位置，並對周邊施加 `disturbance` 的擾動。
+   * Swaps two dumplings' positions and disturbs their surroundings by `disturbance`.
+   */
   swapTargets(a: number, b: number, disturbance: number): void;
-  /** 讓所有方團團向上浮起一段時間；不得越過警戒線。 */
+  /**
+   * 讓所有方團團向上浮起一段時間；不得越過警戒線。
+   * Lifts every dumpling for a while; none may cross the overflow line.
+   */
   floatAll(request: FloatRequest): void;
-  /** 震動整個容器。 */
   shakeContainer(request: ShakeRequest): void;
-  /** 溢位線的 Y（浮動的天花板），虛擬單位。 */
+  /**
+   * 溢位線的 Y（浮動的天花板），虛擬單位。
+   * The overflow line's Y (the float ceiling), in virtual units.
+   */
   readonly overflowLineY: number;
-  /** 容器寬度，虛擬單位（搖晃半徑的基準）。 */
+  /**
+   * 容器寬度，虛擬單位（搖晃半徑的基準）。
+   * The container width, in virtual units (the shake radius' basis).
+   */
   readonly containerWidth: number;
 }

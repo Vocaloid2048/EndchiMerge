@@ -1,27 +1,6 @@
 /**
- * 畫面更新迴圈。
- * The frame loop.
- *
- * 每幀做三件事：推進物理、把狀態畫出來、通知外部（HUD）。刻意只有這三件 ——
- * 迴圈一旦開始夾帶規則，就會變成誰都不敢改的上帝物件。
- * Three things per frame: step physics, draw the state, notify the outside world (the
- * HUD). Deliberately only three — a loop that accumulates rules becomes untouchable.
- *
- * **物理用固定時間步**，由累加器把實際經過時間切成整數個 1/60 秒。這樣做的理由：
- * Physics runs on a **fixed timestep**, with an accumulator slicing real elapsed time
- * into whole 1/60s steps, because:
- *
- * 1. Matter.js 自己在 delta > 16.667ms 時會發出警告，而且大步長的求解精度會下降 ——
- *    合併類遊戲最容易出事的地方正是**堆疊穩定性**。
- *    Matter.js warns above 16.667ms and a large step loses solver accuracy exactly
- *    where merge games are most fragile: stable stacking.
- * 2. 用實際 delta 直接餵引擎會讓物理行為隨螢幕更新率改變（120Hz 與 60Hz 手感不同）。
- *    Feeding the raw delta makes physics depend on the display refresh rate.
- *
- * 步數上限是為了避免「追趕螺旋」：分頁回到前景時若累積了數十秒，一次補完會把整箱
- * 方團團炸開。上限之外的時間直接丟棄。
- * The step cap prevents a catch-up spiral: returning from a backgrounded tab with tens
- * of seconds accumulated would blow the box apart, so the excess is discarded.
+ * 畫面更新迴圈：推進物理（固定時間步）、繪製、通知 HUD。
+ * The frame loop: step physics (fixed timestep), draw, notify the HUD.
  */
 
 import type { SpriteSource } from '../render/stage';
@@ -29,22 +8,21 @@ import { drawStage } from '../render/stage';
 import type { Viewport } from '../render/viewport';
 import type { GameSession } from './session';
 
-/** 固定物理步長，毫秒（60 Hz）。 */
+/**
+ * 固定物理步長，毫秒（60 Hz）。
+ * The fixed physics step, in milliseconds (60 Hz).
+ */
 export const FIXED_STEP_MS = 1000 / 60;
 
-/** 單一畫面最多追趕幾個固定步。 */
+/**
+ * 單一畫面最多追趕幾個固定步。
+ * The maximum number of fixed steps per frame.
+ */
 export const MAX_SUBSTEPS = 5;
 
 /**
- * 累加器的浮點容差，毫秒。
- * Floating-point tolerance for the accumulator, in milliseconds.
- *
- * 沒有它，`stepMs * maxSubsteps` 這種乘法再連減會留下一點點浮點塵埃，
- * 讓「一大段時間」只跑 `maxSubsteps - 1` 步。差一步在畫面上看不出來，
- * 但會讓物理的實際速率靜默地比預期慢，而且只在特定更新率下發生。
- * Without it, multiplying and repeatedly subtracting leaves float dust that makes a
- * large delta run `maxSubsteps - 1` steps. One step is invisible on screen but
- * silently slows the simulation, and only at certain refresh rates.
+ * 累加器的浮點容差，毫秒；沒有它，浮點塵埃會讓「剛好一步」被誤判成「還差一點」。
+ * Floating-point tolerance for the accumulator; without it, float dust reads "exactly one step" as "just short of one".
  */
 const ACCUMULATOR_EPSILON = 1e-9;
 
@@ -54,13 +32,8 @@ export interface FixedStepperOptions {
 }
 
 /**
- * 把不規則的實際時間切成整數個固定步。
- * Slice irregular real time into a whole number of fixed steps.
- *
- * 獨立成一個類別是為了可測試：累加器的邊界（正好等於一步、剛好差一點）是最容易寫錯
- * 又最難在畫面上察覺的地方。
- * Split out as a class so it can be tested: the accumulator's boundaries are the
- * easiest thing to get wrong and the hardest to notice on screen.
+ * 把不規則的實際時間切成整數個固定步（獨立成類以利測試累加器邊界）。
+ * Slices irregular real time into whole fixed steps (a class so the accumulator's edges are testable).
  */
 export class FixedStepper {
   private readonly stepMs: number;
@@ -81,16 +54,17 @@ export class FixedStepper {
     }
   }
 
-  /** 尚未被消耗的零碎時間，毫秒。除錯與測試用。 */
+  /**
+   * 尚未被消耗的零碎時間，毫秒；除錯與測試用。
+   * Unconsumed fractional time, in milliseconds; for debugging and tests.
+   */
   get pendingMs(): number {
     return this.accumulator;
   }
 
   /**
    * 回報這一幀應該跑幾步固定物理。
-   * Report how many fixed steps this frame should run.
-   *
-   * @param deltaMs 距上一幀的實際毫秒 / Real elapsed milliseconds.
+   * Reports how many fixed steps this frame should run.
    */
   advance(deltaMs: number): number {
     /* 先夾制再累加：負值或離譜的大值都不該進到累加器。 */
@@ -98,35 +72,25 @@ export class FixedStepper {
     this.accumulator += Math.min(Math.max(deltaMs, 0), maxAccumulated);
 
     let steps = 0;
-    /*
-     * `+ EPSILON` 讓「剛好一步」不會因為浮點誤差被判成「還差一點」。迴圈本身也受
-     * `maxSubsteps` 約束，所以放寬比較不會導致超步。
-     * The epsilon keeps "exactly one step" from reading as "just short of one". The
-     * loop is still bounded by maxSubsteps, so relaxing the comparison cannot overrun.
-     */
     while (steps < this.maxSubsteps && this.accumulator + ACCUMULATOR_EPSILON >= this.stepMs) {
-      /*
-       * 用 `Math.max(0, ...)` 而非直接相減：減完可能落在極小的負值，負的累加器會
-       * 讓下一幀少跑一步，症狀和浮點塵埃一樣難查。
-       * Clamped rather than a plain subtraction: the result can land on a tiny negative,
-       * and a negative accumulator costs the next frame a step — just as hard to trace.
-       */
+      /* 用夾制而非直接相減：極小的負累加器會讓下一幀少跑一步。 */
       this.accumulator = Math.max(0, this.accumulator - this.stepMs);
       steps += 1;
     }
 
     /*
-     * 追不上就放棄落後的時間，而不是留著下一幀繼續追 —— 留著會讓每一幀都跑滿上限，
-     * 物理永遠追不上真實時間，畫面看起來像慢動作。
-     * When we cannot keep up, discard the lag rather than carrying it: keeping it makes
-     * every subsequent frame hit the cap and the world runs in slow motion.
+     * 追不上就丟棄落後的時間：留著會讓每一幀都跑滿上限，畫面像慢動作。
+     * Discard the lag when we cannot keep up: carrying it pins every frame to the cap and the world runs in slow motion.
      */
     if (this.accumulator + ACCUMULATOR_EPSILON >= this.stepMs) this.accumulator = 0;
 
     return steps;
   }
 
-  /** 清空累加器；分頁回到前景時呼叫，避免補上一大段時間。 */
+  /**
+   * 清空累加器；分頁回到前景時呼叫，避免補上一大段時間。
+   * Clears the accumulator; call when the tab returns to the foreground.
+   */
   reset(): void {
     this.accumulator = 0;
   }
@@ -136,13 +100,17 @@ export interface FrameLoopOptions {
   viewport: Viewport;
   session: GameSession;
   sprites: SpriteSource;
-  /** 每幀繪製完成後呼叫，用來更新 HUD。 */
+  /**
+   * 每幀繪製完成後呼叫，用來更新 HUD。
+   * Called after each frame is drawn, to update the HUD.
+   */
   onAfterFrame?: (session: GameSession) => void;
-  /** 覆寫固定步長。 */
   stepMs?: number;
-  /** 覆寫單幀最大步數。 */
   maxSubsteps?: number;
-  /** 疊加除錯輔助線（容器外框、物理空腔、投放線）。開發時由 `?debug=1` 開啟。 */
+  /**
+   * 疊加除錯輔助線（容器外框、物理空腔、投放線）；開發時由 `?debug=1` 開啟。
+   * Overlays debug guides (container frame, physics cavity, spawn line); enabled by `?debug=1` in development.
+   */
   debug?: boolean;
 }
 
@@ -157,7 +125,7 @@ export class FrameLoop {
 
   private handle: number | null = null;
   private lastTime = 0;
-  /** 最近一幀的時間戳，驅動溢位警戒區的脈動。 */
+  /** 最近一幀的時間戳，驅動溢位警戒區與選取標示的脈動。 */
   private nowMs = 0;
 
   constructor(options: FrameLoopOptions) {
@@ -190,12 +158,8 @@ export class FrameLoop {
   }
 
   /**
-   * 立刻畫一幀，不推進物理。
-   * Draw one frame immediately without stepping physics.
-   *
-   * 給 resize 後的重繪與截圖驗證使用；不啟動迴圈，所以不會有計時器殘留。
-   * Used for post-resize redraws and screenshot verification; it does not start the
-   * loop, so nothing is left ticking.
+   * 立刻畫一幀，不推進物理（resize 後重繪與截圖驗證用；不會留下計時器）。
+   * Draws one frame immediately without stepping physics (post-resize redraws and screenshots; leaves no timer).
    */
   renderOnce(): void {
     this.nowMs = performance.now();
@@ -203,7 +167,7 @@ export class FrameLoop {
   }
 
   private readonly tick = (now: number): void => {
-    /* 先排下一幀再做事：如此即使這一幀拋錯，迴圈也不會安靜地停掉。 */
+    /* 先排下一幀再做事：即使這一幀拋錯，迴圈也不會安靜地停掉。 */
     this.handle = requestAnimationFrame(this.tick);
 
     const steps = this.stepper.advance(now - this.lastTime);
@@ -229,20 +193,15 @@ export class FrameLoop {
         aim: this.session.aimPreview,
         overflow: this.overflowFrame(),
         /*
-         * 裁切上界固定為畫布頂端（虛擬 Y = 0）。方團團與投放預覽都只會被裁在**看得見的
-         * 範圍內**：素材在圓心上方伸出 2.16 倍半徑，疊高或投放預覽時會有一截超出去，
-         * 顯式裁掉比讓畫布靜默切斷乾淨。
-         * The clip's top is the canvas top (virtual y = 0). Dumplings and the drop preview are
-         * only ever trimmed to the **visible** area: the art reaches 2.16 radii above the
-         * centre, so a tall pile or the preview hangs over the edge, and an explicit cut is
-         * cleaner than the canvas quietly truncating it.
+         * 裁切上界固定為畫布頂端（虛擬 Y = 0）：素材在圓心上方伸出約 2.16 倍半徑，
+         * 疊高或投放預覽會有一截超出去，顯式裁掉比讓畫布靜默切斷乾淨。
+         * The clip's top is the canvas top (virtual y = 0): the art reaches ~2.16 radii above the
+         * centre, so a tall pile or the preview hangs over — an explicit cut beats silent truncation.
          */
         clipTop: 0,
         /*
-         * 技能選取的脈動相位；週期約 900ms（design.md §5.6 的 `selectPulseMs`），由時間推導
-         * 所以畫面本身不存狀態。只改透明度，不動幾何。
-         * The skill-selection pulse phase, about a 900ms period (design.md §5.6's `selectPulseMs`),
-         * derived from the clock so the renderer keeps no state. It changes opacity only.
+         * 技能選取的脈動相位（週期約 900ms），由時間推導，渲染器不存狀態；只改透明度。
+         * The skill-selection pulse phase (about a 900ms period), derived from the clock so the renderer keeps no state; opacity only.
          */
         selectionPulse: 0.5 + 0.5 * Math.sin(this.nowMs / 450),
         debug: this.debug
@@ -259,9 +218,8 @@ export class FrameLoop {
   }
 
   /**
-   * 溢位警戒區的畫面資料；脈動相位由時間推導，所以畫面本身不必保存狀態。
-   * The overflow zone's frame data. The pulse phase is derived from time, so the renderer
-   * itself keeps no state.
+   * 溢位警戒區的畫面資料；脈動相位由時間推導，渲染器本身不必保存狀態。
+   * The overflow zone's frame data; the pulse phase is derived from time, so the renderer keeps no state.
    */
   private overflowFrame(): {
     lineY: number;
@@ -274,7 +232,7 @@ export class FrameLoop {
     secondsLeft: number;
   } {
     const frame = this.session.containerGeometry.frame;
-    /* 0..1 的餘弦脈動；週期 520ms，肉眼剛好讀成「一呼一吸」而不刺眼。 */
+    /* 0..1 的正弦脈動；週期 520ms。 */
     const pulse = 0.5 + 0.5 * Math.sin(this.nowMs / 260);
 
     return {
@@ -284,10 +242,8 @@ export class FrameLoop {
       x: frame.x,
       width: frame.width,
       /*
-       * `danger` 只在**越線且停定**時為真。尚未停定時整個警戒（線、區、倒數）都不畫，
-       * 所以玩家不會在方團團還在掉的時候看到警告。
-       * `danger` is true only once the breach has **settled**; before that the whole warning
-       * (line, zone, countdown) stays hidden, so nothing shows while a dumpling is falling.
+       * `danger` 只在越線且已入堆判定成立時為真；此前整個警戒（線、區、倒數）都不畫。
+       * `danger` is true only for a settled piled breach; before that the whole warning stays hidden.
        */
       danger: this.session.overflowDanger,
       pulse,

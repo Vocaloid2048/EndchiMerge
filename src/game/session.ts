@@ -1,29 +1,6 @@
 /**
- * 單局狀態。
- * One play session.
- *
- * 一局的所有狀態都活在這裡：**投放**、**瞄準**、**合成**、**連擊**、**溢位**，以及把
- * 物理狀態投影成畫面資料。`game/loop.ts` 每幀呼叫 `step()`，其餘模組只讀 getter。
- * Everything a run owns lives here: drops, aiming, merging, combos, overflow, and the
- * projection of physics into render data. `game/loop.ts` calls `step()` each frame; every
- * other module only reads getters.
- *
- * 刻意**不**在這裡做的兩件事 / Two things deliberately left out:
- *
- * 1. **管理掉落順序** —— 那屬於 `SpawnQueue`（D22 的單一真實來源）。這裡只呼叫
- *    `take()`／`peekAt()`，絕不自行抽取，否則 NEXT 卡又會和實際掉落不一致。
- *    Spawn ordering belongs to `SpawnQueue`; this only calls `take()`/`peekAt()`.
- * 2. **持久化解鎖** —— 那屬於 `game/progress.ts`。這裡只在「合成出新等級」時呼叫
- *    `unlocks.unlock()`，並在成功時刷新生成池。解鎖要跨局存活，而這個物件每局都會重建。
- *    Persisting unlocks belongs to `game/progress.ts`. This only calls `unlocks.unlock()`
- *    when a merge creates a new level, and refreshes the draw pool when it succeeds.
- *
- * 對外有**兩個**「下一顆」，名字刻意分開，因為搞混就是一個 bug：
- * Two different "next" values are exposed, deliberately with different names because
- * conflating them is a bug:
- *
- * - `pendingLevelId`：馬上要掉的那顆（＝手上這顆），驅動畫面預覽。
- * - `upcomingLevelId`：**放下之後**才上場的那顆，驅動 NEXT 卡。
+ * 單局狀態：投放、瞄準、合成、連擊、溢位，以及把物理投影成畫面資料。
+ * One play session: dropping, aiming, merging, combos, overflow, and projecting physics into render data.
  */
 
 import Matter from 'matter-js';
@@ -66,22 +43,14 @@ import type { RenderAim, RenderBody } from '../render/stage';
 import type { SilhouetteCache } from '../render/silhouetteLoader';
 
 /**
- * 剛體離場多遠才算「真的不見了」。
- * How far outside the field a body must be before it counts as gone.
- *
- * 留一大段餘裕是為了不誤殺：被擠到牆上方（牆有 `DEFAULT_WALL_OVERHANG` 的延伸）
- * 或暫時被彈到高處的方團團都還算在場。
+ * 剛體離場多遠才算「真的不見了」；留餘裕以免誤殺被擠到牆上方或暫時彈高的顆粒。
+ * How far outside the field a body must be before it counts as gone; the margin spares bodies pushed above the walls or briefly flung high.
  */
 const FALL_OUT_MARGIN = 400;
 
 /**
- * 解鎖來源。
- * The unlock source.
- *
- * `game/progress.ts` 的 `ProgressStore` 在結構上滿足這個介面。刻意只取需要的一小部分，
- * 是為了讓 `GameSession` 不必知道「解鎖存在哪裡」——它只知道「問得到、也解得開」。
- * `ProgressStore` satisfies this structurally. Only the needed slice is taken so the session
- * never learns where unlocks live; it only needs to be able to ask and to unlock.
+ * 解鎖來源；`game/progress.ts` 的 `ProgressStore` 在結構上滿足這個介面。
+ * The unlock source; `ProgressStore` from `game/progress.ts` satisfies it structurally.
  */
 export interface UnlockSource {
   readonly unlocked: ReadonlySet<number>;
@@ -89,7 +58,10 @@ export interface UnlockSource {
   unlock(id: number): boolean;
 }
 
-/** 場上一顆方團團：物理剛體 ＋ 它的等級 ＋ 出生時刻 ＋ 是否進過槽。 */
+/**
+ * 場上一顆方團團：物理剛體、等級、出生時刻與是否入堆。
+ * A dumpling on the field: its body, level, birth time, and piled flag.
+ */
 interface Entry {
   body: Matter.Body;
   level: LevelDef;
@@ -99,21 +71,19 @@ interface Entry {
    */
   bornAtMs: number;
   /**
-   * 這顆是否已經「入堆」（＝曾經碰到其他方團團）。
-   * Whether the body has joined the pile, i.e. it has touched another dumpling.
+   * 這顆是否已經「入堆」（＝曾經碰到其他方團團）；**單向**，一旦為真就不再變回假。
+   * Whether the body has joined the pile (i.e. touched another dumpling); **one-way**, never flips back.
    *
-   * **單向**：一旦為真就不再變回假。溢位判定（`game/overflow.ts`）只把入堆的顆粒納入
-   * 警戒，因為**下墜中的顆粒**不該觸發警告 —— 投放點在溢位線上方，若把下墜中的也算進去，
-   * 連續投放會把寬限計時器自己填滿。使用者定案：必須「觸碰到其他方團團」才算入堆。
-   * **One-way**: once true it never flips back. Overflow only counts piled bodies, because
-   * **in-flight** dumplings must not raise the alarm — the drop point is above the overflow
-   * line, so counting them would let rapid dropping fill the grace timer on its own. The
-   * rule is the user's: only a dumpling that has touched another dumpling counts.
+   * 只有入堆的顆粒納入溢位警戒 —— 下墜中的顆粒不該觸發警告（投放點在溢位線上方）。
+   * Only piled bodies feed overflow detection; in-flight dumplings must not raise the alarm.
    */
   entered: boolean;
 }
 
-/** 一次待處理的合成；碰撞事件期間只收集，物理步結束後才真正執行。 */
+/**
+ * 一次待處理的合成；碰撞期間只收集，物理步結束後才執行。
+ * A pending merge; collected during collisions and applied after the physics step.
+ */
 interface PendingMerge {
   a: Entry;
   b: Entry;
