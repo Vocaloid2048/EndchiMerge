@@ -1,26 +1,7 @@
 #!/usr/bin/env node
 /**
- * sign-assets.mjs — 為方團團素材（SVG / PNG / WebP）注入不可見的元數據簽名。
- * Embed an invisible metadata signature into EndchiMerge character assets.
- *
- * 為什麼是「元數據」而不是可見浮水印：
- *   Metadata is invisible, whereas a visible watermark would ruin the in-game
- *   artwork and would clash with the design mock-up.
- *
- * 重要前提（勿誤解）：
- *   SVG / PNG / WebP 都是「使用者可直接編輯」的格式——任何簽名都能被移除或覆寫。
- *   這個簽名是**署名與溯源**，不是防拷貝。真正的保護是授權聲明 + git 時間戳。
- *   Signing is attribution, not DRM. Nothing here prevents removal.
- *
- * 用法 / Usage:
- *   node scripts/sign-assets.mjs <file|dir> [...]           就地簽名（可重複執行）
- *   node scripts/sign-assets.mjs --check <file|dir> [...]   只檢查；有檔案未簽名即 exit 1
- *   node scripts/sign-assets.mjs --dry-run <file|dir> [...] 只報告，不寫入
- *
- * 支援格式 / Formats:
- *   .svg  → <title> / <desc> / <metadata>（RDF: dc:* + xmp:CreatorTool）
- *   .png  → iTXt chunk  keyword = "XML:com.adobe.xmp"
- *   .webp → RIFF "XMP " chunk（必要時自動升級為 VP8X 擴充容器）
+ * 為方團團素材（SVG / PNG / WebP）注入不可見的元數據簽名，供署名與溯源。
+ * Embeds an invisible metadata signature into EndchiMerge character assets.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -36,14 +17,20 @@ const SIGNER = {
   lang: 'zh-Hant',
 };
 
-/** 用於 --check 的辨識字串；版本變動時舊檔案會刻意變成「未簽名」。 */
+/**
+ * `--check` 的辨識字串；版本變動時舊檔案會刻意變成「未簽名」。
+ * The marker `--check` looks for; bumping the version deliberately makes old files "unsigned".
+ */
 const MARKER = `${SIGNER.tool} v${SIGNER.version}`;
 const SUPPORTED = new Set(['.svg', '.png', '.webp']);
 const TODAY = new Date().toISOString().slice(0, 10);
 
 /* ── 共用 / Shared ─────────────────────────────────────────────────────────── */
 
-/** 由檔名推導角色顯示名：`萊萬汀_img.svg` → `萊萬汀`。 */
+/**
+ * 由檔名推導角色顯示名：`萊萬汀_img.svg` → `萊萬汀`。
+ * Derives the character's display name from the file name.
+ */
 function titleFromPath(file) {
   return path
     .basename(file)
@@ -51,7 +38,10 @@ function titleFromPath(file) {
     .replace(/_(img|icon|sprite|sym|art)$/i, '');
 }
 
-/** 保留既有簽名的建立日期，讓重複執行不會產生 diff 雜訊。 */
+/**
+ * 保留既有簽名的建立日期，讓重複執行不會產生 diff 雜訊。
+ * Keeps an existing signature's creation date so repeated runs produce no diff noise.
+ */
 function pickDate(existingDate) {
   return existingDate && /^\d{4}-\d{2}-\d{2}$/.test(existingDate) ? existingDate : TODAY;
 }
@@ -81,8 +71,10 @@ function svgBlock(ctx) {
 }
 
 /**
- * 切開 `<svg>` 開標籤與其後「連續的 title / desc / metadata 區塊」。
- * 原素材的第一個子元素一律是繪圖元素，故此切法對本專案安全。
+ * 切開 `<svg>` 開標籤與其後連續的 title／desc／metadata 區塊；本專案素材的第一個子元素一律是繪圖
+ * 元素，所以這個切法安全。
+ * Splits the `<svg>` opening tag from the run of title/desc/metadata blocks right after it, which is
+ * safe here because the first child of every asset is a drawing element.
  */
 function splitSvg(xml) {
   const open = xml.match(/<svg\b[^>]*>/i);
@@ -253,7 +245,10 @@ function writeRiff(chunks) {
   return Buffer.concat([head, body]);
 }
 
-/** 讀出畫布尺寸，用於必要時建立 VP8X 擴充容器。 */
+/**
+ * 讀出畫布尺寸，用於必要時建立 VP8X 擴充容器。
+ * Reads the canvas size, needed when a VP8X extended container has to be created.
+ */
 function webpCanvas(chunks) {
   const u24 = (d, o) => d[o] | (d[o + 1] << 8) | (d[o + 2] << 16);
   const vp8x = chunks.find((c) => c.fourcc === 'VP8X');
@@ -333,7 +328,10 @@ function sign(file, buf) {
   throw new Error(`不支援的格式 / unsupported format: ${ext}`);
 }
 
-/** 從既有 PNG/WebP 簽名取出日期（若有）。 */
+/**
+ * 從既有 PNG／WebP 簽名取出日期（若有）。
+ * Reads the date out of an existing PNG/WebP signature, if there is one.
+ */
 function bufferToXmpDate(buf, ext) {
   let xmp = '';
   try {

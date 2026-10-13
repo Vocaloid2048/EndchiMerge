@@ -1,17 +1,7 @@
 #!/usr/bin/env node
 /**
- * install-git-hooks.mjs — 讓 git 使用 repo 內的 `.githooks/` 目錄。
- * Point git at the in-repo `.githooks/` directory.
- *
- * 由 package.json 的 `prepare` 在 `npm install` 之後自動執行。
- *
- * 為什麼 hooks 要放 `.githooks/` 而不是 `.git/hooks/`：
- *   `.git/` 不受版控，clone 不會帶走 hook。每位貢獻者都得手動安裝，
- *   漏掉的人就會產生未簽名的 commit。放進 repo 才能一起被 clone。
- *
- * 兩段式做法 / Two-step approach:
- *   1. 首選 `git config core.hooksPath .githooks`（單一真實來源，hook 不會走樣）
- *   2. 若無法呼叫 git（PATH 問題、受限環境），退回用 fs 把 hook 複製進 `.git/hooks/`
+ * 讓 git 使用 repo 內的 `.githooks/`（由 `package.json` 的 `prepare` 在 `npm install` 後執行）。
+ * Points git at the in-repo `.githooks/` directory.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -20,7 +10,11 @@ import { execFileSync } from 'node:child_process';
 const CWD = process.cwd();
 const HOOKS_SRC = path.join(CWD, '.githooks');
 
-/** 解析 git 目錄；支援一般 repo（`.git` 是目錄）與 worktree／submodule（`.git` 是檔案）。 */
+/**
+ * 解析 git 目錄；支援一般 repo（`.git` 是目錄）與 worktree／submodule（`.git` 是檔案）。
+ * Resolves the git directory; supports a plain repo (`.git` is a directory) and worktrees /
+ * submodules (`.git` is a file).
+ */
 function resolveGitDir() {
   const dotGit = path.join(CWD, '.git');
   if (!fs.existsSync(dotGit)) return null;
@@ -56,7 +50,8 @@ function copyHooks(gitDir) {
     try {
       fs.chmodSync(dst, 0o755);
     } catch {
-      // Windows 沒有 POSIX 權限位元，忽略即可
+      // Windows 沒有 POSIX 權限位元，忽略即可。
+      // Windows has no POSIX permission bits, so this is fine to ignore.
     }
     copied++;
   }
