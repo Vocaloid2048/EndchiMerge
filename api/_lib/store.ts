@@ -5,6 +5,11 @@
  */
 
 import type { BoardCategory } from './db/dialect.js';
+import { newUserTag } from './tokens.js';
+
+/** 重抽玩家號的次數上限：撞號本身罕見（四位數），上限只是不讓極端情況變成無窮迴圈。
+ * How many times a colliding tag is re-rolled: collisions are rare (four digits), and the cap only keeps an extreme case from looping forever. */
+const TAG_ATTEMPTS = 10;
 
 /**
  * `requests` 的一列（接收日誌）。
@@ -42,6 +47,11 @@ export interface ScoreRow {
   readonly runId: string;
   readonly deviceId: string;
   readonly displayName: string;
+  /**
+   * 要給 profile 的玩家號（**不是** `scores` 的欄位）：只有 `profiles` 帶號，這裡負責把它送過去。
+   * The player tag offered to the profile — **not** a `scores` column; only `profiles` carries one.
+   */
+  readonly userTag: string;
   readonly score: number;
   readonly durationMs: number;
   readonly merges: number;
@@ -60,6 +70,9 @@ export interface ScoreRow {
 export interface ProfileRow {
   readonly deviceId: string;
   readonly displayName: string;
+  /** 顯示用的四位數玩家號；`''` 代表這一列還沒拿到號（舊庫回填前）。**永遠不是身分**（那是 `deviceId`）。
+   * The four-digit display tag; `''` means this row has none yet (an old database before the backfill). **Never identity** (that is `deviceId`). */
+  readonly userTag: string;
   readonly bestScore: number;
   readonly bestDurationMs: number;
   readonly bestMaxCombo: number;
@@ -227,9 +240,12 @@ export class MemoryStore implements Store {
     if (!row.verified) return true;
 
     const previous = this.profiles.get(row.deviceId);
+    const displayName = row.displayName === '' ? (previous?.displayName ?? '') : row.displayName;
+    const userTag = this.resolveUserTag(displayName, previous?.userTag ?? '', row.userTag, row.deviceId);
     const updated: ProfileRow = {
       deviceId: row.deviceId,
-      displayName: row.displayName === '' ? (previous?.displayName ?? '') : row.displayName,
+      displayName,
+      userTag,
       bestScore: Math.max(previous?.bestScore ?? 0, row.score),
       /*
        * 時長只在分數真的刷新時才跟著換（與客戶端同一條規則），否則最高分旁會掛別的一局的時間。
@@ -246,6 +262,37 @@ export class MemoryStore implements Store {
     this.profiles.set(row.deviceId, updated);
 
     return true;
+  }
+
+  /**
+   * 這個裝置在**這個名字**下該用哪個號：沿用既有的（所以改名不動號），否則用送進來的那個；只有與**別的裝置**
+   * 撞到「同名字＋同號」才重抽 —— 這一條就是「榜上不會有兩列一模一樣」的保證。
+   * Which tag this device carries under **this name**: keep the existing one (so a rename does not change
+   * it), else take the offered one; a re-roll happens only when **another device** already holds the same
+   * name-and-tag pair — that is what keeps two board rows from ever reading alike.
+   */
+  private resolveUserTag(displayName: string, current: string, offered: string, deviceId: string): string {
+    /* 沿用既有的 → 用送來的 → 連送來的都是空的就當場鑄一個（例如從 `scores` 讀回來的一列）。
+     * Keep the existing one → take the offered one → mint one when even that is empty (a row read back from `scores`, say). */
+    let tag = current !== '' ? current : offered !== '' ? offered : newUserTag();
+    if (displayName === '') return tag;
+
+    for (let attempt = 0; attempt < TAG_ATTEMPTS && this.isUserTagTaken(displayName, tag, deviceId); attempt += 1) {
+      tag = newUserTag();
+    }
+
+    return tag;
+  }
+
+  /** 這個「名字＋號」是不是已經被**別的**裝置佔用。 */
+  private isUserTagTaken(displayName: string, tag: string, deviceId: string): boolean {
+    for (const profile of this.profiles.values()) {
+      if (profile.deviceId !== deviceId && profile.displayName === displayName && profile.userTag === tag) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   async getProfile(deviceId: string): Promise<ProfileRow | null> {
@@ -277,6 +324,8 @@ export class MemoryStore implements Store {
     const probeRow: ProfileRow = {
       deviceId: probe.deviceId,
       displayName: '',
+      /* 名次只看數字，與號無關。 */
+      userTag: '',
       bestScore: probe.score,
       bestDurationMs: 0,
       bestMaxCombo: probe.maxCombo,

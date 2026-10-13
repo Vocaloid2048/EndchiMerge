@@ -4,7 +4,7 @@
  * checked against the moment the server recorded at issue; a threshold, not a defence.
  */
 
-import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 
 /**
  * 一張憑證所綁定的事實；四個值全部參與簽章，改動任何一個都會讓簽章對不上。
@@ -95,4 +95,10 @@ const ID_PATTERN = /^[A-Za-z0-9._:-]{8,64}$/;
 
 export function isValidDeviceId(value: string): boolean {
   return ID_PATTERN.test(value);
+}
+
+/** 玩家號的值域：`0001`–`9999`（跳過 `0000`），顯示用，永遠不是身分。
+ * The player tag's range: `0001`–`9999` (`0000` skipped), for display and never identity. */
+export function newUserTag(): string {
+  return String(randomInt(1, 10_000)).padStart(4, '0');
 }

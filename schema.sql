@@ -30,6 +30,9 @@
 create table if not exists profiles (
   device_id         text primary key,
   display_name      text        not null default '',
+  -- 顯示用的四位數玩家號（`0001`–`9999`）。**不是身分** —— 身分是 `device_id`，所以改名不動號、
+  -- 也永遠不會因為撞名而換人；同名的人靠這個號分開。
+  user_tag          varchar(4)  not null default '',
   -- 這三個是**各自**的歷史最大，可能來自不同的局（與客戶端資料層同一個模型）。
   best_score        integer     not null default 0,
   best_max_combo    integer     not null default 0,
@@ -138,3 +141,11 @@ alter table requests drop column if exists client_ip, drop column if exists user
   drop column if exists country, drop column if exists region, drop column if exists city,
   drop column if exists headers;
 alter table scores drop column if exists client_ip;
+
+-- ⚠️ 玩家號：顯示用的四位數，**永不當身分**。新庫由上面的建表帶上；舊庫在這裡補欄位與回填 ——
+-- 回填靠自己的 `where` 冪等，所以每次部署重跑都不會動到已經有號的列。
+-- ⚠️ The player tag: four display digits, **never identity**. A new database gets it from the create
+-- above; an old one is given the column and the backfill here, and the backfill is idempotent through
+-- its own `where`, so re-running it on every deploy touches no row that already has a tag.
+alter table profiles add column if not exists user_tag varchar(4) not null default '';
+update profiles set user_tag = lpad((floor(random() * 9999) + 1)::int::text, 4, '0') where user_tag = '';

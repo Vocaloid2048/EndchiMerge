@@ -114,6 +114,7 @@ function scoreRow(overrides: Partial<ScoreRow> = {}): ScoreRow {
     runId: '11111111-1111-4111-8111-111111111111',
     deviceId: 'device-0000-1111',
     displayName: '阿爺',
+    userTag: '0001',
     score: 900,
     durationMs: 60_000,
     merges: 30,
@@ -303,16 +304,23 @@ describe('SqlStore.saveScore — 冪等 / idempotency', () => {
 
   it('writes the profile only when the insert really landed', async () => {
     const driver = new RecordingDriver();
-    /* Postgres 這邊用 `returning` 回一列表示寫進去了。 */
+    /* Postgres 用 `returning` 回一列表示寫進去了；中間兩次讀是 upsert 的前置（沿用既有的號、查「名字＋號」有沒有撞到）。
+     * Postgres signals a real write with a `returning` row; the two reads in between are the upsert's
+     * prerequisites (keep the existing tag, check the name-and-tag pair for a collision). */
     driver.reply([{ run_id: 'x' }], 1);
+    driver.reply([], 0);
+    driver.reply([], 0);
     driver.reply([], 1);
 
     const inserted = await new SqlStore(driver, postgresDialect).saveScore(scoreRow());
 
     expect(inserted).toBe(true);
-    expect(driver.calls).toHaveLength(2);
-    expect(driver.calls[0]?.sql.toLowerCase()).toContain('insert into scores');
-    expect(driver.calls[1]?.sql.toLowerCase()).toContain('insert into profiles');
+
+    /* 只數**寫入**：前置讀了幾次不該讓這一條紅，但「寫了哪兩張表、什麼次序」是這一條的重點。 */
+    const writes = driver.calls.filter((call) => call.sql.toLowerCase().startsWith('insert'));
+    expect(writes).toHaveLength(2);
+    expect(writes[0]?.sql.toLowerCase()).toContain('insert into scores');
+    expect(writes[1]?.sql.toLowerCase()).toContain('insert into profiles');
   });
 
   /* 未通過檢查的提交留檔但不進榜（design.md §6.7），所以只寫 `scores`。 */
@@ -363,6 +371,7 @@ describe('SqlStore — 列的轉換 / mapping rows', () => {
       {
         device_id: 'device-1',
         display_name: '阿爺',
+        user_tag: '0001',
         best_score: '900',
         best_duration_ms: '60000',
         best_max_combo: '5',
@@ -376,6 +385,7 @@ describe('SqlStore — 列的轉換 / mapping rows', () => {
     expect(profile).toEqual({
       deviceId: 'device-1',
       displayName: '阿爺',
+      userTag: '0001',
       bestScore: 900,
       bestDurationMs: 60_000,
       bestMaxCombo: 5,

@@ -235,11 +235,20 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
       row.dataset['rank'] = String(index + 1);
 
       const rank = el('span', 'leaderboard__rank', `#${String(index + 1)}`);
-      const who = el(
-        'span',
-        'leaderboard__who',
-        entry.name === '' ? t('leaderboard.unnamed') : entry.name,
+      /*
+       * 名字與號是**同一個顯示單位**的兩半：號用淡化小字緊貼在名字後面，兩列同名的人才分得開。
+       * 只有名字存在時才顯示 —— 未命名的人沒有東西要區分。
+       * Name and tag are two halves of **one display unit**: the tag follows the name in muted small
+       * type, which is what keeps two rows sharing a name apart. Shown only when there is a name.
+       */
+      const who = el('span', 'leaderboard__who');
+      appendChildren(
+        who,
+        el('span', 'leaderboard__name', entry.name === '' ? t('leaderboard.unnamed') : entry.name),
       );
+      if (entry.name !== '' && entry.tag !== undefined && entry.tag !== '') {
+        appendChildren(who, el('span', 'leaderboard__tag', `#${entry.tag}`));
+      }
       const value = el('span', 'leaderboard__value', primaryValue(entry, category));
       /*
        * 時長（`HH:mm:ss`）貼在該分類數值的右邊，回答「這個數字是跑了多久打出來的」。

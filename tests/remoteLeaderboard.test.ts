@@ -78,10 +78,10 @@ const OK_BOARD = {
   category: 'score',
   total: 5,
   entries: [
-    { rank: 1, name: '阿爺', score: 9000, durationMs: 60_000, maxCombo: 9, merges: 40, at: TIME },
-    { rank: 2, name: '阿嬤', score: 4000, durationMs: 30_000, maxCombo: 4, merges: 20, at: TIME - 1 },
+    { rank: 1, name: '阿爺', tag: '0001', score: 9000, durationMs: 60_000, maxCombo: 9, merges: 40, at: TIME },
+    { rank: 2, name: '阿嬤', tag: '0002', score: 4000, durationMs: 30_000, maxCombo: 4, merges: 20, at: TIME - 1 },
   ],
-  self: { rank: 3, name: '我', score: 900, durationMs: 20_000, maxCombo: 6, merges: 12, at: TIME - 2 },
+  self: { rank: 3, name: '我', tag: '0003', score: 900, durationMs: 20_000, maxCombo: 6, merges: 12, at: TIME - 2 },
 };
 
 interface Harness {
@@ -627,6 +627,33 @@ describe('createRemoteLeaderboard — 讀榜 / reading the board', () => {
     await settle();
 
     expect(board.snapshot('score').entries).toHaveLength(2);
+  });
+
+  /*
+   * 玩家號是拿來顯示的：形狀不對就當沒有 —— 寧可少顯示一個號，也不要在一列名字旁邊印出垃圾。
+   * The tag is display-only: a wrongly shaped one is treated as absent — better to show no tag than to
+   * print junk next to a name.
+   */
+  it('carries the tag through, and drops one that is not four digits', async () => {
+    const { board } = makeHarness({
+      reply: (call) =>
+        call.url.startsWith('/api/leaderboard')
+          ? {
+              body: {
+                ...OK_BOARD,
+                entries: [{ ...OK_BOARD.entries[0], tag: '42' }, { ...OK_BOARD.entries[1], tag: 'abcd' }],
+                self: { ...OK_BOARD.self, tag: '0003' },
+              },
+            }
+          : undefined,
+    });
+
+    board.setSharing(true);
+    await settle();
+
+    const snapshot = board.snapshot('score');
+    expect(snapshot.entries.map((entry) => entry.tag)).toEqual(['', '']);
+    expect(snapshot.self?.entry.tag).toBe('0003');
   });
 });
 

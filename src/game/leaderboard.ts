@@ -108,6 +108,9 @@ export interface LeaderboardEntry {
   id: string;
   /** 顯示名；未設定時為空字串。 */
   name: string;
+  /** 顯示用的四位數號（`夜芷冰#0001` 的後半）。同名的人靠它分開；本機榜沒有它就留空。
+   * 永遠不是身分 —— 身分是 `id`，所以改名不換號。 */
+  tag?: string;
   /** 歷史最高分。 */
   score: number;
   /**

@@ -112,6 +112,12 @@ export interface Dialect {
    * Only for the drops inside `schema()`, not a general error classifier.
    */
   isMissingColumnError?(error: unknown): boolean;
+
+  /**
+   * 這個錯誤是不是「要加的欄位已經在那裡」＝ schema 已含該欄位（加欄位的冪等來源）。
+   * Whether this error means "the column to add is already there" = the schema has it (how adds stay idempotent).
+   */
+  isDuplicateColumnError?(error: unknown): boolean;
 }
 
 /**

@@ -196,12 +196,13 @@ export const postgresDialect: Dialect = {
   insertScoreSignal: 'rows',
 
   upsertProfile: () => `insert into profiles (
-       device_id, display_name, best_score, best_duration_ms, best_max_combo, best_merges,
+       device_id, display_name, user_tag, best_score, best_duration_ms, best_max_combo, best_merges,
        best_at, created_at, updated_at
-     ) values ($1, $2, $3, $4, $5, $6, $7::timestamptz, now(), now())
+     ) values ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, now(), now())
      on conflict (device_id) do update set
        display_name = case when excluded.display_name = ''
                            then profiles.display_name else excluded.display_name end,
+       user_tag = excluded.user_tag,
        best_duration_ms = case when excluded.best_score > profiles.best_score
                                then excluded.best_duration_ms else profiles.best_duration_ms end,
        best_at = case when excluded.best_score > profiles.best_score
@@ -215,6 +216,7 @@ export const postgresDialect: Dialect = {
     `create table if not exists profiles (
        device_id         text primary key,
        display_name      text        not null default '',
+       user_tag          varchar(4)  not null default '',
        best_score        integer     not null default 0,
        best_max_combo    integer     not null default 0,
        best_merges       integer     not null default 0,
@@ -276,9 +278,17 @@ export const postgresDialect: Dialect = {
        drop column if exists country, drop column if exists region, drop column if exists city,
        drop column if exists headers`,
     `alter table scores drop column if exists client_ip`,
+
+    /* 玩家號：顯示用的四位數，永不當身分（身分只認 `device_id`）。新庫由建表帶上，舊庫在這裡補欄位與回填 —— 回填靠自己的 `where` 冪等。
+     * The player tag: four display digits, never identity (that is `device_id` only). A new database gets
+     * it from the create; an old one is given the column and the backfill here, the backfill idempotent
+     * through its own `where`. */
+    `alter table profiles add column if not exists user_tag varchar(4) not null default ''`,
+    `update profiles set user_tag = lpad((floor(random() * 9999) + 1)::int::text, 4, '0') where user_tag = ''`,
   ],
 
-  /* PG 的「欄位不存在」是 42703；上面的 drop 全走原生 `if exists`，這個成員只是把缺口補齊。
-   * PG's undefined column is 42703; the drops above are all native `if exists`, so this only completes the pattern. */
+  /* PG 的「欄位」錯誤：42703 不存在、42701 重複；上面的語句全走原生 `if exists`／`if not exists`，這兩個成員只是把缺口補齊。
+   * PG's column errors: 42703 undefined, 42701 duplicate; the statements above are all native, so these only complete the pattern. */
   isMissingColumnError: (error) => (error as { code?: unknown } | null)?.code === '42703',
+  isDuplicateColumnError: (error) => (error as { code?: unknown } | null)?.code === '42701',
 };

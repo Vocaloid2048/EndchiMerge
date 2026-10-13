@@ -82,6 +82,7 @@ function score(device: string, overrides: Partial<ScoreRow> = {}): ScoreRow {
     runId: randomUUID(),
     deviceId: device,
     displayName: '阿爺',
+    userTag: '0001',
     score: 900,
     durationMs: 60_000,
     merges: 30,
@@ -553,6 +554,49 @@ describe('ensureSchema — 舊欄位的清除遷移 / dropping the legacy column
 
     const scores = await driver.query('select * from scores');
     expect(scores.rows[0]).not.toHaveProperty('client_ip');
+
+    await driver.close();
+  });
+
+  /*
+   * 玩家號那一欄是**加**上去的，所以既有玩家要先有欄位、再被回填 —— 而回填必須只碰還沒有號的列，否則每次
+   * 部署都會把全班的號換一遍（那正是這個功能要避免的「被誤判成不同人」）。
+   * The player tag is an **added** column, so existing players need the column and then a backfill — and
+   * the backfill must touch only rows without a tag, or every deploy would renumber everybody, which is
+   * exactly the "mistaken for someone else" this feature exists to prevent.
+   */
+  it('adds the player tag to existing profiles and keeps the backfilled value', async () => {
+    const driver = createDriver('sqlite', ':memory:');
+    const dialect = dialectFor('sqlite');
+
+    await driver.query(`create table profiles (
+       device_id        text    primary key,
+       display_name     text    not null default '',
+       best_score       integer not null default 0,
+       best_duration_ms integer not null default 0,
+       best_max_combo   integer not null default 0,
+       best_merges      integer not null default 0,
+       best_at          integer,
+       name_changed_at  integer,
+       created_at       integer,
+       updated_at       integer)`);
+    await driver.query(
+      `insert into profiles (device_id, display_name, best_score) values ('it-legacy', '阿爺', 900)`,
+    );
+
+    await ensureSchema(driver, dialect);
+    const backfilled = await new SqlStore(driver, dialect).getProfile('it-legacy');
+
+    /* 名字、分數原樣保留，只多了一個號。 */
+    expect(backfilled?.displayName).toBe('阿爺');
+    expect(backfilled?.bestScore).toBe(900);
+    expect(backfilled?.userTag).toMatch(/^\d{4}$/u);
+    expect(backfilled?.userTag).not.toBe('0000');
+
+    await ensureSchema(driver, dialect);
+    expect((await new SqlStore(driver, dialect).getProfile('it-legacy'))?.userTag).toBe(
+      backfilled?.userTag,
+    );
 
     await driver.close();
   });

@@ -6,6 +6,11 @@
 import type { ProfileRow, RankProbe, RequestRow, RunTokenRow, ScoreRow, Store } from './store.js';
 import { Binder, BOARD_PRIMARY_COLUMN, type BoardCategory, type Dialect } from './db/dialect.js';
 import type { Driver, Row } from './db/types.js';
+import { newUserTag } from './tokens.js';
+
+/** 重抽玩家號的次數上限：撞號本身罕見（四位數），上限只是不讓極端情況變成無窮迴圈。
+ * How many times a colliding tag is re-rolled: collisions are rare (four digits), and the cap only keeps an extreme case from looping forever. */
+const TAG_ATTEMPTS = 10;
 
 const asText = (value: unknown): string => (typeof value === 'string' ? value : '');
 const asNullableText = (value: unknown): string | null =>
@@ -111,6 +116,9 @@ export class SqlStore implements Store {
       runId: asText(row['run_id']),
       deviceId: asText(row['device_id']),
       displayName: asText(row['display_name']),
+      /* `scores` 沒有號這一欄（只有 `profiles` 有），所以讀回來的就是空的 —— 呼叫端要寫 profile 時才提議一個。
+       * `scores` has no tag column (only `profiles` does), so a row read back carries none; a tag is offered only when a profile is written. */
+      userTag: '',
       score: this.dialect.readNumber(row['score']),
       durationMs: this.dialect.readNumber(row['duration_ms']),
       merges: this.dialect.readNumber(row['merges']),
@@ -181,9 +189,14 @@ export class SqlStore implements Store {
   }
 
   private async upsertProfile(tx: Driver, row: ScoreRow): Promise<void> {
+    const current = await this.loadProfile(tx, row.deviceId);
+    const displayName = row.displayName === '' ? (current?.displayName ?? '') : row.displayName;
+    const userTag = await this.resolveUserTag(tx, displayName, current?.userTag ?? '', row.userTag, row.deviceId);
+
     await tx.query(this.dialect.upsertProfile(), [
       row.deviceId,
       row.displayName,
+      userTag,
       row.score,
       row.durationMs,
       row.maxCombo,
@@ -192,10 +205,56 @@ export class SqlStore implements Store {
     ]);
   }
 
+  /**
+   * 這個裝置在**這個名字**下該用哪個號：沿用既有的（所以改名不動號），否則用送進來的那個；只有與**別的裝置**
+   * 撞到「同名字＋同號」才重抽 —— 這一條就是「榜上不會有兩列一模一樣」的保證。
+   * Which tag this device carries under **this name**: keep the existing one (so a rename does not change
+   * it), else take the offered one; a re-roll happens only when **another device** already holds the same
+   * name-and-tag pair — that is what keeps two board rows from ever reading alike.
+   */
+  private async resolveUserTag(
+    tx: Driver,
+    displayName: string,
+    current: string,
+    offered: string,
+    deviceId: string,
+  ): Promise<string> {
+    /* 沿用既有的 → 用送來的 → 連送來的都是空的就當場鑄一個（例如從 `scores` 讀回來的一列）。
+     * Keep the existing one → take the offered one → mint one when even that is empty (a row read back from `scores`, say). */
+    let tag = current !== '' ? current : offered !== '' ? offered : newUserTag();
+    if (displayName === '') return tag;
+
+    for (let attempt = 0; attempt < TAG_ATTEMPTS && (await this.isUserTagTaken(tx, displayName, tag, deviceId)); attempt += 1) {
+      tag = newUserTag();
+    }
+
+    return tag;
+  }
+
+  /** 這個「名字＋號」是不是已經被**別的**裝置佔用。 */
+  private async isUserTagTaken(
+    tx: Driver,
+    displayName: string,
+    tag: string,
+    deviceId: string,
+  ): Promise<boolean> {
+    const b = new Binder(this.dialect);
+
+    const { rows } = await tx.query(
+      `select 1 as taken from profiles
+       where display_name = ${b.bind(displayName)} and user_tag = ${b.bind(tag)}
+         and device_id <> ${b.bind(deviceId)}
+       limit 1`,
+      b.params,
+    );
+
+    return rows.length > 0;
+  }
+
   /* ── 玩家與榜 ──────────────────────────────────────────────────────────── */
 
   private profileColumns(): string {
-    return `device_id, display_name, best_score, best_duration_ms, best_max_combo, best_merges,
+    return `device_id, display_name, user_tag, best_score, best_duration_ms, best_max_combo, best_merges,
             case when best_at is null then null else ${this.dialect.epochMs('best_at')} end as best_at_ms`;
   }
 
@@ -203,6 +262,7 @@ export class SqlStore implements Store {
     return {
       deviceId: asText(row['device_id']),
       displayName: asText(row['display_name']),
+      userTag: asText(row['user_tag']),
       bestScore: this.dialect.readNumber(row['best_score']),
       bestDurationMs: this.dialect.readNumber(row['best_duration_ms']),
       bestMaxCombo: this.dialect.readNumber(row['best_max_combo']),
@@ -211,10 +271,11 @@ export class SqlStore implements Store {
     };
   }
 
-  async getProfile(deviceId: string): Promise<ProfileRow | null> {
+  /** 讀一列 profile；`upsertProfile` 要在**同一個交易**裡先看現況（號要沿用、名字要不動），所以驅動是參數。 */
+  private async loadProfile(driver: Driver, deviceId: string): Promise<ProfileRow | null> {
     const b = new Binder(this.dialect);
 
-    const { rows } = await this.driver.query(
+    const { rows } = await driver.query(
       `select ${this.profileColumns()} from profiles where device_id = ${b.bind(deviceId)}`,
       b.params,
     );
@@ -222,6 +283,10 @@ export class SqlStore implements Store {
     const row = (rows as Row[])[0];
 
     return row === undefined ? null : this.toProfileRow(row);
+  }
+
+  async getProfile(deviceId: string): Promise<ProfileRow | null> {
+    return this.loadProfile(this.driver, deviceId);
   }
 
   async topProfiles(category: BoardCategory, limit: number): Promise<ProfileRow[]> {

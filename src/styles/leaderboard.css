@@ -171,9 +171,33 @@
 }
 
 .leaderboard__who {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+/*
+ * 名字裁掉、號留下：名字可以是 32 個字，而顯示號正是這一欄的用途 —— 把號一起裁掉就等於讓兩個同名的人
+ * 再次長得一樣。
+ * The name truncates and the tag stays: a name may run to 32 characters, and showing the tag is this
+ * column's whole job — truncating it too would make two same-named players look alike again.
+ */
+.leaderboard__name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * 玩家號：淡化小字緊貼名字。刻意比名次小 —— 名次讀作 `#1`、號讀作 `#0001`，兩者必須一眼看得出分別。
+ * The player tag: muted small type right after the name. Deliberately smaller than the rank — a rank
+ * reads `#1` and a tag `#0001`, and the two must be told apart at a glance.
+ */
+.leaderboard__tag {
+  flex: none;
+  color: var(--color-fg-dim);
+  font-size: 0.72em;
 }
 
 .leaderboard__value {

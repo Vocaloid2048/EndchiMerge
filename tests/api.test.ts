@@ -702,6 +702,29 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
   });
 
   /*
+   * 玩家號是**存起來的**（不是每次算出來的），所以同一份資料抓兩次榜拿到同一個號 —— 那正是「同一個人在
+   * 不同時間玩不會被誤判成不同人」。同名的人靠這個號分開，所以每一列都要有。
+   * The player tag is **stored**, not derived per request, so two fetches of the same data return the
+   * same tag — which is exactly "the same player is never mistaken for a different one". Rows sharing
+   * a name are told apart by it, so every row must carry one.
+   */
+  it('gives every board row a four-digit tag that does not move between fetches', async () => {
+    const { deps, advance } = makeDeps();
+
+    await play(deps, advance, GOOD_RUN);
+
+    const read = async (): Promise<{ entries: { name: string; tag: string }[]; self: { tag: string } }> =>
+      (await board(deps, `deviceId=${DEVICE}`)).body as never;
+
+    const first = await read();
+    expect(first.entries[0]?.tag).toMatch(/^\d{4}$/u);
+    expect(first.self.tag).toBe(first.entries[0]?.tag);
+
+    const second = await read();
+    expect(second.entries[0]?.tag).toBe(first.entries[0]?.tag);
+  });
+
+  /*
    * `self` 的名次也要跟著分頁走 —— 同一個人在三個分頁上的名次本來就不一樣，而摘要那一行寫的是
    * 「你的最佳：{該分頁的數值} · 第 N 名」，兩者必須描述同一個分頁。
    * The `self` rank must follow the tab too: one player's position differs across the three tabs, and the

@@ -152,6 +152,27 @@ T2 的價值在**頒發時刻**：伺服器在開局時記下時間，於是提�
 `npm run dev` 會在**沒有設定時**替你填 `DATABASE_URL=sqlite:.mysql/endchi.db` 與一個公開的開發用
 `RUN_TOKEN_SECRET`（見 §6.5）—— 它只補沒有設的，所以 `.env` 永遠優先。
 
+### 身分與顯示：`device_id` 是身分，名字與玩家號只是顯示
+
+榜上的一列顯示成 `夜芷冰#0001`，但那兩半都**不是**身分：
+
+| | 是什麼 | 會不會變 |
+| --- | --- | --- |
+| `device_id` | **身分**：`profiles` 的主鍵、憑證綁定、速率限制的鍵、榜的決勝鍵 | 不變（改名、改號都不動） |
+| `display_name` | 顯示名，**允許重名**（沒有任何唯一約束） | 隨時可改 |
+| `user_tag` | 顯示用的四位數號（`0001`–`9999`），拿來把同名的人分開 | 指派一次後不變；**只有**撞到別的裝置的「同名字＋同號」才重抽 |
+
+規則因此可以一句話講完：**同名不是問題，只有整串顯示字一模一樣才是問題**。改名只寫
+`display_name`，號跟著 profile 走，所以同一個人在不同時間玩仍然是同一列。號由伺服器鑄
+（`newUserTag()`，`handlers.ts` 送進 `saveScore` 的只是一個**提議**），客戶端**永遠不送號**
+—— 送了就等於多一個可偽造的身分。`scores` **沒有**這一欄：那是每一局的快照，而號不是那一局的屬性。
+
+`ensureSchema` 因此也學會「加欄位」：Postgres 有 `add column if not exists`，MySQL／SQLite 沒有
+⇒ 靠 `Dialect.isDuplicateColumnError`（MySQL 1060／SQLite `duplicate column name`／PG 42701）把
+「欄位已經在那裡」判為已完成，與 `isMissingColumnError`（drop 那一側）對稱。既有玩家的號由一條
+`update … where user_tag = ''` 回填 —— 冪等來自它**自己的 `where`**，所以每次部署重跑都不會把已經
+有號的人換掉。
+
 ### 私隱硬規則：IP 與標頭**不落庫**
 
 `requests` 表（接收日誌）只存五個欄位：`method`、`path`、`status`、`device_id`、`run_id`。**IP、

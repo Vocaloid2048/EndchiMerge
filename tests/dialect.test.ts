@@ -445,14 +445,23 @@ describe('schema — 必須可重複執行 / it must be repeatable', () => {
 
       for (const statement of statements) {
         const flat = statement.toLowerCase().replace(/\s+/gu, ' ');
+        const where = `${dialect.name}: ${statement.slice(0, 60)}`;
 
-        if (flat.startsWith('create')) {
-          expect(flat, dialect.name).toContain('if not exists');
+        if (flat.startsWith('create') || flat.startsWith('alter') || flat.startsWith('drop')) {
+          /* 建表、改欄位、刪欄位：靠原生的 `if (not) exists`，或靠方言的分類器把「已經在那個狀態」判為已完成。
+           * Creates, column changes and drops: a native `if (not) exists`, or a classifier treating "already in that state" as done. */
+          const native = flat.includes('if not exists') || flat.includes('if exists');
+          const classified =
+            typeof dialect.isMissingColumnError === 'function' ||
+            typeof dialect.isDuplicateColumnError === 'function';
+
+          expect(native || classified, where).toBe(true);
         } else {
-          expect(
-            flat.includes('if exists') || typeof dialect.isMissingColumnError === 'function',
-            `${dialect.name}: ${statement.slice(0, 60)}`,
-          ).toBe(true);
+          /* 回填（`update`）：冪等來自它**自己的 `where`**，而行為由 `db.integration.test.ts` 釘住（跑兩次值不變）。
+           * A backfill (`update`): its idempotency is its **own `where`**, and the behaviour is pinned in
+           * `db.integration.test.ts` (run it twice and the values do not move). */
+          expect(flat.startsWith('update'), where).toBe(true);
+          expect(flat, where).toContain('where');
         }
       }
     }
@@ -1004,8 +1013,7 @@ describe('isMissingColumnError — drop 的冪等來源 / what makes a drop idem
    * = the schema is already in shape. So it must be strict — a loose one would silently swallow real
    * SQL errors as "already done".
    */
-  it('accepts the missing-column errors of its own driver and nothing else', () => {
-    /* Postgres：42703（undefined_column）。 */
+  it('accepts the missing-column errors of its own driver and nothing else', () => {    /* Postgres：42703（undefined_column）。 */
     expect(postgresDialect.isMissingColumnError?.({ code: '42703' })).toBe(true);
     expect(postgresDialect.isMissingColumnError?.({ code: '42P01' })).toBe(false);
     expect(postgresDialect.isMissingColumnError?.({ code: '42601' })).toBe(false);
@@ -1040,5 +1048,42 @@ describe('isMissingColumnError — drop 的冪等來源 / what makes a drop idem
       }),
     ).toBe(false);
     expect(sqliteDialect.isMissingColumnError?.(new Error('boom'))).toBe(false);
+  });
+});
+
+describe('isDuplicateColumnError — 加欄位的冪等來源 / what makes an add idempotent', () => {
+  /*
+   * 與 `isMissingColumnError` 對稱：MySQL／SQLite 沒有 `add column if not exists`，所以要能認出「這個欄位已經在那裡」。
+   * 同樣必須嚴格 —— 寬鬆會把真正的 SQL 錯誤當成「已完成」吞掉。
+   * The mirror of `isMissingColumnError`: MySQL / SQLite have no `add column if not exists`, so "the
+   * column is already there" has to be recognised. It must be just as strict — a loose one would
+   * swallow a real SQL error as "already done".
+   */
+  it('accepts the duplicate-column error of its own driver and nothing else', () => {
+    /* Postgres：42701（duplicate_column），與 42703（不存在）分開。 */
+    expect(postgresDialect.isDuplicateColumnError?.({ code: '42701' })).toBe(true);
+    expect(postgresDialect.isDuplicateColumnError?.({ code: '42703' })).toBe(false);
+    expect(postgresDialect.isDuplicateColumnError?.(null)).toBe(false);
+
+    /* MySQL：errno 1060（ER_DUP_FIELDNAME），與 1091（drop 用的那個）分開。 */
+    expect(mysqlDialect.isDuplicateColumnError?.({ errno: 1060 })).toBe(true);
+    expect(mysqlDialect.isDuplicateColumnError?.({ code: 'ER_DUP_FIELDNAME' })).toBe(true);
+    expect(mysqlDialect.isDuplicateColumnError?.({ errno: 1091 })).toBe(false);
+    expect(mysqlDialect.isDuplicateColumnError?.(null)).toBe(false);
+
+    /* SQLite：「duplicate column name」，與「no such column」分開。 */
+    expect(
+      sqliteDialect.isDuplicateColumnError?.({
+        code: 'ERR_SQLITE_ERROR',
+        message: 'duplicate column name: user_tag',
+      }),
+    ).toBe(true);
+    expect(
+      sqliteDialect.isDuplicateColumnError?.({
+        code: 'ERR_SQLITE_ERROR',
+        message: 'no such column: user_tag',
+      }),
+    ).toBe(false);
+    expect(sqliteDialect.isDuplicateColumnError?.(new Error('boom'))).toBe(false);
   });
 });

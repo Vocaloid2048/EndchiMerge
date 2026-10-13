@@ -236,11 +236,12 @@ export const mysqlDialect: Dialect = {
    * ⚠️ Column order is part of **correctness**: `best_duration_ms` and `best_at` must come before `best_score`, since they compare against the **old** `best_score` (see `Dialect.upsertProfile`).
    */
   upsertProfile: () => `insert into profiles (
-       device_id, display_name, best_score, best_duration_ms, best_max_combo, best_merges,
+       device_id, display_name, user_tag, best_score, best_duration_ms, best_max_combo, best_merges,
        best_at, created_at, updated_at
-     ) values (?, ?, ?, ?, ?, ?, ?, utc_timestamp(3), utc_timestamp(3))
+     ) values (?, ?, ?, ?, ?, ?, ?, ?, utc_timestamp(3), utc_timestamp(3))
      on duplicate key update
        display_name = if(values(display_name) = '', profiles.display_name, values(display_name)),
+       user_tag = values(user_tag),
        best_duration_ms = if(values(best_score) > profiles.best_score,
                                values(best_duration_ms), profiles.best_duration_ms),
        best_at = if(values(best_score) > profiles.best_score, values(best_at), profiles.best_at),
@@ -260,6 +261,7 @@ export const mysqlDialect: Dialect = {
     `create table if not exists \`profiles\` (
        \`device_id\`        varchar(64)  not null,
        \`display_name\`     varchar(64)  not null default '',
+       \`user_tag\`         varchar(4)   not null default '',
        \`best_score\`       int          not null default 0,
        \`best_max_combo\`   int          not null default 0,
        \`best_merges\`      int          not null default 0,
@@ -325,14 +327,24 @@ export const mysqlDialect: Dialect = {
     `alter table \`requests\` drop column \`city\``,
     `alter table \`requests\` drop column \`headers\``,
     `alter table \`scores\` drop column \`client_ip\``,
+
+    /* 玩家號：顯示用的四位數，永不當身分。MySQL 沒有 `add column if not exists`，舊庫已有這個欄位時報 1060 並被判為已完成。
+     * The player tag: four display digits, never identity. MySQL has no `add column if not exists`, so an
+     * old database that already has the column raises 1060 and counts as done. */
+    `alter table \`profiles\` add column \`user_tag\` varchar(4) not null default ''`,
+    `update \`profiles\` set \`user_tag\` = lpad(floor(rand() * 9999) + 1, 4, '0') where \`user_tag\` = ''`,
   ],
 
   /*
-   * MySQL 的「欄位／索引不存在」是 errno 1091（`ER_CANT_DROP_FIELD_OR_KEY`）；mysql2 把它放在 `errno` 與 `code` 兩處，兩處都認。
-   * MySQL's "check that column/key exists" is errno 1091 (`ER_CANT_DROP_FIELD_OR_KEY`); mysql2 carries it in both `errno` and `code`, and both are accepted.
+   * MySQL 的欄位錯誤：1091 不存在（drop 用）、1060 重複（add 用）；mysql2 把代號放在 `errno` 與 `code` 兩處，兩處都認。
+   * MySQL's column errors: 1091 missing (drops), 1060 duplicate (adds); mysql2 carries the code in both `errno` and `code`.
    */
   isMissingColumnError: (error) => {
     const e = error as { code?: unknown; errno?: unknown } | null;
     return e?.code === 'ER_CANT_DROP_FIELD_OR_KEY' || e?.errno === 1091;
+  },
+  isDuplicateColumnError: (error) => {
+    const e = error as { code?: unknown; errno?: unknown } | null;
+    return e?.code === 'ER_DUP_FIELDNAME' || e?.errno === 1060;
   },
 };

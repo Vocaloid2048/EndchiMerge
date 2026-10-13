@@ -10,7 +10,7 @@ import type { Config } from './env.js';
 import { MAX_RUN_MS } from './env.js';
 import { checkClaimedDuration, checkRationality } from './limits.js';
 import type { Store } from './store.js';
-import { isValidDeviceId, newRunId, signRunToken, tokenFingerprint, verifyRunToken } from './tokens.js';
+import { isValidDeviceId, newRunId, newUserTag, signRunToken, tokenFingerprint, verifyRunToken } from './tokens.js';
 
 export interface Deps {
   readonly config: Config;
@@ -283,6 +283,12 @@ export const handleScore: CoreHandler = async (request, deps) => {
     runId,
     deviceId,
     displayName,
+    /*
+     * 只是一個**提議**：profile 已經有號就沿用（改名不動號），撞到別人的「名字＋號」才會被換掉。
+     * Only a **proposal**: an existing profile keeps its tag (a rename does not change it), and it is
+     * replaced only when it collides with another device's name-and-tag pair.
+     */
+    userTag: newUserTag(),
     score,
     durationMs,
     merges,
@@ -353,6 +359,7 @@ export const handleLeaderboard: CoreHandler = async (request, deps) => {
   const entries = rows.map((row, index) => ({
     rank: index + 1,
     name: row.displayName,
+    tag: row.userTag,
     score: row.bestScore,
     durationMs: row.bestDurationMs,
     maxCombo: row.bestMaxCombo,
@@ -380,6 +387,7 @@ export const handleLeaderboard: CoreHandler = async (request, deps) => {
       self = {
         rank,
         name: profile.displayName,
+        tag: profile.userTag,
         score: profile.bestScore,
         durationMs: profile.bestDurationMs,
         maxCombo: profile.bestMaxCombo,

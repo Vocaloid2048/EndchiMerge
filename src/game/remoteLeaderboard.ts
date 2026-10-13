@@ -102,6 +102,8 @@ export interface RemoteLeaderboardOptions {
 interface ServerEntry {
   readonly rank: number;
   readonly name: string;
+  /** 顯示用的四位數號；伺服器沒給或不合法時為空字串。 */
+  readonly tag: string;
   readonly score: number;
   readonly durationMs: number;
   readonly maxCombo: number;
@@ -154,9 +156,13 @@ function parseServerEntry(raw: unknown): ServerEntry | null {
   const rank = record['rank'];
   if (typeof rank !== 'number' || !Number.isFinite(rank) || rank < 1) return null;
 
+  const tag = record['tag'];
+
   return {
     rank: Math.trunc(rank),
     name: typeof record['name'] === 'string' ? record['name'] : '',
+    /* 形狀不對就當沒有號 —— 它是拿來顯示的，寧可少顯示也不要印出垃圾。 */
+    tag: typeof tag === 'string' && /^\d{4}$/u.test(tag) ? tag : '',
     score: readCount(record['score']),
     durationMs: readCount(record['durationMs']),
     maxCombo: readCount(record['maxCombo']),
@@ -194,6 +200,7 @@ function toEntry(entry: ServerEntry): LeaderboardEntry {
   return {
     id: '',
     name: entry.name,
+    tag: entry.tag,
     score: entry.score,
     durationMs: entry.durationMs,
     maxCombo: entry.maxCombo,

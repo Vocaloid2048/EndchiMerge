@@ -200,12 +200,13 @@ export const sqliteDialect: Dialect = {
    * assignment order — MySQL's column-order trap does not exist here.
    */
   upsertProfile: () => `insert into profiles (
-       device_id, display_name, best_score, best_duration_ms, best_max_combo, best_merges,
+       device_id, display_name, user_tag, best_score, best_duration_ms, best_max_combo, best_merges,
        best_at, created_at, updated_at
-     ) values (?, ?, ?, ?, ?, ?, ?, ${NOW_MS}, ${NOW_MS})
+     ) values (?, ?, ?, ?, ?, ?, ?, ?, ${NOW_MS}, ${NOW_MS})
      on conflict (device_id) do update set
        display_name = case when excluded.display_name = ''
                            then profiles.display_name else excluded.display_name end,
+       user_tag = excluded.user_tag,
        best_duration_ms = case when excluded.best_score > profiles.best_score
                                then excluded.best_duration_ms else profiles.best_duration_ms end,
        best_at = case when excluded.best_score > profiles.best_score
@@ -226,6 +227,7 @@ export const sqliteDialect: Dialect = {
     `create table if not exists profiles (
        device_id        text    primary key,
        display_name     text    not null default '',
+       user_tag         text    not null default '',
        best_score       integer not null default 0,
        best_max_combo   integer not null default 0,
        best_merges      integer not null default 0,
@@ -288,11 +290,17 @@ export const sqliteDialect: Dialect = {
     `alter table requests drop column city`,
     `alter table requests drop column headers`,
     `alter table scores drop column client_ip`,
+
+    /* 玩家號：顯示用的四位數，永不當身分。SQLite 沒有 `add column if not exists`，舊庫已有這個欄位時報「duplicate column name」並被判為已完成。
+     * The player tag: four display digits, never identity. SQLite has no `add column if not exists`, so an
+     * old database that already has the column raises "duplicate column name" and counts as done. */
+    `alter table profiles add column user_tag text not null default ''`,
+    `update profiles set user_tag = printf('%04d', abs(random()) % 9999 + 1) where user_tag = ''`,
   ],
 
   /*
-   * node:sqlite 把 SQLite 的錯誤包成 `ERR_SQLITE_ERROR`，訊息以「no such column / no such index」開頭。
-   * node:sqlite wraps SQLite errors as `ERR_SQLITE_ERROR` with messages starting "no such column / no such index".
+   * node:sqlite 把 SQLite 的錯誤包成 `ERR_SQLITE_ERROR`：drop 的缺口是「no such column / index」，add 的缺口是「duplicate column name」。
+   * node:sqlite wraps SQLite errors as `ERR_SQLITE_ERROR`: a drop's gap reads "no such column / index" and an add's reads "duplicate column name".
    */
   isMissingColumnError: (error) => {
     const e = error as { code?: unknown; message?: unknown } | null;
@@ -300,6 +308,14 @@ export const sqliteDialect: Dialect = {
       e?.code === 'ERR_SQLITE_ERROR' &&
       typeof e.message === 'string' &&
       /^no such (column|index):/i.test(e.message)
+    );
+  },
+  isDuplicateColumnError: (error) => {
+    const e = error as { code?: unknown; message?: unknown } | null;
+    return (
+      e?.code === 'ERR_SQLITE_ERROR' &&
+      typeof e.message === 'string' &&
+      /^duplicate column name:/i.test(e.message)
     );
   },
 };
