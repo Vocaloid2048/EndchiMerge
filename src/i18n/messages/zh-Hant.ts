@@ -1,21 +1,9 @@
 /**
- * 繁體中文（香港）字典 —— **來源語言**。
- * Traditional Chinese (Hong Kong) — the **source** locale.
- *
- * 這一支是翻譯的唯一真實來源：鍵集合由它導出（`MessageKey`），其餘四個語系都必須提供同樣
- * 的鍵，缺一個就編譯不過。要新增文案，先加在這裡。
- * This file is the single source of truth for translations: the key set is derived from it
- * (`MessageKey`), and the other four locales must supply every key or the build fails. Add new
- * copy here first.
+ * 繁體中文（香港）字典 —— 來源語言：鍵集合由它導出（`MessageKey`），其餘四個語系缺一個鍵就編譯不過。
+ * Traditional Chinese (Hong Kong) — the source locale: the key set derives from it (`MessageKey`), and every other locale must match it exactly.
  *
  * 佔位符寫成 `{name}`，由 `t()` 代入（見 `src/i18n/index.ts`）。
  * Placeholders are written `{name}` and substituted by `t()`.
- *
- * **設計稿標籤**（`label.*`）原本刻意不翻譯，使用者後來定案要跟著語系走，因此已列進字典。
- * 英文字典照原樣收錄，因為那幾個字本來就是英文原文。
- * The **mock's own labels** (`label.*`) used to be left untranslated on purpose; the user has
- * since decided they should follow the locale, so they are in the tables now. The English table
- * carries them verbatim, since those strings are already the English original.
  */
 
 export const zhHant = {
@@ -38,7 +26,10 @@ export const zhHant = {
   'label.next': '下一顆',
   'label.combo': '連擊',
   'label.skillList': '技能列表',
-  /* 使用者定案「MELTING LIST 就是圖鑑」（docs/CHANGELOG.md），所以照那個詞走。 */
+  /*
+   * 「MELTING LIST」就是圖鑑，顯示文字照那個詞走。
+   * MELTING LIST is the compendium, so the displayed text follows that name.
+   */
   'label.meltingList': '圖鑑',
   'label.gameOver': '遊戲結束',
   'label.newBest': '新紀錄',
@@ -85,11 +76,8 @@ export const zhHant = {
   'leaderboard.mergesValue': '{value} 次',
   'leaderboard.self': '你的最佳：{value}（{score} 分）· 第 {rank} 名，共 {total} 位玩家',
   /*
-   * 100 名之後不報名次（使用者定案）：榜只列前 100，第 101 名起的名次沒有對應的列可以看，
-   * 報一個玩家找不到的名字只是為難他，改成報「超越了百分之多少的玩家」。
-   * Past #100 no rank is reported (the user's decision): the board only lists the top 100, so a
-   * rank beyond that has no visible row to match, and quoting a number the player cannot find
-   * helps nobody. It reports the share of players beaten instead.
+   * 100 名之後不報名次：榜只列前 100，第 101 名起沒有對應的列可以看，改成報「超越了百分之多少的玩家」。
+   * Past #100 no rank is reported: the board lists the top 100 only, so beyond that it reports the share of players beaten instead.
    */
   'leaderboard.selfBeats': '你的最佳：{value}（{score} 分）· 超越 {beats}% 的玩家（共 {total} 位）',
   'leaderboard.tab.score': '最高分數',
@@ -146,11 +134,8 @@ export const zhHant = {
 
   /* ── 遊戲說明彈窗 / Help popup ─────────────────────────────────── */
   /*
-   * 內文由使用者親撰（2026-10-08），以下逐字照登，只做兩件事：
-   *  1. 依原文段落切成 `body1` / `body2` …，因為排版是一段一個 `<p>`（段落間距靠 CSS，
-   *     塞在單一字串裡就吃不到行距）。
-   *  2. 補上原文省略的書名號（《方團團大作戰》）。
-   * 原文版權段寫的「方團團大冒險」與本作名稱「方團團大作戰」不符，已統一為後者。
+   * 遊戲說明的內文：依原文段落切成 `body1` / `body2` …（排版一段一個 `<p>`，段落間距靠 CSS）。
+   * The help popup's body copy, split into `body1` / `body2` … per original paragraph (one `<p>` each; spacing comes from CSS).
    */
   'help.title': '遊戲說明',
   'help.close': '關閉說明',

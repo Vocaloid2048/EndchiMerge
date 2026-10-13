@@ -55,7 +55,7 @@ export const zhHans: Messages = {
   'leaderboard.comboValue': '{value} 连',
   'leaderboard.mergesValue': '{value} 次',
   'leaderboard.self': '你的最佳：{value}（{score} 分）· 第 {rank} 名，共 {total} 位玩家',
-  /* 100 名之后不报名次，改报超越了百分之多少的玩家（使用者定案）。 */
+  /* 100 名之后不报名次，改报超越了百分之多少的玩家。 / Past #100 no rank is shown, only the share of players beaten. */
   'leaderboard.selfBeats': '你的最佳：{value}（{score} 分）· 超越 {beats}% 的玩家（共 {total} 位）',
   'leaderboard.tab.score': '最高分数',
   'leaderboard.tab.combo': 'COMBO 数',

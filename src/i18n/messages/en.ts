@@ -1,16 +1,9 @@
 /**
- * English dictionary.
- * 英文字典。
- *
- * `zh-Hant.ts` 的對譯；鍵集合必須完全一致。
+ * English dictionary；`zh-Hant.ts` 的對譯，鍵集合必須完全一致。
  * The English counterpart of `zh-Hant.ts`; the key set must match exactly.
  *
- * 技能名以**設定檔的官方英文名**為準（`skills.json` 的 `names.en`）：Cast Off / Protocol:
- * Levitate / Shake Up! / Fated Exchange。提示句裡的技能名照那個寫法固定，因為這兩項技能的
- * 名字是定死的（見 `skillHint.discard` / `skillHint.fate_swap`）。
- * Skill names follow the **official English names** in config (`names.en` in `skills.json`):
- * Cast Off / Protocol: Levitate / Shake Up! / Fated Exchange. The hint sentences spell those
- * names out, since the two skills are fixed.
+ * 技能名以設定檔的官方英文名為準（`skills.json` 的 `names.en`），提示句照那個寫法固定。
+ * Skill names follow the official English names in config (`names.en` in `skills.json`), and the hint sentences spell those out.
  */
 
 import type { Messages } from './zh-Hant';
@@ -34,13 +27,8 @@ export const en: Messages = {
   'label.combo': 'COMBO',
   'label.skillList': 'SKILL LIST',
   /*
-   * 使用者定案：這個標籤在英文也照「圖鑑」的意思走，不再沿用設計稿的 `MELTING LIST`
-   * （`MELTING` 仍留在程式內部的識別名，改的只有顯示文字）。英文用 `COMPENDIUM`；
-   * 想換成 `CODEX` / `ARCHIVE` 這類同義詞只動這一行。
-   * The user's decision: this label follows the meaning of 圖鑑 in English too, rather than
-   * keeping the mock's `MELTING LIST`. (`MELTING` survives as an internal identifier — only the
-   * displayed text changed.) `COMPENDIUM` is the pick; swapping in `CODEX` / `ARCHIVE` is a
-   * one-line change.
+   * 這個標籤在英文照「圖鑑」的意思走（`MELTING` 仍是程式內部識別名，改的只有顯示文字）。
+   * This label follows the meaning of 圖鑑 in English (`MELTING` survives as an internal identifier — only the displayed text changed).
    */
   'label.meltingList': 'COMPENDIUM',
   'label.gameOver': 'GAME OVER',
@@ -79,7 +67,7 @@ export const en: Messages = {
   'leaderboard.mergesValue': '{value} merges',
   'leaderboard.self':
     'Your best: {value} ({score} pts) · #{rank} of {total} players',
-  /* Past #100 the rank is not reported, only the share of players beaten (the user's decision). */
+  /* 100 位之後不報名次，改報超越了百分之多少的玩家。 / Past #100 the rank is not reported, only the share of players beaten. */
   'leaderboard.selfBeats':
     'Your best: {value} ({score} pts) · beats {beats}% of players ({total} total)',
   'leaderboard.tab.score': 'Best score',

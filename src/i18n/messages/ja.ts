@@ -67,7 +67,7 @@ export const ja: Messages = {
   'leaderboard.mergesValue': '{value} 回合成',
   'leaderboard.self':
     'あなたのベスト：{value}（{score} 点）· {total} 人中 {rank} 位',
-  /* 100 位より下は順位を出さず、上回ったプレイヤーの割合だけを出します（使用者定案）。 */
+  /* 100 位より下は順位を出さず、上回ったプレイヤーの割合だけを出します。 / Past #100 no rank is shown, only the share of players beaten. */
   'leaderboard.selfBeats':
     'あなたのベスト：{value}（{score} 点）· プレイヤーの {beats}% を上回っています（全 {total} 人）',
   'leaderboard.tab.score': '最高スコア',

@@ -1,26 +1,12 @@
 /**
- * i18n 執行期：目前語系、翻譯查表、以及靜態文字的 DOM 同步。
- * The i18n runtime: the current locale, translation lookup, and DOM sync for static text.
+ * i18n 執行期：目前語系、翻譯查表（`t(key, params)`）與靜態文字的 DOM 同步（`applyTo()`）。
+ * The i18n runtime: the current locale, translation lookup (`t(key, params)`) and DOM sync for static text (`applyTo()`).
  *
- * 兩種用法，各管一半（**不要混用**）：
- * Two usages, each owning one half — do not mix them:
+ * 固定文字用 `i18nText` 等標記、由 `applyTo()` 統一改寫；動態文字由產生它的模組用 `t()` 即時組字串。
+ * Static text is tagged with `i18nText` and friends and rewritten by `applyTo()`; dynamic text is composed on the spot with `t()` by the module that owns it.
  *
- * 1. **固定文字**（標籤、按鈕、aria、佔位符）→ 建立時用 `i18nText` / `i18nAriaLabel` /
- *    `i18nTitle` / `i18nPlaceholder` 標記；語系一換，`applyTo()` 走一遍 DOM 就把所有標記過的
- *    節點改掉。**不需要**每個模組自己寫重繪。
- *    **Static text** (labels, buttons, aria, placeholders) is tagged at build time with
- *    `i18nText` and friends; on a locale change `applyTo()` walks the DOM once and rewrites
- *    every tagged node. No per-module re-render code is needed.
- * 2. **動態文字**（帶數字的句子、清單、aria 摘要）→ 用 `t(key, params)` 即時組字串；這類
- *    節點由產生它的模組自行重繪（那些模組本來就每幀或在開啟時重畫）。
- *    **Dynamic text** (sentences with numbers, lists, aria summaries) is composed on the spot
- *    with `t(key, params)`; those nodes are re-rendered by the modules that own them, which
- *    already redraw every frame or on open.
- *
- * 佔位符語法是 `{name}`，代入值一律 `String()` 化；找不到對應值的佔位符**原樣保留**，方便
- * 一眼看出漏填了什麼，而不是留下一個空白。
- * Placeholders are `{name}` and substituted via `String()`; a placeholder with no matching value
- * is **left as-is**, so a missing argument is visible rather than silently blank.
+ * 佔位符是 `{name}`，代入值一律 `String()` 化；找不到對應值的佔位符原樣保留。
+ * Placeholders are `{name}` and substituted via `String()`; an unmatched placeholder is left as-is.
  */
 
 import { DEFAULT_LOCALE, isLocale, type Locale } from './locale';

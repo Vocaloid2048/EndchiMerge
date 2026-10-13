@@ -1,13 +1,8 @@
 /**
- * 語系清單與偵測。
- * The locale list and detection.
+ * 語系清單與偵測：五個語系（繁體中文、簡體中文、粵語、英文、日文），清單順序就是設定頁的顯示順序。
+ * The locale list and detection: five locales (Traditional Chinese, Simplified Chinese, Cantonese, English, Japanese), listed in the settings page's order.
  *
- * 五個語系（使用者定案）：繁體中文、簡體中文、粵語、英文、日文。清單順序就是設定頁的顯示
- * 順序，也是語言選單的順序。
- * Five locales (the user's decision): Traditional Chinese, Simplified Chinese, Cantonese,
- * English and Japanese. The list order is the settings page's display order.
- *
- * 純函式、不碰 DOM，所以偵測規則可以逐條釘在單元測試裡。
+ * 純函式、不碰 DOM，偵測規則可以逐條釘在單元測試裡。
  * Pure functions with no DOM, so every detection rule can be pinned down by a test.
  */
 
