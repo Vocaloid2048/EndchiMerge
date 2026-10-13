@@ -1,10 +1,4 @@
 {
-  "_meta": {
-    "provisional": true,
-    "note": "半徑、密度、彈性、摩擦與分數全部為暫定值，推導規則見 docs/physics.md。待 M0 的半徑校準原型定案後會整表重算。",
-    "virtualHeight": 1000
-  },
-
   "settings": {
     "maxBodies": 80,
     "gravityY": 1,

@@ -17,13 +17,6 @@
     "noFallthroughCasesInSwitch": true,
     "noImplicitOverride": true,
 
-    /*
-     * 工具腳本（`scripts/*.ts`）跑在 Node 上：用 `process.env` 讀設定、用 `process.exitCode` 回報結果，
-     * 所以要 Node 的型別。`scripts/` 底下只有 `migrate.ts` 是 TypeScript，其餘 `.mjs` 由 Node 直接跑。
-     * Tool scripts (`scripts/*.ts`) run on Node — they read `process.env` and report through
-     * `process.exitCode` — so they need Node's types. Only `migrate.ts` is TypeScript there; the rest
-     * are `.mjs` run directly by Node.
-     */
     "types": ["node"]
   },
   "include": ["vite.config.ts", "scripts/**/*.ts"]
