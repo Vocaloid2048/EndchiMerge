@@ -1,29 +1,9 @@
 /**
- * 主畫面版面。
- * The main-screen layout.
+ * 主畫面版面：固定設計畫布上的絕對定位，座標全部取自 `core/design.ts`，整張畫布由 `ui/scale.ts` 等比縮放。
+ * The main-screen layout: absolute positioning on a fixed design canvas, coordinates from `core/design.ts`, scaled uniformly by `ui/scale.ts`.
  *
- * 這一版把版面從「跟著視窗跑的彈性排版」改成**固定設計畫布上的絕對定位**，座標全部
- * 取自 `core/design.ts`（＝ Figma frame `Group 445`）。整個畫布再由 `ui/scale.ts` 等比
- * 縮放，所以瀏覽器縮放不會改變任何兩件東西之間的相對大小。
- * This replaces a fluid, viewport-following layout with **absolute positioning on a fixed
- * design canvas** whose coordinates come from `core/design.ts` (the Figma frame
- * `Group 445`). `ui/scale.ts` then scales the canvas uniformly, so browser zoom cannot
- * change the size of anything relative to anything else.
- *
- * 分工 / Division of labour:
- *
- * - **位置與尺寸**由這裡用 inline style 寫入，值來自 `LAYOUT_RECTS`。
- *   Position and size are written here as inline styles from `LAYOUT_RECTS`.
- * - **外觀**（玻璃、顏色、字級、圓角）在 `styles/`。
- *   Appearance lives in `styles/`.
- * - **面板內部的格距**（技能格、名冊格、技力條）由 `ui/designTokens.ts` 寫成 CSS 變數，
- *   CSS 只讀 `var(--…)`，兩邊不會各抄一份數字。
- *   Intra-panel pitches are written as CSS variables by `ui/designTokens.ts` so no number
- *   is duplicated between TypeScript and CSS.
- *
- * 建構子回傳各區域節點，後續模組以 `data-hook` 取用內部槽位，不必回頭改這支檔案。
- * The returned region nodes let later modules mount into `data-hook` slots without
- * editing this file.
+ * 位置與尺寸由這裡以 inline style 寫入；外觀在 `styles/`；面板內部格距由 `ui/designTokens.ts` 寫成 CSS 變數。
+ * Position and size are inline styles here; appearance lives in `styles/`; intra-panel pitches become CSS variables via `ui/designTokens.ts`.
  */
 
 import { DESIGN_HEIGHT, DESIGN_WIDTH, LAYOUT_RECTS } from '../core/design';
@@ -34,55 +14,59 @@ import { applyDesignTokens } from './designTokens';
 import { appendChildren, el } from './dom';
 import { createAssetIcon, type AssetIconName } from './icons';
 
-/** 七個區域的識別名，對應 design.md §2.2 的編號 1–7。 */
+/**
+ * 七個區域的識別名，對應 design.md §2.2 的編號 1–7。
+ * The seven regions' names, matching the mock's numbering 1–7.
+ */
 export const REGION_NAMES = ['score', 'toolbar', 'next', 'combo', 'skill', 'container', 'melting'] as const;
 export type RegionName = (typeof REGION_NAMES)[number];
 
 export interface Layout {
-  /** 設計畫布的內層版面根節點。 */
+  /**
+   * 設計畫布的內層版面根節點。
+   * The layout root inside the design canvas.
+   */
   root: HTMLElement;
-  /** 固定 1920×1080、被整體縮放的畫布節點。 */
+  /**
+   * 固定 1920×1080、被整體縮放的畫布節點。
+   * The fixed 1920×1080 canvas node that gets scaled as a whole.
+   */
   stage: HTMLElement;
-  /** 七個區域節點，供後續模組掛載內容。 */
+  /**
+   * 七個區域節點，供後續模組掛載內容。
+   * The seven region nodes for later modules to mount into.
+   */
   regions: Record<RegionName, HTMLElement>;
-  /** 不屬七區域的常駐介面。 */
+  /**
+   * 不屬七區域的常駐介面。
+   * Persistent chrome outside the seven regions.
+   */
   chrome: {
-    /** 音樂開關，獨立於工具列膠囊之外（design.md D23）。 */
+    /**
+     * 音樂開關，獨立於工具列膠囊之外。
+     * The music toggle, separate from the toolbar capsule.
+     */
     music: HTMLButtonElement;
   };
-  /** 非官方聲明的宿主；內容由配置載入後填入。 */
+  /**
+   * 非官方聲明的宿主；內容由配置載入後填入。
+   * Hosts the unofficial notice; filled in once the config loads.
+   */
   notice: HTMLElement;
   /**
-   * 依容器的左右展示餘裕重新擺放舞台（`container.json` 的 `leftOffset` / `rightOffset`，
-   * 虛擬單位）。版面比配置更早建立，所以這一手要在 `loadConfig()` 之後補上。
-   * Re-place the stage from the container's left/right display margins (`leftOffset` /
-   * `rightOffset` in `container.json`, virtual units). The layout is built before the config
-   * loads, so this has to be applied afterwards.
+   * 依容器的左右展示餘裕重新擺放舞台（`container.json` 的 `leftOffset`／`rightOffset`）；
+   * 版面比配置更早建立，所以這一手要在 `loadConfig()` 之後補上。
+   * Re-places the stage from the container's left/right display margins (`leftOffset`/`rightOffset` in `container.json`); the layout is built before the config loads, so this runs afterwards.
    */
   setContainerMargin(leftOffset: number, rightOffset: number): void;
 }
 
 /**
- * 工具列每個圖示的語意（design.md D23 + 重新開始）。
- * Toolbar semantics per design.md D23, plus restart.
+ * 工具列每個圖示的語意：排行榜、工作坊（停用）、說明、設定、重新開始。
+ * Toolbar semantics: leaderboard, workshop (disabled), help, settings, restart.
  *
- * **「主頁面」已移除**（使用者定案）：排行榜、說明與設定都是模態，遊戲本體永遠在下面，
- * 一顆切回本體的按鈕無事可做 —— 所以 `ic_game` 不再出現在工具列，膠囊也就回到設計稿的
- * 五顆鈕（見 `core/design.ts` 的 `toolGroup`）。
- * **The "home" button was removed** (the user's decision): the leaderboard, help and settings are
- * all modals and the game itself never goes away, so a button that switches back to it has
- * nothing to do. `ic_game` therefore left the toolbar and the capsule returned to the mock's five
- * buttons (see `toolGroup` in `core/design.ts`).
- *
- * 重新開始的**行為**（彈出確認對話框）不在這裡 —— 這裡只負責把按鈕放上工具列，`main.ts`
- * 會用 `ui/restartButton.ts` 把確認流程接上。
- * Restart's *behaviour* (the confirmation dialog) does not live here — this only places the
- * button; `main.ts` wires the confirm flow via `ui/restartButton.ts`.
- *
- * 標籤是 **i18n 鍵**而非字串：按鈕的 `title` 與 `aria-label` 都由 `data-i18n-*` 標記，
- * 語系一換由 `i18n.applyTo()` 一次改掉（見 `src/i18n/index.ts`）。
- * Labels are **i18n keys**, not strings: each button's `title` and `aria-label` are tagged with
- * `data-i18n-*`, and a locale change rewrites them all in one `i18n.applyTo()` pass.
+ * 標籤是 i18n 鍵而非字串：`title` 與 `aria-label` 由 `data-i18n-*` 標記，語系一換一次改掉。
+ * Labels are i18n keys, not strings: `title` and `aria-label` are tagged with `data-i18n-*` and rewritten in one pass on a locale change.
  */
 const TOOLBAR_ITEMS: readonly {
   icon: AssetIconName;
@@ -98,13 +82,8 @@ const TOOLBAR_ITEMS: readonly {
 ];
 
 /**
- * 把節點放到設計稿座標上。
- * Place a node at a design-space rectangle.
- *
- * 用 inline style 而非 CSS class：座標只有一份（`core/design.ts`），產生 CSS class 反而
- * 需要在 CSS 裡再寫一次數字。
- * Inline styles rather than generated classes: the coordinates exist once, in
- * `core/design.ts`, and a class would mean writing them a second time in CSS.
+ * 把節點放到設計稿座標上；用 inline style 而非 CSS class（座標只有一份，產生 class 會要在 CSS 再寫一次）。
+ * Places a node at a design-space rectangle with inline styles rather than a class — the coordinates exist once, and a class would duplicate them in CSS.
  */
 function place(node: HTMLElement, rect: Rect): void {
   node.style.left = `${String(rect.x)}px`;
@@ -118,17 +97,8 @@ function buildScoreCard(): HTMLElement {
   card.dataset['region'] = 'score';
 
   /*
-   * 分數那一行現在**只裝分數**（使用者定案：這一局的時長不再顯示在 HUD，只在排行榜上）。
-   * 這裡原本並排兩個節點 —— 一個裝數字、一個裝時長 —— 因為 `ui/hud.ts` 每次分數變動都對
-   * 數字那個 `span` 整個覆寫 `textContent`，時長掛在同一個節點裡會被第一次更新抹掉。時長拿掉
-   * 之後那個理由也跟著消失，所以整行收成一個節點，與 COMBO 卡（`card__value` 直接帶 hook）
-   * 的結構一致。
-   * The score line now holds **only the score** (the user's decision: the run's duration is no
-   * longer shown in the HUD, only on the leaderboard). It used to hold two nodes side by side — the
-   * number and the duration — because `ui/hud.ts` overwrites the number's `textContent` outright on
-   * every score change, which would have wiped a duration sharing that node. Removing the duration
-   * removes the reason, so the line collapses back to a single node, matching the COMBO card, whose
-   * `card__value` carries its hook directly.
+   * 分數那一行只裝分數（時長只在排行榜顯示），結構與 COMBO 卡一致。
+   * The score line holds only the score (the duration shows on the leaderboard alone), matching the COMBO card's structure.
    */
   const value = el('p', 'card__value', '0');
   value.dataset['hook'] = 'score-value';
@@ -142,14 +112,9 @@ function buildScoreCard(): HTMLElement {
     const term = el('dt', 'card__stat-label');
 
     /*
-     * 標籤與分隔號是**兩個** `<span>`，不是一個字串加冒號。
-     * Label and separator are **two** `<span>`s rather than one string plus a colon.
-     *
-     * 理由是換語系時 `applyTo()` 對每個 `[data-i18n]` 是直接覆寫 `textContent`：往 `dt`
-     * 追加的文字節點不帶標記，下一次換語系就會被整個抹掉。分成兩個標記節點，兩邊各自更新。
-     * `applyTo()` overwrites `textContent` outright for every `[data-i18n]` node, so a text node
-     * appended to the `<dt>` carries no tag and would be wiped on the next locale change. Two
-     * tagged nodes update independently.
+     * 標籤與分隔號是兩個 `<span>`：`applyTo()` 對每個 `[data-i18n]` 直接覆寫 `textContent`，
+     * 不帶標記的文字節點會在下次換語系被抹掉。
+     * Label and separator are two `<span>`s: `applyTo()` overwrites `textContent` per `[data-i18n]` node, so an untagged text node would be wiped on the next locale change.
      */
     const name = el('span');
     i18nText(name, labelKey);
@@ -170,7 +135,10 @@ function buildScoreCard(): HTMLElement {
   return card;
 }
 
-/** 工具列：五圖示共用一個膠囊群組（design.md D23 + 重新開始鍵）。 */
+/**
+ * 工具列：五圖示共用一個膠囊群組。
+ * The toolbar: five icons sharing one pill group.
+ */
 function buildToolbar(): HTMLElement {
   const nav = el('nav', 'panel panel--pill toolbar');
   nav.dataset['region'] = 'toolbar';
@@ -190,7 +158,10 @@ function buildToolbar(): HTMLElement {
   return nav;
 }
 
-/** 音樂開關：獨立，不與工具列共用選中態（design.md D23）。 */
+/**
+ * 音樂開關：獨立，不與工具列共用選中態。
+ * The music toggle: standalone, not sharing the toolbar's pressed state.
+ */
 function buildMusicButton(): HTMLButtonElement {
   const music = el('button', 'panel panel--pill music');
   music.type = 'button';
@@ -216,24 +187,9 @@ function buildNextCard(): HTMLElement {
 }
 
 /**
- * COMBO 卡。
- * The COMBO card.
- *
- * 兩個數字，回答兩個不同的問題（使用者定案）：
- * - 大數字：**本次投放合成了幾次**（`combo-count`）。
- * - 下面一行：**本次投放合共賺了多少分**，加上最後一次合成所用的倍率
- *   （`combo-detail`，`+ 18 (×1.74)`）。
- *
- * 兩者都隨投放歸零，所以「本次投放」的界線與連擊一致，不會出現次數還在跳、
- * 得分卻已經換了一批的錯覺。
- *
- * Two numbers answering two different questions (the user's decision):
- * - the big one: **how many merges this drop produced** (`combo-count`);
- * - the line below: **what this drop earned in total** with the multiplier its last merge
- *   used (`combo-detail`, `+ 18 (×1.74)`).
- *
- * Both reset on a drop, so "this drop" spans the same window as the chain and the total can
- * never belong to a different drop than the count.
+ * COMBO 卡：大數字是本次投放合成了幾次，下一行是本次投放合共賺的分與最後一次的倍率；
+ * 兩者都隨投放歸零，界線與連擊一致。
+ * The COMBO card: the big number is merges this drop produced, the line below is what the drop earned with its last multiplier; both reset on a drop, so the window matches the chain.
  */
 function buildComboCard(): HTMLElement {
   const card = el('section', 'panel card card--combo');
@@ -255,10 +211,8 @@ function buildSkillList(): HTMLElement {
   panel.dataset['region'] = 'skill';
 
   /*
-   * 技力條的**段數**由 `sp.max` 決定（設計稿是一點一條），所以配置載入前不建任何
-   * 段數；載入後由 `ui/hud.ts` 的 `renderSpMeter()` 填。這裡只提供容器與 hook。
-   * The segment count follows `sp.max` (one pill per point), so nothing is built before
-   * the config loads; `renderSpMeter()` in `ui/hud.ts` fills it afterwards.
+   * 技力條的段數由 `sp.max` 決定，配置載入前不建任何段數，載入後由 `renderSpMeter()` 填。
+   * The meter's segment count follows `sp.max`; nothing is built before the config loads, and `renderSpMeter()` fills it afterwards.
    */
   const meter = el('div', 'sp-meter');
   meter.dataset['hook'] = 'sp-meter';
@@ -282,11 +236,8 @@ function buildStage(): HTMLElement {
   const canvas = el('canvas', 'stage__canvas');
   canvas.dataset['hook'] = 'stage-canvas';
   /*
-   * 畫布是自繪的互動介面，不是圖片：`role="img"` 會讓鍵盤使用者永遠進不去。
-   * 改為 `application` 並讓它可以聚焦，鍵盤的瞄準與投放才有宿主。
-   * The canvas is a self-drawn interactive surface, not an image: `role="img"` would
-   * leave keyboard users locked out. `application` plus a tab stop gives the keyboard
-   * controls a home.
+   * 畫布是自繪的互動介面：`role="application"` ＋ 可聚焦，鍵盤的瞄準與投放才有宿主。
+   * The canvas is a self-drawn interactive surface: `role="application"` plus a tab stop gives the keyboard controls a home.
    */
   canvas.setAttribute('role', 'application');
   canvas.setAttribute('tabindex', '0');
@@ -310,10 +261,8 @@ function buildMeltingList(): HTMLElement {
 }
 
 /**
- * 建立版面並掛載到宿主節點。
- * Build the layout and mount it into the host element.
- *
- * @param host 版面宿主，通常是 `#app` / Layout host, normally `#app`.
+ * 建立版面並掛載到宿主節點；`host` 通常是 `#app`。
+ * Builds the layout and mounts it into the host element; `host` is normally `#app`.
  */
 export function createLayout(host: HTMLElement): Layout {
   /* 畫布：固定 1920×1080，倍率由 `ui/scale.ts` 設定。 */
@@ -343,11 +292,9 @@ export function createLayout(host: HTMLElement): Layout {
   place(melting, LAYOUT_RECTS.melting);
 
   /*
-   * 設計稿把返回鍵放在 (64,64)，與 SCORE 面板完全重疊而在設計稿中根本看不到；
-   * 依裁定「照設計稿」不渲染它。座標仍留在 `LAYOUT_RECTS.back` 作紀錄。
-   * The mock puts the back button at (64,64), fully under the SCORE panel so the mock
-   * never renders it; per the decision it is not drawn, and its rect stays in
-   * `LAYOUT_RECTS.back` as a record.
+   * 設計稿把返回鍵放在 (64,64)，與 SCORE 面板完全重疊而看不到；照設計稿不渲染，
+   * 座標仍留在 `LAYOUT_RECTS.back` 作紀錄。
+   * The mock puts the back button at (64,64), fully under the SCORE panel and never visible; it is not drawn, and its rect stays in `LAYOUT_RECTS.back` as a record.
    */
 
   /* 非官方聲明：放在安全區之下的下緣留白，不佔任何 UI 空間。 */
@@ -359,14 +306,9 @@ export function createLayout(host: HTMLElement): Layout {
   host.append(stage);
 
   /*
-   * 容器的左右展示餘裕：畫布（`.stage`）必須比容器區域左右各寬一段，容器才搖得動而不被畫布
-   * 切掉。設計稿像素 / 虛擬單位這把尺由「容器區域高度 ↔ `VIRTUAL_HEIGHT`」決定，與寬度無關
-   * （`render/viewport.ts` 的 `scale = cssHeight / VIRTUAL_HEIGHT`），所以不會遞迴。
-   * The container's left/right display margins: the canvas (`.stage`) must be wider than the
-   * container region by one margin on each side, or the box would be sliced by the canvas the
-   * moment it shakes. The design-px-per-virtual-unit ruler comes from the region height
-   * against `VIRTUAL_HEIGHT` and is independent of the width (`scale = cssHeight /
-   * VIRTUAL_HEIGHT` in `render/viewport.ts`), so this is not circular.
+   * 容器的左右展示餘裕：畫布比容器區域左右各寬一段，容器才搖得動而不被切掉。
+   * 設計像素/虛擬單位這把尺由「區域高度 ↔ VIRTUAL_HEIGHT」決定，與寬度無關，所以不會遞迴。
+   * The container's left/right display margins: the canvas is one margin wider on each side so the box can shake without being sliced. The design-px-per-virtual-unit ruler comes from the region height against `VIRTUAL_HEIGHT` and is width-independent, so this is not circular.
    */
   const setContainerMargin = (leftOffset: number, rightOffset: number): void => {
     const rect = LAYOUT_RECTS.container;
@@ -375,13 +317,9 @@ export function createLayout(host: HTMLElement): Layout {
     const right = Math.max(0, rightOffset) * designPerUnit;
 
     /*
-     * 舞台以容器為中心向左右長出去，所以容器在設計稿上的座標一個都沒動，只有畫布變寬。
-     * 畫布的虛擬寬度因此增加 `left + right` 個虛擬單位，而 `render/container.ts` 又把外框
-     * 左右各內縮同樣的距離 —— 兩者相抵，**容器的尺寸與可玩寬度都不變**。
-     * The stage grows symmetrically outward, so the box keeps the mock's coordinates exactly
-     * and only the canvas gets wider. That adds `left + right` virtual units to the canvas'
-     * virtual width, and `render/container.ts` insets the frame by the same amount — the two
-     * cancel, so **neither the container's size nor the play width changes**.
+     * 舞台以容器為中心向左右長出去：畫布的虛擬寬度增加 `left + right`，
+     * 而 `render/container.ts` 把外框內縮同樣的距離 —— 兩者相抵，容器尺寸與可玩寬度都不變。
+     * The stage grows symmetrically outward: the canvas' virtual width gains `left + right`, and `render/container.ts` insets the frame by the same amount — the two cancel, so neither the container's size nor the play width changes.
      */
     place(container, {
       x: rect.x - left,

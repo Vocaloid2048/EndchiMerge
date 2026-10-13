@@ -1,32 +1,9 @@
 /**
- * 設定彈窗。
- * The settings popup.
+ * 設定彈窗：兩欄版面（左欄分類、右欄「副標題 → 控件 → 說明」），一行一個設定。
+ * The settings popup: a two-column layout (categories on the left, "subtitle → control → note" on the right), one setting per row.
  *
- * 使用者定案的版面是兩欄：**左欄是分類**，右欄是該分類的「副標題 → 控件 → 淺灰小字說明」。
- * 一行一個設定，說明就在它下面，所以「這個開關做什麼」永遠不必去別的地方找。
- * The layout the user decided on is two columns: **the category on the left**, and on the right
- * that category's "subtitle → control → small grey note". One setting per row with its note
- * directly beneath, so what a switch does never has to be looked up elsewhere.
- *
- * 四個分類（依使用者定案）：
- * 1. **遊戲玩法 / 規則更改** —— 一個**總開關**，開啟後才可調整其他規則，而且開啟期間成績一律
- *    不記入排行榜（見 `game/preferences.ts` 的閘門說明）。
- * 2. **無盡模式** —— 越過警戒線不再觸發警告與結束。
- * 3. **語言** —— 五個語系，預設跟隨裝置。
- * 4. **排行榜** —— 顯示名稱與分享意願，直接掛 `ui/publishFields.ts`（與首次詢問共用同一支）。
- *
- * Four categories (the user's decision): the rule-change **master switch** (with the other rules
- * only adjustable while it is on, and nothing recorded while it is), **endless mode**, the
- * **language** (five locales, defaulting to the device), and the **leaderboard** fields, which
- * mount the very same `ui/publishFields.ts` the one-off prompt uses.
- *
- * 這一支**不含任何儲存邏輯**：偏好寫進 `PreferencesStore`，名稱與分享寫進 `LeaderboardSource`，
- * 這裡只把控件接上去、把狀態畫出來。
- * **No storage logic lives here**: preferences go to the `PreferencesStore` and the name/sharing to
- * the `LeaderboardSource`; this only wires the controls and draws the state.
- *
- * 尺寸是**設計稿像素**（掛在 `.stage-scale` 內，與整張畫布一起被 `ui/scale.ts` 等比縮放）。
- * Sizes are **design pixels** (mounted inside `.stage-scale`, scaled with the canvas).
+ * 不含任何儲存邏輯：偏好寫進 `PreferencesStore`，名稱與分享寫進 `LeaderboardSource`，這裡只接控件與畫狀態。
+ * It holds no storage logic: preferences go to `PreferencesStore`, the name and sharing to `LeaderboardSource`; this only wires controls and draws state.
  */
 
 import type { LeaderboardSource } from '../game/leaderboard';
@@ -36,11 +13,20 @@ import { appendChildren, el } from './dom';
 import { createPublishFields, type PublishFields } from './publishFields';
 
 export interface SettingsOptions {
-  /** 掛載點；通常是 `layout.root`（同時也是縮放畫布）。 */
+  /**
+   * 掛載點；通常是 `layout.root`（同時也是縮放畫布）。
+   * Where it mounts; usually `layout.root` (also the scaled stage).
+   */
   host: HTMLElement;
-  /** 偏好來源（語言、規則總開關、無盡模式）。 */
+  /**
+   * 偏好來源（語言、規則總開關、無盡模式）。
+   * The preferences source (locale, the rules master gate, endless mode).
+   */
   preferences: PreferencesStore;
-  /** 排行榜來源（顯示名稱與分享意願）。 */
+  /**
+   * 排行榜來源（顯示名稱與分享意願）。
+   * The leaderboard source (display name and sharing consent).
+   */
   leaderboard: LeaderboardSource;
 }
 
@@ -51,7 +37,10 @@ export interface SettingsView {
   dispose(): void;
 }
 
-/** 一個開關列的三件東西。 */
+/**
+ * 一個開關列的三件東西。
+ * The three handles of a switch row.
+ */
 interface SwitchRow {
   root: HTMLElement;
   input: HTMLInputElement;
@@ -61,14 +50,10 @@ interface SwitchRow {
 
 /**
  * 開關列：標題在左、開關在右，說明在下一行（淺灰小字）。
- * A switch row: the label on the left, the switch on the right, the note on the line below in
- * small grey type.
+ * A switch row: the label on the left, the switch on the right, the note below in small grey type.
  *
- * 用 `<input type="checkbox" role="switch">` 而不是自己畫一顆 div：鍵盤、`Space` 切換、
- * 表單語意與輔助技術全部免費，`aria-checked` 也跟著 `checked` 一起維護。
- * A native `<input type="checkbox" role="switch">` rather than a hand-drawn div: keyboard,
- * `Space` toggling, form semantics and assistive tech all come free, and `aria-checked` is kept
- * in step with `checked`.
+ * 用原生 `<input type="checkbox" role="switch">`：鍵盤、`Space` 切換與表單語意全部免費。
+ * A native `<input type="checkbox" role="switch">`: keyboard, `Space` toggling and form semantics come free.
  */
 function buildSwitchRow(options: {
   labelKey: MessageKey;
@@ -182,10 +167,8 @@ export function createSettings(options: SettingsOptions): SettingsView {
     input.value = locale;
 
     /*
-     * 語系名一律用**該語言自己的寫法**（endonym），不翻譯：日文使用者要能一眼找到「日本語」，
-     * 而不是在五個莫名其妙的漢字裡猜。所以這一格刻意不掛 `data-i18n`。
-     * Locale names are always endonyms and are **not** translated: a Japanese speaker looks for
-     * "日本語", not for a guess among five unfamiliar labels. Hence no `data-i18n` here.
+     * 語系名一律用該語言自己的寫法（endonym），不翻譯；這一格刻意不掛 `data-i18n`。
+     * Locale names are endonyms and never translated; hence no `data-i18n` here.
      */
     const optionLabel = el('label', 'settings__language');
     appendChildren(optionLabel, input, el('span', 'settings__language-name', LOCALE_LABELS[locale]));
@@ -243,13 +226,11 @@ export function createSettings(options: SettingsOptions): SettingsView {
   /* ── 狀態同步 ────────────────────────────────────────────────────── */
 
   /**
-   * 把控制項拉回來源。開窗時、以及來源被別處改動時呼叫。
-   * Pull the controls back from the sources. Called on open and whenever a source changes
-   * elsewhere.
+   * 把控制項拉回來源；開窗時、以及來源被別處改動時呼叫。
+   * Pulls the controls back from the sources; called on open and whenever a source changes elsewhere.
    *
-   * **不會**同步名稱輸入框裡玩家正在打的字（`fields.sync()` 自己會避開聚焦中的欄位）。
-   * It does **not** clobber what the player is typing in the name field (`fields.sync()` avoids
-   * the focused field by itself).
+   * 不會同步名稱輸入框裡玩家正在打的字（`fields.sync()` 自己會避開聚焦中的欄位）。
+   * It never clobbers what the player is typing (`fields.sync()` avoids the focused field by itself).
    */
   function sync(): void {
     masterSwitch.setChecked(preferences.rulesEnabled);
@@ -271,11 +252,8 @@ export function createSettings(options: SettingsOptions): SettingsView {
   });
 
   /*
-   * 語系變更時重跑一次同步：`data-i18n` 的靜態文字由 `main.ts` 的 `applyTo()` 負責，但控件
-   * 的**狀態**（勾選、radio、無盡模式的可用性）要在這裡更新，因為它們不是文字。
-   * Re-sync on a locale change: `main.ts`'s `applyTo()` handles the static `data-i18n` copy, but
-   * the controls' **state** (ticks, radios, endless availability) is updated here, since it is
-   * not text.
+   * 語系變更時重跑一次同步：`applyTo()` 負責靜態文字，控件的狀態（勾選、radio、可用性）在這裡更新。
+   * Re-syncs on a locale change: `applyTo()` handles the static copy, but the controls' state (ticks, radios, availability) is updated here.
    */
   const unsubscribeLocale = i18n.subscribe((): void => {
     if (!root.hidden) sync();
