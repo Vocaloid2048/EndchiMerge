@@ -1,24 +1,14 @@
 /**
- * 虛擬座標換算的單元測試。
- * Unit tests for virtual-coordinate conversion.
- *
- * 這一組測試守著一個實際發生過的 bug：**畫布被外層 CSS 縮放時，指標的換算沒有把縮放
- * 除回去**，於是手指停在容器右牆時，瞄準早已撞到夾制上限 —— 玩家看到的可投放範圍只剩
- * 左邊一小段，而且視窗越小越窄。每條斷言都對應那個症狀的其中一面。
- * These tests guard a bug that actually shipped: **when the canvas is CSS-scaled, pointer
- * conversion did not divide the scale back out**, so a finger resting on the right wall was
- * already past the clamp — the droppable range looked like a short segment on the left and
- * got narrower as the window shrank. Each assertion covers one face of that symptom.
+ * 虛擬座標換算的單元測試：外層 CSS 縮放必須被除回去，否則可投放範圍會縮水。
+ * Unit tests for virtual-coordinate conversion: the outer CSS scale must be divided back out.
  */
 
 import { beforeAll, describe, expect, it } from 'vitest';
 import { Viewport } from '../src/render/viewport';
 
 /*
- * 測試環境是 node，沒有 `window`；`Viewport.resize()` 只跟它要 `devicePixelRatio`。
- * 補一個最小替身，讓換算邏輯能在不需要瀏覽器的情況下被釘住。
- * The test environment is node and has no `window`; `Viewport.resize()` only asks it for
- * `devicePixelRatio`. A minimal stand-in keeps the conversion testable without a browser.
+ * 測試環境是 node，沒有 `window`；補一個最小替身，讓 `Viewport.resize()` 問得到 `devicePixelRatio`。
+ * The test environment is node and has no `window`; a minimal stand-in supplies `devicePixelRatio`.
  */
 beforeAll((): void => {
   (globalThis as unknown as { window: unknown }).window = { devicePixelRatio: 1 };
@@ -63,7 +53,6 @@ function setup(
 describe('Viewport.toVirtual — 縮放還原 / undoing the CSS scale', () => {
   it('agrees with the identity case (k = 1)', () => {
     const { viewport, rect } = setup(800, 400, 1);
-    /* 800×400 的畫布、虛擬高 1000 ⇒ 比例 0.4；x = 400 應落在虛擬 1000。 */
     const point = viewport.toVirtual(rect, 400, 200);
 
     expect(point).not.toBeNull();
@@ -73,15 +62,12 @@ describe('Viewport.toVirtual — 縮放還原 / undoing the CSS scale', () => {
 
   it('maps the visible right edge to the same virtual X regardless of CSS zoom', () => {
     /*
-     * 這是 bug 的核心：外層縮放 k 改變的是「一個 CSS px 值多少虛擬單位」，視覺上的
-     * 最右緣永遠是虛擬寬度。修好之前，k = 0.5 時指標要到視覺 2 倍遠才會碰到同一個虛擬 X。
-     * The heart of the bug: the outer scale changes how many virtual units a CSS pixel is
-     * worth, but the visible right edge is always the virtual width. Before the fix, at
-     * k = 0.5 the pointer had to travel twice as far to reach the same virtual X.
+     * 外層縮放改變「一個 CSS px 值多少虛擬單位」，但視覺最右緣永遠對應虛擬寬度。
+     * The outer scale changes how many virtual units a CSS pixel is worth, but the visible right
+     * edge always maps to the virtual width.
      */
     for (const k of [1, 0.9, 0.75, 0.5, 0.25]) {
       const { viewport, rect } = setup(800, 400, k);
-      /* 指標停在元素的最右緣：rect 寬就是 cssWidth × k。 */
       const point = viewport.toVirtual(rect, rect.width, rect.height / 2);
 
       expect(point, `k = ${String(k)}`).not.toBeNull();
@@ -90,7 +76,6 @@ describe('Viewport.toVirtual — 縮放還原 / undoing the CSS scale', () => {
   });
 
   it('does not drift with a non-zero rect origin', () => {
-    /* 元素被版面挪到 (137, 42) 時，換算結果必須與原點無關。 */
     const { viewport } = setup(800, 400, 0.5);
     const rect = { left: 137, top: 42, width: 400, height: 200 } as DOMRectReadOnly;
 
@@ -102,12 +87,6 @@ describe('Viewport.toVirtual — 縮放還原 / undoing the CSS scale', () => {
   });
 
   it('returns null outside the element', () => {
-    /*
-     * 元素外不回應。少了這一條，拖到畫布外時瞄準會繼續被推到夾制邊界，與瀏覽器
-     * 「元素外不派發事件」的行為不一致。
-     * Nothing outside the element: without this, dragging off the canvas keeps pushing the
-     * aim to its clamp, which contradicts the browser not dispatching events out there.
-     */
     const { viewport, rect } = setup(800, 400, 1);
 
     expect(viewport.toVirtual(rect, -1, 100)).toBeNull();

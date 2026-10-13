@@ -1,15 +1,6 @@
 /**
- * 蛇形佈局的單元測試。
- * Unit tests for the serpentine layout.
- *
- * 守住三件事：(1) 走位是**橫向蛇形（S 形）**——第一列由左而右、第二列由右而左（使用者
- * 定案），(2) 設計稿的 19 個槽位會落在 4 欄 × 5 列的哪一格 —— 那個「缺一格」的位置就是
- * 判斷蛇形方向的唯一證據，(3) 走線是**一條**連續折線，帶著設計稿的 32 圓角與向下箭頭。
- * Three things are pinned: (1) the walk is **row-major (an S shape)** — row 1 left to right,
- * row 2 right to left (the user's decision), (2) which of the 4×5 grid cells the mock's 19
- * slots occupy — the single gap is the only evidence for the walking direction — and (3) the
- * track is **one** continuous polyline carrying the mock's 32-radius fillets and a downward
- * arrow.
+ * 蛇形佈局的單元測試：S 形走位、設計稿 19 格的唯一缺口、單一連續走線。
+ * Unit tests for the serpentine layout: the S-shaped walk, the 19-slot gap, and one track.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -30,7 +21,7 @@ const { cols: COLS, rows: ROWS, cellWidth: CW, cellHeight: CH } = MELTING;
 const { laneOverhang, exitInset, cornerRadius, strokeWidth, arrowLength, arrowHalfWidth } =
   MELTING.track;
 
-/** 4 欄格網在內容區裡的置中偏移（使用者定案：S 形左右置中）。 */
+/** 4 欄格網在內容區裡的置中偏移。 */
 const OFFSET_4 = gridOffsetX(COLS);
 
 /** 左右走道：置中後的格網左右緣再各向外伸 `laneOverhang`。 */
@@ -81,7 +72,6 @@ describe('slotAt — 橫向蛇形 / row-major S walk', () => {
   });
 
   it('respects a non-default column count', () => {
-    /* 3 欄一列：偶數列由左而右，奇數列由右而左。 */
     expect(slotAt(0, 3)).toEqual({ col: 0, row: 0 });
     expect(slotAt(2, 3)).toEqual({ col: 2, row: 0 });
     expect(slotAt(3, 3)).toEqual({ col: 2, row: 1 });
@@ -104,9 +94,7 @@ describe('格網幾何 / grid geometry', () => {
   });
 
   it('centres the used grid in the content box', () => {
-    /* 4 欄佔 337、內容區 367 → 左右各留 15。 */
     expect(OFFSET_4).toBe((MELTING.content.width - COLS * CW) / 2);
-    /* 1 欄（84.25）置中在 367 裡。 */
     expect(gridOffsetX(1)).toBe((MELTING.content.width - CW) / 2);
   });
 
@@ -121,11 +109,9 @@ describe('格網幾何 / grid geometry', () => {
 
   it('derives the lanes: the centred grid edges widened by one overhang each side', () => {
     expect(trackLanes(COLS)).toEqual({ leftLane: LEFT_LANE_4, rightLane: RIGHT_LANE_4 });
-    /* 左右對稱：兩條走道到內容區左右緣的距離相等。 */
     expect(trackLanes(COLS).leftLane).toBe(
       MELTING.content.width - trackLanes(COLS).rightLane,
     );
-    /* 欄數改變時走道跟著（置中後的）格網走。 */
     expect(trackLanes(2).leftLane).toBe(gridOffsetX(2) - laneOverhang);
     expect(trackLanes(2).rightLane).toBe(gridOffsetX(2) + 2 * CW + laneOverhang);
   });
@@ -147,7 +133,6 @@ describe('computeRosterLayout — 設計稿的 19 格 / the mock’s 19 slots', 
       (row) => layout.slots.filter((slot) => slot.row === row).length,
     );
 
-    /* 前 4 列各 4 格、第 5 列 3 格。直行蛇形會把空位留在**第 1 列**，與此不符。 */
     expect(perRow).toEqual([4, 4, 4, 4, 3]);
     expect(layout.slots.some((slot) => slot.col === 3 && slot.row === 4)).toBe(false);
   });
@@ -157,7 +142,6 @@ describe('computeRosterLayout — 設計稿的 19 格 / the mock’s 19 slots', 
 
     expect(layout.slots).toHaveLength(20);
     expect(layout.slots.some((slot) => slot.col === 3 && slot.row === 4)).toBe(true);
-    /* 第 5 列是偶數列，由左而右，所以第 20 顆停在第 5 列的最右邊。 */
     expect(layout.slots.at(-1)).toMatchObject({ col: 3, row: 4 });
   });
 
@@ -220,20 +204,16 @@ describe('走線 / the track', () => {
     );
     const sweeps = arcs.map((arc) => arc.args[4]);
 
-    /* 第 1 列往右（sweep 1）→ 2 個；第 2 列往左（sweep 0）→ 2 個；如此類推。 */
     expect(sweeps).toEqual([1, 1, 0, 0, 1, 1, 0, 0]);
   });
 
   it('keeps every x on the widened grid: a lane, a lane inset by one fillet radius, or the last slot centre', () => {
     /*
-     * 這條守住「走線不會飄走」：實線段的每一個水平座標都必須是左／右走道、走道內縮一個
-     * 圓角半徑（＝列上那一段的端點）、或最後一個槽位的中心（實線／虛線分界）。
-     * Guards against the track drifting: every x of the solid run must be a lane, a lane
-     * inset by one fillet radius (the row run's endpoints), or the last slot's centre (the
-     * solid/dashed boundary).
+     * 實線段的每個水平座標都必須落在左／右走道、走道內縮一個圓角半徑、或最後一槽中心。
+     * Every x of the solid run must be a lane, a lane inset by one fillet radius, or the last
+     * slot's centre.
      */
     const commands = parsePath(computeRosterLayout({ count: 19 }).track?.path ?? '');
-    /* count 19 的最後一格是第 5 列第 3 欄（row-major：index 18 → col 2）。 */
     const lastSlotX = OFFSET_4 + 2 * CW + CW / 2;
     const allowed = new Set([
       LEFT_LANE_4,
@@ -255,9 +235,7 @@ describe('走線 / the track', () => {
     const lastSlotX = OFFSET_4 + 2 * CW + CW / 2;
     const exitY = ROWS * CH - exitInset;
 
-    /* 實線的最後一筆落在最後一格的中心（第 5 列第 3 欄的中心）。 */
     expect(parsePath(track?.path ?? '').at(-1)).toEqual({ cmd: 'L', args: [lastSlotX, rowCentre(4)] });
-    /* 虛線段：由最後一格中心沿第 5 列走到右走道，直落出欄線。 */
     expect(track?.dash).toBe(
       [`M ${String(lastSlotX)} ${String(rowCentre(4))}`, `L ${String(RIGHT_LANE_4)} ${String(rowCentre(4))}`, `L ${String(RIGHT_LANE_4)} ${String(exitY)}`].join(' '),
     );
@@ -276,12 +254,8 @@ describe('走線 / the track', () => {
 
   it('locks the whole 4-column route to the centred, widened geometry', () => {
     /*
-     * 這條是「幾何合約」：把整條 `d` 寫死。它來自使用者定案（格網置中＋走道外拓＋
-     * 最後一隻之後虛線，見 `core/design.ts` 的 `MELTING.track`），任何改動都應該是
-     * 有意識的，而不是順手漂移。
-     * The geometry contract: the entire `d`, frozen. It encodes the user's decisions
-     * (centred grid, widened lanes, dashed tail past the last dumpling — see
-     * `MELTING.track` in `core/design.ts`), so any change here must be deliberate.
+     * 幾何合約：整條 `d` 寫死，任何改動都應該是有意識的。
+     * The geometry contract: the entire `d`, frozen, so any change here must be deliberate.
      */
     expect(computeRosterLayout({ count: 19 }).track?.path).toBe(
       [
@@ -336,18 +310,15 @@ describe('走線 / the track', () => {
     const commands = parsePath(computeRosterLayout({ count: 19 }).track?.arrow ?? '');
     const [, middle, last] = commands;
 
-    /* 中間那一點的 y 最大（＝最低），兩隻翼都比它高。 */
     expect(middle.args[1]).toBeGreaterThan(last.args[1]);
     expect(middle.args[0]).toBe(last.args[0] - arrowHalfWidth);
   });
 
   it('lets the arrow overshoot the content edge like the mock, still inside the panel', () => {
     /*
-     * 走道外拓之後，箭頭的兩翼伸過內容區右緣 —— 與設計稿一致（`overflow: visible`）。
-     * 但整支箭頭仍在 MELTING LIST 面板（435 寬、內容區左緣 21）之內。
-     * With the widened lanes the arrowhead's wings overshoot the content box's right edge —
-     * like the mock (`overflow: visible`). The whole arrow still sits inside the MELTING LIST
-     * panel (435 wide, content box 21 from the panel's left edge).
+     * 走道外拓後箭翼伸過內容區右緣，但整支箭頭仍在 435 寬的面板內。
+     * With widened lanes the wings overshoot the content box, yet the arrow stays inside the
+     * 435-wide panel.
      */
     const right = RIGHT_LANE_4 + arrowHalfWidth;
 
@@ -377,7 +348,6 @@ describe('computeRosterLayout — 已解鎖前綴 / unlocked prefix', () => {
 
 describe('computeRosterLayout — 欄數 / columns', () => {
   it('only walks as many columns as the chain needs', () => {
-    /* 3 顆填不滿第一列，所以只用到 1 欄，槽位不會掉到畫面外。 */
     expect(computeRosterLayout({ count: 3 }).cols).toBe(1);
     expect(computeRosterLayout({ count: 6 }).cols).toBe(2);
     expect(computeRosterLayout({ count: 19 }).cols).toBe(4);
@@ -393,7 +363,6 @@ describe('computeRosterLayout — 欄數 / columns', () => {
 
     expect(layout.cols).toBe(2);
     expect(layout.rows).toBe(5);
-    /* 第 5 列是偶數列，由左而右，最後一顆落在第 2 欄。 */
     expect(layout.slots.at(-1)).toMatchObject({ col: 1, row: 4 });
     expect(layout.track?.rowCentres).toEqual([0, 1, 2, 3, 4].map(rowCentre));
   });
@@ -406,7 +375,6 @@ describe('computeRosterLayout — 邊界 / edges', () => {
     expect(layout.slots).toEqual([]);
     expect(layout.track).toBeNull();
     expect(layout.unlockedCount).toBe(0);
-    /* 空鏈仍回報設計稿的欄列數，讓外框尺寸保持穩定。 */
     expect(layout.cols).toBe(COLS);
     expect(layout.rows).toBe(ROWS);
   });

@@ -1,14 +1,6 @@
 /**
- * 輪廓碰撞體的整合測試（真的跑 Matter.js）。
- * Integration tests for the outline collider (Matter.js actually runs).
- *
- * 這裡驗證**最關鍵的一條**：凹多邊形真的被分解成凸塊，而不是被硬套成凸包。若 `poly-decomp`
- * 沒接上，Matter 會靜默退回凸包，玩家的碰撞框會變成「隱形大三角」而完全察覺不到 ——
- * 所以這裡用一個明顯的凹形（U 字）斷言它的凸塊數量大於 1。
- * This verifies the **one thing that matters**: a concave polygon is genuinely decomposed into
- * convex pieces rather than silently forced into its convex hull. If `poly-decomp` were not
- * registered, Matter falls back to the hull and the collider becomes an invisible wedge — with
- * no visible symptom. A deliberately concave U shape is asserted to yield more than one part.
+ * 輪廓碰撞體的整合測試；真的跑 Matter.js，驗證凹多邊形被分解成凸塊而非凸包。
+ * Integration tests for the outline collider; Matter.js runs, concave input must truly decompose.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -41,7 +33,6 @@ function uPolygon() {
 
 describe('createPolygonBody', () => {
   it('registers poly-decomp with Matter so concave input can be decomposed', () => {
-    /* 沒有這一步，下面的凹形測試會退回凸包而「意外通過」單一凸塊的斷言。 */
     expect(Matter.Common.getDecomp()).not.toBeNull();
   });
 
@@ -56,10 +47,8 @@ describe('createPolygonBody', () => {
 
   it('decomposes a concave polygon into more than one part', () => {
     /*
-     * U 字是凹的：若 `poly-decomp` 沒生效，Matter 會回傳單一凸包（parts.length === 2：本體
-     * ＋一個 part）。分解成功則至少有兩個以上的凸塊。
-     * A U is concave: without decomposition Matter returns one hull (parts.length === 2, the
-     * body plus a single part). Successful decomposition yields at least two convex pieces.
+     * U 是凹的：分解成功至少有兩個凸塊，未分解時 Matter 只回單一凸包（本體＋一個 part）。
+     * A U is concave: decomposition yields at least two pieces, without it Matter returns one hull.
      */
     const body = createPolygonBody(0, 0, uPolygon());
 
@@ -124,17 +113,10 @@ describe('pushBody — 沿方向推開剛體 / displace a body along a direction
 
   it('keeps the cached bounds in sync with the new position', () => {
     /*
-     * 這條釘住「用 `Body.translate` 而不是直接改 `position`」。直接賦值會讓 `bounds` 與
-     * `vertices` 停在舊位置 —— 下一次碰撞偵測就會拿過期幾何去比對。
-     * This pins "use `Body.translate`, not a raw `position` assignment": assigning leaves
-     * `bounds` and `vertices` at the old location, and the next collision pass then tests
-     * against stale geometry.
-     *
-     * 斷言的是**位移量**而不是絕對位置：圓形剛體的頂點是多邊形近似（Matter 預設取樣數
-     * 讓半徑 10 的圓在 x 上只到 15.489 而非 15），所以絕對值不可靠，位移才可靠。
-     * The assertion is on the **shift**, not the absolute position: a circle's vertices are a
-     * polygon approximation (Matter's default sample count makes a radius-10 circle reach
-     * 15.489 on x, not 15), so the absolute value is unreliable while the shift is exact.
+     * 釘住「用 `Body.translate` 而非直接改 `position`」，並且斷言位移量而非絕對位置 ——
+     * 圓形剛體的頂點是多邊形近似，絕對值不可靠。
+     * Pins "use `Body.translate`, not a raw `position` assignment", and asserts the shift rather
+     * than absolute positions (a circle's vertices are a polygon approximation).
      */
     const body = createCircleBody(0, 0, 10);
     const beforeBounds = body.bounds.min.x;

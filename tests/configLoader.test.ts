@@ -1,18 +1,15 @@
 /**
- * `configLoader` 的單元測試。
- * Unit tests for `configLoader`.
- *
- * 這裡刻意**不打任何真實網路**：所有測試都注入假的 fetcher，因此能精確控制
- * 每一份配置檔的內容與失敗方式，逐條驗證降級行為。
- * No test touches the network. Every case injects a fake fetcher so each config
- * file's content and failure mode is controlled precisely, letting the fallback
- * behaviour be asserted line by line.
+ * `configLoader` 的單元測試：以注入的假 fetcher 驗證降級行為。
+ * Unit tests for `configLoader`: fallback behaviour via an injected fake fetcher.
  */
 
 import { describe, expect, it } from 'vitest';
 import { loadConfig, type FetchLike } from '../src/core/configLoader';
 
-/** 以檔名（`levels.json` 等）為 key 的假檔案系統。 */
+/**
+ * 以檔名（`levels.json` 等）為 key 的假檔案系統。
+ * A fake filesystem keyed by filename (`levels.json` etc.).
+ */
 type FileMap = Record<string, string>;
 
 function makeFetcher(files: FileMap): FetchLike {
@@ -103,7 +100,6 @@ describe('loadConfig — 正常路徑 / happy path', () => {
     });
     const config = await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files) });
 
-    /* 0 是合法值（無重力），不應被當成缺漏而退回預設的 1。 */
     expect(config.levels.settings.gravityY).toBe(0);
   });
 
@@ -128,11 +124,6 @@ describe('loadConfig — 正常路徑 / happy path', () => {
   });
 
   it('falls back to a 500ms drop cooldown, the shipped value', async () => {
-    /*
-     * 投放冷卻由 1000 縮到 500（使用者定案「1 秒好像太久了」）。這條盯的是**預設值** ——
-     * `levels.json` 若缺失或漏欄位，`DEFAULT_SETTINGS` 必須給 500，而不是留著舊的 1000。
-     * A missing or partial `levels.json` must yield the shipped 500ms, not a stale 1000.
-     */
     const files = allValid({
       'levels.json': JSON.stringify({ levels: JSON.parse(VALID_LEVELS).levels }),
     });
@@ -190,7 +181,6 @@ describe('loadConfig — 欄位層級的降級 / field-level fallback', () => {
     const files = allValid({ 'levels.json': JSON.stringify(broken) });
     const config = await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files), onWarn: warn });
 
-    /* -5 不合法 → 退回內建第 1 級的半徑（13.5），而不是沿用前一個合法值。 */
     expect(config.levels.levels[0]?.radius).toBe(13.5);
     expect(messages.some((message) => message.includes('radius'))).toBe(true);
   });
@@ -241,7 +231,6 @@ describe('loadConfig — 欄位層級的降級 / field-level fallback', () => {
     });
     const config = await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files), onWarn: warn });
 
-    /* 免費技能殿後，即使它的消耗（0）比另一個低。 */
     expect(config.skills.skills.map((skill) => skill.id)).toEqual(['paid', 'free']);
     expect(config.skills.skills[1]?.unlock).toEqual({ kind: 'cumulativeSpent', threshold: 6 });
   });

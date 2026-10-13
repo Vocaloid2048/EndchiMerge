@@ -1,11 +1,6 @@
 /**
- * 玩家號的規則：指派一次、改名不動、只有撞到「同名字＋同號」才重抽 —— 而**兩個 store 必須一致**
- * （一個走真 SQL，一個走記憶體）。同一組案例跑兩遍是刻意的：這條規則住在 `saveScore` 裡，
- * 而兩個實作是兩份程式碼。
- * The player tag's rules: assigned once, unchanged by a rename, re-rolled only on a name-and-tag
- * collision — and **both stores must agree** (one runs real SQL, one runs in memory). Running the
- * same cases twice is deliberate: the rule lives in `saveScore`, and the two implementations are two
- * pieces of code.
+ * 玩家號的規則：指派一次、改名不動、只在「同名字＋同號」時重抽；兩個 store 必須一致。
+ * Player tag rules: assigned once, kept across renames, re-rolled only on a collision.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -79,8 +74,9 @@ for (const { name, open } of STORES) {
       await store.saveScore(row(DEVICE, { userTag: '4242' }));
       await store.saveScore(row(DEVICE, { userTag: '7777' }));
 
-      /* 每次提交都會鑄一個新號送進來（`handlers.ts`），所以「沿用既有的」是這條規則的關鍵一步。
-       * Every submission mints a fresh tag (see `handlers.ts`), so "keep the existing one" is the load-bearing step. */
+      /* 每次提交都會送來新鑄的號（見 `handlers.ts`），所以「沿用既有的」是關鍵一步。
+       * Every submission mints a fresh tag (see `handlers.ts`), so keeping the existing one is
+       * the load-bearing step. */
       expect((await store.getProfile(DEVICE))?.userTag).toBe('4242');
 
       await close();
@@ -103,7 +99,6 @@ for (const { name, open } of STORES) {
       const { store, close } = await open();
 
       await store.saveScore(row(DEVICE, { userTag: '4242' }));
-      /* 第二個裝置用**同一個名字**、而且剛好抽到同一個號 —— 這正是要處理的撞名情況。 */
       await store.saveScore(row(RIVAL, { userTag: '4242' }));
 
       const mine = await store.getProfile(DEVICE);
@@ -112,7 +107,6 @@ for (const { name, open } of STORES) {
       expect(theirs?.displayName).toBe('夜芷冰');
       expect(theirs?.userTag).toMatch(/^\d{4}$/u);
       expect(theirs?.userTag).not.toBe('4242');
-      /* 先來的那一位不受影響 —— 重抽的是後來者。 */
       expect(mine?.userTag).toBe('4242');
 
       await close();
@@ -144,7 +138,6 @@ for (const { name, open } of STORES) {
     it('mints a tag when the offered one is empty, rather than storing a blank', async () => {
       const { store, close } = await open();
 
-      /* 「送來的號是空的」在正式路徑上不會發生，但 `getScore` 讀回來的一列就是這個形狀。 */
       await store.saveScore(row(DEVICE, { userTag: '' }));
 
       expect((await store.getProfile(DEVICE))?.userTag).toMatch(/^\d{4}$/u);

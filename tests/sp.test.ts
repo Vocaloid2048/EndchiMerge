@@ -1,11 +1,6 @@
 /**
- * `SpResource` 的單元測試。
- * Unit tests for `SpResource`.
- *
- * 技力是「技能可不可用」的唯一判準，所以它的邊界（夾在上限、扣費時機、臨時上限）必須被
- * 逐條釘住 —— 這些錯誤只會在玩了一段時間之後才看得出來。
- * SP is the sole gate on skill availability, so its boundaries — clamping, charge timing, the
- * temporary ceiling — are pinned one by one; otherwise they only surface after a long session.
+ * `SpResource` 的單元測試：夾在上限、扣費時機、臨時上限等邊界。
+ * Unit tests for `SpResource`: clamping, charge timing, the temporary ceiling.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -46,7 +41,6 @@ describe('SpResource — 累積 / accrual', () => {
     for (let i = 0; i < 40; i += 1) sp.gainForDrop();
 
     expect(sp.current).toBeCloseTo(2, 10);
-    /* 上限不變，所以填充比例可以超過 1 —— UI 自己夾。 */
     expect(sp.max).toBe(1);
   });
 
@@ -117,7 +111,6 @@ describe('SpResource — 臨時上限 / temporary ceiling', () => {
     expect(sp.current).toBe(1);
 
     sp.setMaxOverride(4);
-    /* 上限回去並不會把值補回來 —— 那是玩家自己賺的。 */
     expect(sp.current).toBe(1);
   });
 });

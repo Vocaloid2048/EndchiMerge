@@ -1,11 +1,6 @@
 /**
- * 本地進度（解鎖 ＋ 最高分）的單元測試。
- * Unit tests for local progress (unlocks and high score).
- *
- * 這裡用一個注入的假儲存體，所以不必碰 `localStorage`，也就測得到「壞掉的存檔」這種在
- * 真實瀏覽器裡很難重現的情況 —— 而那正是這個模組最需要防守的地方。
- * A fake injected storage means `localStorage` is never touched, which makes "a corrupt save"
- * testable — and that is exactly what this module exists to defend against.
+ * 本地進度（解鎖 ＋ 最高分）的單元測試，用注入的假儲存體測壞存檔。
+ * Unit tests for local progress (unlocks and high score) with an injected fake storage.
  */
 
 import { describe, expect, it } from 'vitest';

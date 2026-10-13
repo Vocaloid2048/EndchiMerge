@@ -1,11 +1,6 @@
 /**
  * 固定時間步累加器的單元測試。
  * Unit tests for the fixed-timestep accumulator.
- *
- * 累加器的邊界（「剛好等於一步」與「差一點點」）是最容易寫錯的地方，而且寫錯在畫面上
- * 只會表現成「物理偶爾慢半拍」，幾乎不可能靠肉眼抓到。
- * Accumulator boundaries are where this code goes wrong, and a mistake only shows up on
- * screen as "physics occasionally feels a beat slow" — effectively invisible by eye.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -27,7 +22,6 @@ describe('FixedStepper — 步數換算 / step conversion', () => {
   it('runs no step until a full step has accumulated', () => {
     const stepper = new FixedStepper();
 
-    /* 差一點點 → 還不跑，但時間要留著。 */
     expect(stepper.advance(FIXED_STEP_MS - 0.01)).toBe(0);
     expect(stepper.pendingMs).toBeCloseTo(FIXED_STEP_MS - 0.01, 6);
   });
@@ -69,7 +63,6 @@ describe('FixedStepper — 上限 / substep cap', () => {
 
     stepper.advance(60_000);
 
-    /* 落後的時間必須被丟棄，否則之後每一幀都會頂到上限。 */
     expect(stepper.pendingMs).toBe(0);
     expect(stepper.advance(FIXED_STEP_MS)).toBe(1);
   });
@@ -120,7 +113,10 @@ describe('FixedStepper — 更新率無關 / refresh-rate independence', () => {
     let steps144 = 0;
     for (let frame = 0; frame < 144 * seconds; frame += 1) steps144 += at144.advance(1000 / 144);
 
-    /* 浮點誤差允許 ±2 步。 */
+    /*
+     * 浮點誤差允許 ±2 步。
+     * Floating-point drift is tolerated at ±2 steps.
+     */
     expect(Math.abs(steps60 - 120)).toBeLessThanOrEqual(2);
     expect(Math.abs(steps144 - 120)).toBeLessThanOrEqual(2);
   });

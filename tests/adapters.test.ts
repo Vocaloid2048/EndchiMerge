@@ -1,17 +1,6 @@
 /**
- * 執行環境轉接頭的測試。
- * Tests for the runtime adapters.
- *
- * 這裡測的是**共用程式碼的縫**：同一份 `Handler` 餵給 Vercel 的 `req`/`res`、餵給 Web 標準的
- * `Request`/`Response`、餵給 EdgeOne 的具名匯出，三者必須得到一樣的 `ApiRequest` 與一樣的回應。
- * 縫歪掉的話，症狀是「Vercel 上可以、EdgeOne 上 400」，而那正是最難查的一種。
- * These test the **seam of the shared code**: the same `Handler` fed Vercel's `req`/`res`, a
- * Web-standard `Request`/`Response`, and EdgeOne's named exports must all produce the same
- * `ApiRequest` and the same response. A crooked seam shows up as "works on Vercel, 400 on EdgeOne" —
- * the hardest kind to track down.
- *
- * Node 22 有全域的 `Request`／`Response`，所以這裡**不需要**任何 DOM 或 fetch 的替身。
- * Node 22 has global `Request` / `Response`, so no DOM or fetch stand-in is needed.
+ * 執行環境轉接頭的測試：同一份 `Handler` 要得到一樣的 `ApiRequest`。
+ * Tests for the runtime adapters: one `Handler` must yield the same `ApiRequest` everywhere.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -26,7 +15,6 @@ import { MAX_RUN_MS, RUN_TOKEN_SLACK_MS, type Config } from '../api/_lib/env';
 
 const SECRET = 'a'.repeat(48);
 
-/** 把收到的 `ApiRequest` 原樣吐回去，好斷言轉接頭到底轉出了什麼。 */
 const echo: Handler = async (request) =>
   ok({
     method: request.method,
@@ -45,15 +33,6 @@ interface Echo {
   body: unknown;
 }
 
-/**
- * 最小的 `res` 替身：記下狀態、標頭與主體。
- * The smallest possible `res` stand-in: it records the status, the headers and the body.
- *
- * 放在模組層級而不是某個 `describe` 裡面，是因為「兩個轉接頭要得到同一個結果」那一組也需要它 ——
- * 那個跨轉接頭的斷言才是這個檔案的重點。
- * At module scope rather than inside a `describe` because the "both adapters agree" group needs it too
- * — and that cross-adapter assertion is this file's point.
- */
 function fakeResponse(): {
   res: { statusCode: number; setHeader(name: string, value: string): void; end(chunk?: string): void };
   headers: Record<string, string>;
@@ -122,7 +101,6 @@ describe('fetch adapter — Web 標準 / the Web standard', () => {
     expect(((await response.json()) as Echo).body).toBeNull();
   });
 
-  /* GET／HEAD 沒有主體；某些 runtime 對這兩種方法讀 `text()` 會拋錯，所以轉接頭必須先擋。 */
   it('does not try to read a body on GET', async () => {
     const response = await createFetchHandler(echo)(new Request('https://game.example/api/x'));
 
@@ -143,12 +121,6 @@ describe('fetch adapter — Web 標準 / the Web standard', () => {
     expect(text).toContain('internal_error');
   });
 
-  /*
-   * 204 不得帶主體。硬塞一個 "null" 會讓某些代理把回應改成 502 —— 而 CORS 的前置請求正是 204，
-   * 所以那會表現成「跨來源的請求全部失敗」。
-   * A 204 must not carry a body. Forcing a "null" in makes some proxies turn the response into a 502 —
-   * and the CORS preflight is exactly a 204, so it would look like "every cross-origin request fails".
-   */
   it('sends no body for a 204', async () => {
     const response = await createFetchHandler(async () => ({ status: 204, body: null }))(
       new Request('https://game.example/api/x', { method: 'OPTIONS' }),
@@ -187,20 +159,12 @@ describe('EdgeOne handlers — 具名匯出 / the named exports', () => {
     expect(body.body).toEqual({ score: 1 });
   });
 
-  /*
-   * 三個具名匯出指向**同一個**處理器，而方法判斷在處理器裡。所以用錯方法時要拿到 405（而不是
-   * 「路由不存在」）—— 那兩者的差別是「客戶端用錯方法」與「部署壞了」。
-   * All three exports point at the **same** handler and the method check lives inside it, so a wrong
-   * method gets a 405 (not "no such route") — the difference being "the client used the wrong method"
-   * versus "the deploy is broken".
-   */
   it('answers 405 for a method the handler does not accept', async () => {
     const handlers = createEdgeOneHandlers(async () => methodNotAllowed(['POST']));
 
     const response = await handlers.onRequestGet({ request: new Request('https://game.example/api/x') });
 
     expect(response.status).toBe(405);
-    /* `allow` 要穿過轉接頭 —— 少了它，客戶端不知道該用哪個方法。 */
     expect(response.headers.get('allow')).toBe('POST');
   });
 });
@@ -268,13 +232,6 @@ describe('vercel adapter — Node 的 req／res / Node req and res', () => {
 /* ── 兩個轉接頭要得到同一個結果 / Both adapters agree ──────────────────────── */
 
 describe('adapters — 同一份處理器 / the same handler', () => {
-  /*
-   * 這一條是「共用程式碼」最直接的證明：把**同一個** `Handler` 餵給兩個轉接頭，轉出來的
-   * `ApiRequest` 除了「客戶端位址的來源不同」（Vercel 從 socket、邊緣從標頭）之外必須一模一樣。
-   * This is the most direct proof of "shared code": feed the **same** `Handler` to both adapters and the
-   * resulting `ApiRequest` must be identical apart from where the client address comes from (a socket
-   * on Vercel, a header at the edge).
-   */
   it('produces the same ApiRequest from a Request and from req/res', async () => {
     const url = '/api/leaderboard?limit=10&deviceId=player-aaaa-1111';
     const headers = { 'content-type': 'application/json', 'user-agent': 'vitest' };
@@ -311,13 +268,6 @@ describe('vercelEndpoint — 外殼 ＋ 轉接頭 / the shell plus the adapter',
     };
   }
 
-  /*
-   * 這一條把三層串起來驗：`vercelEndpoint` → 外殼（設定、接收紀錄、CORS）→ 真的處理器。它同時證明
-   * 外殼仍然是平台無關的 —— 換成 `createFetchHandler(endpoint(handleHealth))` 也會得到同一份結果。
-   * This wires all three layers together: `vercelEndpoint` → the shell (config, request log, CORS) →
-   * the real handler. It also shows the shell stays platform-agnostic — swapping in
-   * `createFetchHandler(endpoint(handleHealth))` gives the same result.
-   */
   it('runs the real health handler through the shell', async () => {
     const store = new MemoryStore();
     setDependencies({ config: makeConfig(), store, now: () => 1_700_000_000_000 });
@@ -334,7 +284,6 @@ describe('vercelEndpoint — 外殼 ＋ 轉接頭 / the shell plus the adapter',
 
       expect(fake.status()).toBe(200);
       expect(body).toMatchObject({ ok: true, database: 'postgres', players: 0 });
-      /* 外殼也跑了：接收紀錄有寫進去。 */
       expect(store.requestCount).toBe(1);
       expect(store.lastRequest?.path).toBe('/api/health');
     } finally {
@@ -342,7 +291,6 @@ describe('vercelEndpoint — 外殼 ＋ 轉接頭 / the shell plus the adapter',
     }
   });
 
-  /* 同一份外殼，換成 Web 標準轉接頭，結果必須一樣（見上一條的說明）。 */
   it('gives the same answer through the fetch adapter', async () => {
     const store = new MemoryStore();
     setDependencies({ config: makeConfig(), store, now: () => 1_700_000_000_000 });

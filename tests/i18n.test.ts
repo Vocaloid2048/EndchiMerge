@@ -1,14 +1,6 @@
 /**
- * i18n 的單元測試。
+ * i18n 執行期的單元測試。
  * Unit tests for the i18n runtime.
- *
- * 這一層的兩個失敗模式最貴：**鍵對不上**（某個語言少一句，畫面上默默變成別的語言）與
- * **語言偵測挑錯**（香港裝置拿到繁中、日文裝置拿到英文）。前者用「五份字典鍵集合一致」釘住，
- * 後者逐條列出對照。
- * The two expensive failure modes here are a **key mismatch** (one locale silently renders
- * another language) and **wrong detection** (a Hong Kong device getting Traditional Chinese).
- * The first is pinned by "all five dictionaries share one key set"; the second by an explicit
- * table of tag → locale.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -23,7 +15,6 @@ describe('formatMessage — 佔位符 / placeholders', () => {
   });
 
   it('leaves unknown placeholders visible', () => {
-    /* 原樣保留比留白好 —— 一眼看得出漏填了什麼。 */
     expect(formatMessage('{known} {missing}', { known: 'x' })).toBe('x {missing}');
   });
 
@@ -75,6 +66,10 @@ describe('isLocale / LOCALE_LABELS', () => {
   });
 });
 
+/**
+ * 五份字典共用同一組鍵：少一句就會默默退回別的語言。
+ * All five dictionaries share one key set; a missing entry silently falls back to another locale.
+ */
 describe('字典完整性 / dictionary completeness', () => {
   it('every locale provides exactly the source key set', () => {
     const expected = Object.keys(zhHant).sort();
@@ -101,7 +96,6 @@ describe('I18n — 查表與切換 / lookup and switching', () => {
 
   it('falls back to the source locale for an unknown key', () => {
     const i18n = new I18n('en');
-    /* 型別上不可能，但執行期資料壞掉時仍要有合理的退路。 */
     expect(i18n.t('does.not.exist' as never)).toBe('does.not.exist');
   });
 
@@ -119,7 +113,6 @@ describe('I18n — 查表與切換 / lookup and switching', () => {
     i18n.setLocale('ja');
     expect(calls).toBe(1);
 
-    /* 不支援的語系一律忽略，不能把狀態弄成無效值。 */
     i18n.setLocale('fr' as never);
     expect(i18n.locale).toBe('ja');
     expect(calls).toBe(1);

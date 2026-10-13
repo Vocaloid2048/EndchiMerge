@@ -1,13 +1,6 @@
 /**
  * 遊玩區物理邊界的單元測試。
  * Unit tests for the play area's physics boundaries.
- *
- * 這裡釘住三件事：空腔與牆的**內緣必須完全貼合**（否則球會卡在縫隙或被牆推出去）、
- * 地板**橫跨整個前表面寬度**（否則底部轉角有洞）、以及矩形左上角定址轉 Matter
- * **中心點**定址的換算正確。
- * Three things are pinned: the cavity and wall inner edges must coincide exactly (or
- * bodies snag on a seam), the floor must span the full front width (or the bottom
- * corners leak), and the top-left → Matter-centre conversion must be right.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -22,7 +15,6 @@ import {
 import { WALL_THICKNESS } from '../src/core/constants';
 import type { Rect } from '../src/core/types';
 
-/** 一個典型的前表面：500 寬、1000 高，位於原點。 */
 const FRONT: Rect = { x: 0, y: 0, width: 500, height: 1000 };
 
 const [leftWall, rightWall, floor] = computeWalls(FRONT);
@@ -32,7 +24,6 @@ describe('computePlayArea — 空腔內縮 / cavity inset', () => {
   it('insets the sides and the bottom by one wall thickness', () => {
     expect(cavity.x).toBe(WALL_THICKNESS);
     expect(cavity.width).toBe(500 - WALL_THICKNESS * 2);
-    /* 底部縮、頂部不縮：方團團要從上方投進來。 */
     expect(cavity.y).toBe(0);
     expect(cavity.height).toBe(1000 - WALL_THICKNESS);
   });
@@ -121,28 +112,14 @@ describe('computeContainerBounds — 一次算完 / one-shot derivation', () => 
 });
 
 describe('computeWallOverhang — 牆高推導 / deriving the wall height', () => {
-  /*
-   * 牆高是「防漏」與「防裁切」的第一道防線，所以不該是一個孤立的常數：投放點與溢位線
-   * 若被調到比牆頂還高，剛生成的那一顆就有一小段時間兩側無遮擋。
-   * The wall height is the first line of defence against leaks, so it must not be an isolated
-   * constant: if the drop point or the overflow line is tuned above the wall top, a fresh
-   * dumpling is briefly unfenced on both sides.
-   */
   it('never returns less than the floor', () => {
     expect(computeWallOverhang(200)).toBe(DEFAULT_WALL_OVERHANG);
-    /* 極端小值也一樣：下限保證牆一定高過頂緣。 */
     expect(computeWallOverhang(0)).toBe(DEFAULT_WALL_OVERHANG);
   });
 
   it('grows to clear a drop point above the floor', () => {
-    /*
-     * 容器頂緣 y=200、投放點 y=160（頂緣上方 40）→ 牆頂必須高於 160，所以高度至少
-     * 200 + 40 = 240 …… 這裡要的是「牆頂 ≤ 投放點 - 餘裕」。
-     * Rim at y = 200, drop point at y = 160 (40 above the rim) — the wall top must clear 160.
-     */
     const overhang = computeWallOverhang(200, 160);
 
-    /* 牆頂 = 200 - overhang，必須不高於投放點減餘裕。 */
     expect(200 - overhang).toBeLessThanOrEqual(160 - DEFAULT_WALL_OVERHANG);
   });
 
@@ -153,7 +130,6 @@ describe('computeWallOverhang — 牆高推導 / deriving the wall height', () =
   });
 
   it('takes the tallest requirement when several are given', () => {
-    /* 溢位線比投放點高時，牆必須依溢位線長 —— 取最嚴格的。 */
     const byDrop = computeWallOverhang(200, 160);
     const byLine = computeWallOverhang(200, 160, 100);
 
@@ -167,11 +143,6 @@ describe('computeWallOverhang — 牆高推導 / deriving the wall height', () =
   });
 
   it('produces a wall that spans from above the drop point down to the floor', () => {
-    /*
-     * 整合檢查：把推導出來的高度餵回 `computeWalls()`，牆頂必須高於投放點。
-     * Integration check: feed the derived height back into `computeWalls()` and the wall top
-     * must sit above the drop point.
-     */
     const rim = 200;
     const spawnY = 160;
     const overhang = computeWallOverhang(rim, spawnY);
@@ -188,7 +159,6 @@ describe('createContainerBodies — 座標換算 / coordinate conversion', () =>
 
     expect(bodies).toHaveLength(3);
 
-    /* 左牆：左上角 (0, -240)、16 × 1224 → 中心 (8, 372)。 */
     expect(bodies[0]?.position.x).toBeCloseTo(leftWall.x + leftWall.width / 2, 6);
     expect(bodies[0]?.position.y).toBeCloseTo(leftWall.y + leftWall.height / 2, 6);
   });

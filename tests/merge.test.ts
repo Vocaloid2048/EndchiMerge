@@ -1,12 +1,6 @@
 /**
- * 合成規則的單元測試。
- * Unit tests for the merge rule.
- *
- * 合成是這個遊戲全部分數的來源，所以規則被拆成純函式正是為了能在這裡把三種「不能合成」
- * 的情形逐一釘住，而不必先讓一堆剛體真的撞在一起。
- * Merging is where all the score comes from, and splitting it into a pure function is exactly
- * what lets the three "cannot merge" cases be pinned here instead of by shoving bodies
- * together and hoping.
+ * 合成規則 `mergeResultId` 的單元測試。
+ * Unit tests for the merge rule, `mergeResultId`.
  */
 
 import { describe, expect, it } from 'vitest';

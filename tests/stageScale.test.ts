@@ -1,10 +1,6 @@
 /**
- * 設計畫布縮放的單元測試。
- * Unit tests for the design-canvas scale factor.
- *
- * 這裡的每條斷言都對應一個「縮放後版面會走樣」的具體情境，而不是在測數學。
- * Every assertion here corresponds to a concrete way the layout could drift under zoom
- * rather than to arithmetic for its own sake.
+ * 設計畫布縮放的單元測試：每個情境對應一種版面走樣方式。
+ * Unit tests for the design-canvas scale factor; each case is a way the layout could drift.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -17,23 +13,19 @@ describe('computeStageScale — 等比縮放 / uniform scaling', () => {
   });
 
   it('letterboxes a wider viewport by binding on height', () => {
-    /* 21:9 的超寬螢幕：高度先到頂，左右留黑邊。 */
     expect(computeStageScale(2560, 1080)).toBeCloseTo(1, 9);
     expect(computeStageScale(3840, 1080)).toBeCloseTo(1, 9);
   });
 
   it('letterboxes a taller viewport by binding on width', () => {
-    /* 4:3 的舊螢幕：寬度先到頂，上下留黑邊。 */
     expect(computeStageScale(1440, 1080)).toBeCloseTo(1440 / DESIGN_WIDTH, 9);
     expect(computeStageScale(1440, 1920)).toBeCloseTo(1440 / DESIGN_WIDTH, 9);
   });
 
   it('never scales one axis more than the other', () => {
     /*
-     * 這條是整件事的核心：倍率必須是單一值。若哪天有人改成 per-axis 縮放，方團團就會
-     * 變成橢圓，名冊格子也不再是正方形 —— 這條會先壞。
-     * The heart of the whole thing: the factor must be a single number. A per-axis scale
-     * would make dumplings elliptical and roster cells non-square; this test breaks first.
+     * 倍率必須是單一值：per-axis 縮放會讓方團團變成橢圓、名冊格子不再是正方形。
+     * The factor must be a single number: a per-axis scale would make dumplings elliptical.
      */
     for (const [w, h] of [
       [1920, 1080],
@@ -50,30 +42,19 @@ describe('computeStageScale — 等比縮放 / uniform scaling', () => {
 
   it('scales linearly with browser zoom so ratios never change', () => {
     /*
-     * 瀏覽器縮放**同時**改變視窗的寬與高（CSS 像素）：110% 縮放＝兩個軸都少 9.09%，
-     * 90% 縮放＝兩個軸都多 11.1%。倍率必須跟著等比變化，任何兩個面板之間的尺寸比值
-     * 才會完全不動 —— 這正是「不要在 110% / 90% 時改動整個 UI 比例」那條要求。
-     * Browser zoom changes **both** viewport axes in CSS pixels: 110% means 9.09% fewer
-     * CSS pixels on each axis, 90% means 11.1% more. The factor must track that
-     * proportionally, which is exactly what keeps every two panels' size ratio fixed.
+     * 瀏覽器縮放同時改變兩個軸（110% ⇒ 各軸少 9.09%），倍率必須跟著等比變化。
+     * Browser zoom changes both axes at once (110% ⇒ 9.09% fewer CSS pixels on each), so the
+     * factor must track proportionally.
      */
     const base = computeStageScale(DESIGN_WIDTH, DESIGN_HEIGHT);
 
     expect(base).toBe(1);
     expect(computeStageScale(DESIGN_WIDTH * 1.1, DESIGN_HEIGHT * 1.1) / base).toBeCloseTo(1.1, 9);
     expect(computeStageScale(DESIGN_WIDTH * 0.9, DESIGN_HEIGHT * 0.9) / base).toBeCloseTo(0.9, 9);
-    /* 1280×720 本身已經比設計畫布小，110% 只是把它放大到 1408×792。 */
     expect(computeStageScale(1280 * 1.1, 720 * 1.1)).toBeCloseTo((1280 * 1.1) / DESIGN_WIDTH, 9);
   });
 
   it('keeps every pair of design measurements at the same ratio across zooms', () => {
-    /*
-     * 直接測「比值不變」而不是測倍率本身：任兩個設計稿距離（例如容器寬 667 與方團團
-     * 直徑）在 90% / 100% / 110% 下的比值都必須相同。
-     * Asserting the invariant rather than the number: any two design distances (say the
-     * container's 667 and a dumpling's diameter) must keep the same ratio at 90%, 100% and
-     * 110% zoom.
-     */
     const zooms = [0.9, 1, 1.1, 1.25, 0.75];
     const containerWidth = 667;
     const dumplingDiameter = 27;
@@ -89,14 +70,6 @@ describe('computeStageScale — 等比縮放 / uniform scaling', () => {
   });
 
   it('does not let a zoomed-out viewport fit extra roster cells', () => {
-    /*
-     * 縮小之後名冊格子仍是同一個**設計稿**尺寸，所以可容納的格子數不會增加 —— 否則玩家
-     * 一縮小就能多塞幾隻方團團。這裡把格子尺寸換算成 CSS 像素再數一次，結果必須恆等於
-     * 設計稿的欄數。
-     * At a smaller scale the roster cells keep the same **design** size, so the number of
-     * cells that fit cannot grow. Converting a cell to CSS pixels at each zoom and counting
-     * must always give the design's column count.
-     */
     const columnsThatFit = (zoom: number): number => {
       const scale = computeStageScale(DESIGN_WIDTH * zoom, DESIGN_HEIGHT * zoom);
       const rosterWidthCss = MELTING.content.width * scale;
@@ -130,14 +103,9 @@ describe('stageTransform — 置中寫進 transform / centring baked into the tr
 
   it('uses a percentage translate so the centre never depends on the viewport', () => {
     /*
-     * 百分比 translate 以**元素自身尺寸**（永遠 1920×1080）計算，所以中點永遠被釘在
-     * 父層中心，不必知道父層多大。這正是修掉「25% ↔ 500% 切換時整張畫布往右下漂」的
-     * 關鍵：舊做法靠父層 `place-items: center` 置中一個比容器大的元素，行為不保證。
-     * A percentage translate resolves against the element's **own** size (always
-     * 1920×1080), so the centre is pinned to the host's centre without knowing its size.
-     * That is exactly what fixes the canvas drifting down-right when the zoom cycles from
-     * 25% to 500%: the old approach asked the host to centre an oversized child, which is
-     * not guaranteed to work.
+     * 百分比 translate 以元素自身尺寸（永遠 1920×1080）計算，所以中點永遠被釘在父層中心。
+     * A percentage translate resolves against the element's own size (always 1920×1080), so the
+     * centre is pinned to the host's centre without knowing its size.
      */
     for (const scale of [0.25, 1, 2.5, 5]) {
       expect(stageTransform(scale)).toMatch(/^translate\(-50%, -50%\) scale\(/);

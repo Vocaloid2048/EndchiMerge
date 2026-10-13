@@ -1,11 +1,6 @@
 /**
- * 掉落佇列的單元測試。
- * Unit tests for the spawn queue.
- *
- * 最重要的一條是 **D22 一致性**：`peek()` 的結果必須永遠等於緊接著 `take()` 的結果。
- * 這一條守住「NEXT 卡說 A 就一定會掉 A」。
- * The critical one is D22 consistency: `peek()` must always equal the following
- * `take()`. That is what guarantees "the card says A, A drops".
+ * 掉落佇列的單元測試；關鍵是 `peek()` 永遠等於接下來的 `take()`。
+ * Unit tests for the spawn queue; the key invariant is `peek()` always equals the next `take()`.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -112,7 +107,6 @@ describe('SpawnQueue — D22 一致性 / D22 consistency', () => {
 
     expect(before).toHaveLength(3);
     expect(dropped).toBe(before[0]);
-    /* 取走一顆後，原本的第二顆遞補到最前面。 */
     expect(queue.peek()).toBe(before[1]);
     expect(queue.pending).toHaveLength(3);
   });
@@ -128,7 +122,6 @@ describe('SpawnQueue — 權重 / weighting', () => {
   });
 
   it('honours the weights rather than drawing uniformly', () => {
-    /* 固定種子 → 完全確定，不需要容錯區間以外的隨機性處理。 */
     const queue = makeQueue();
     const counts = new Map<number, number>();
 
@@ -141,7 +134,6 @@ describe('SpawnQueue — 權重 / weighting', () => {
     const mid = counts.get(2) ?? 0;
     const high = counts.get(3) ?? 0;
 
-    /* 70 / 25 / 5 → 期望值 1400 / 500 / 100；區間放寬到 ±200 仍足以證明不是均勻抽取。 */
     expect(low).toBeGreaterThan(1200);
     expect(mid).toBeGreaterThan(300);
     expect(high).toBeLessThan(300);

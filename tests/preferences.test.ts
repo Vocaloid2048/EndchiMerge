@@ -1,12 +1,6 @@
 /**
- * 偏好的單元測試。
- * Unit tests for the preferences store.
- *
- * 三件事要釘住：**首次跟隨裝置語言**、**壞存檔不會炸**、以及**總開關與無盡模式的閘門關係**
- * —— 最後一項是使用者定案的規則，也是最容易被後續改動弄鬆的地方。
- * Three things are pinned here: the **first-run device locale**, that a **corrupt save cannot
- * crash it**, and the **gate relationship between the master switch and endless mode** — the
- * latter is a decided rule and the easiest one for later edits to loosen.
+ * 偏好的單元測試：首次跟隨裝置語言、壞存檔不炸、總開關與無盡模式的閘門。
+ * Unit tests for the preferences store: first-run locale, corrupt-save survival, endless gating.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -46,13 +40,9 @@ describe('createPreferencesStore — 預設值 / defaults', () => {
 
   it('detects a supported locale from the device when none is injected', () => {
     /*
-     * 不注入 `initialLocale` 時會讀裝置語言。Node 22 也有 `navigator.language`（跟著系統地區
-     * 走），所以這裡**不能**斷言一定會是預設語系 —— 只能斷言結果落在支援清單內，而且偵測
-     * 規則本身由 `tests/i18n.test.ts` 逐條釘住。
-     * Without an injected `initialLocale` it reads the device language. Node 22 does expose
-     * `navigator.language` (following the system region), so this must **not** assume the default
-     * — only that the result is a supported locale. The detection rules themselves are pinned in
-     * `tests/i18n.test.ts`.
+     * 不注入時讀裝置語言，所以只能斷言結果落在支援清單內，不能斷言預設語系。
+     * Without an injected locale it reads the device language, so only membership in the supported
+     * list is asserted, never the default.
      */
     const store = createPreferencesStore({ storage: null });
 
@@ -150,7 +140,6 @@ describe('createPreferencesStore — 通知 / notifications', () => {
     store.setRulesEnabled(true);
     expect(calls).toBe(1);
 
-    /* 設成同一個值不該通知 —— 否則 UI 會做白工重繪。 */
     store.setRulesEnabled(true);
     expect(calls).toBe(1);
 

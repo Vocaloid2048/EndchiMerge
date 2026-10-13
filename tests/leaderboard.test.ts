@@ -1,23 +1,6 @@
 /**
  * 排行榜資料層與名稱驗證的單元測試。
  * Unit tests for the leaderboard data layer and display-name validation.
- *
- * 現在的模型是「**每位玩家一筆，每個分類最多一筆**」，所以這個模組要釘住的行為換了一批：
- * 一局一局記下來只會是一行、只升不降、改名不新增紀錄、本機紀錄與上載分開、同意之前不上榜、
- * 上載有觸發時機，以及存檔被手改過時認得出來。以下每條對應其中一項，用注入的假儲存體，
- * 不碰 `localStorage`。
- * The model is now **one row per player, at most one per category**, so the behaviours worth
- * pinning have changed: repeated runs stay one row, numbers never go down, a rename adds nothing,
- * the local record and the upload are separate, nothing shows before consent, the upload has
- * trigger points, and a hand-edited save is noticed. Each test below pins one of those, over an
- * injected fake storage.
- *
- * 「別人的榜」用 `seal()` 直接寫進假儲存體 —— 本地只有一位玩家，所以多人排序只能這樣造，
- * 順便也就驗了摘要在正常情況下是通的（同一條路徑的另一半在下面被改壞時會失敗）。
- * A board of "other players" is written straight into the fake storage with `seal()`: locally
- * there is only one player, so multi-player ordering has to be staged this way — which doubles as
- * proof that a well-formed digest passes, while the other half of the same path is shown to fail
- * once it is corrupted.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -32,10 +15,8 @@ import {
   validateDisplayName,
 } from '../src/game/playerName';
 
-/** 測試用的鹽；與正式的那一組不同，正好也證明摘要不是寫死比對。 */
 const TEST_SALT = 'test-salt';
 
-/** 記憶體版的儲存體；可設定在寫入時拋錯，模擬無痕模式。 */
 class FakeStorage implements StorageBackend {
   private readonly map = new Map<string, string>();
   failOnWrite = false;
@@ -49,13 +30,11 @@ class FakeStorage implements StorageBackend {
     this.map.set(key, value);
   }
 
-  /** 直接塞值，用來偽造壞掉的存檔。 */
   seed(key: string, value: string): void {
     this.map.set(key, value);
   }
 }
 
-/** 榜上某一列（別人），供排序與裁切的測試用來擺位。 */
 function playerRow(
   id: string,
   score: number,
@@ -63,11 +42,9 @@ function playerRow(
   merges: number,
   at = 1,
 ): LeaderboardEntry {
-  /* 時長預設 0（未知）：這些列只用來擺位，時長本身另有專門的測試。 */
   return { id, name: id, score, durationMs: 0, maxCombo, merges, at };
 }
 
-/** 驗證失敗的原因；通過時字串 'ok'。讓斷言不必先做型別窄化。 */
 function reasonOf(input: string): string {
   const result = validateDisplayName(input);
 
@@ -135,7 +112,6 @@ describe('validateDisplayName — 名稱規則 / name rules', () => {
   });
 });
 
-/** 建一個榜；`seed` 是「別人的榜」，會在讀取之前寫進去。 */
 function makeBoard(limit = LEADERBOARD_LIMIT, seed?: readonly LeaderboardEntry[]) {
   const storage = new FakeStorage();
   if (seed !== undefined) storage.seed('e', seal(seed, TEST_SALT));
@@ -203,17 +179,10 @@ describe('createLocalLeaderboard — 一位玩家一筆 / one row per player', (
     const { board } = makeBoard();
     board.setSharing(true);
 
-    /* 高分局、低連擊。 */
     board.record({ score: 900, maxCombo: 1, merges: 2 });
-    /* 低分但連擊很長的一局，會刷新 COMBO 與合成，卻不會碰到分數。 */
     board.record({ score: 100, maxCombo: 40, merges: 60 });
     board.sync();
 
-    /*
-     * 同一行的三個數字來自不同的局 —— 這是刻意的，否則 COMBO 分頁只會看到高分局。
-     * The three numbers on one row come from different runs, which is the point: tied to a single
-     * run, the COMBO tab would only ever show high-score games.
-     */
     expect(board.snapshot('score').entries[0]).toMatchObject({
       score: 900,
       maxCombo: 40,
@@ -237,12 +206,6 @@ describe('createLocalLeaderboard — 一位玩家一筆 / one row per player', (
     board.record({ score: 10, maxCombo: 1, merges: 1 });
     board.setSharing(true);
 
-    /*
-     * 「關分頁前又記了一次中途成績」不該把那筆紀錄的時間改成現在 —— 那會讓榜上的日期變成
-     * 「最後一次離開」而不是「最後一次刷新」。
-     * Recording a mid-run score on the way out must not restamp the record, or the board's date
-     * becomes "when you last left" rather than "when you last improved".
-     */
     expect(board.snapshot('score').entries[0]?.at).toBe(1_000);
   });
 
@@ -285,11 +248,6 @@ describe('createLocalLeaderboard — 一位玩家一筆 / one row per player', (
   });
 
   it("keeps each category's top N correct even after many players", () => {
-    /*
-     * 「分數最高」與「連擊最高」刻意不是同一個人：只按分數裁切會讓 COMBO 分頁一開始就偏斜。
-     * The top scorer and the top combo are deliberately different players: trimming by score alone
-     * would bias the COMBO tab from the start.
-     */
     const many = Array.from({ length: 20 }, (_, index) => playerRow(`q${String(index)}`, index, 100 - index, 1));
 
     const { board } = makeBoard(5, many);
@@ -314,25 +272,11 @@ describe('createLocalLeaderboard — 一位玩家一筆 / one row per player', (
     expect(self?.rank).toBe(2);
     expect(self?.total).toBe(3);
     expect(self?.entry.id).toBe('me');
-    /* 3 位玩家、第 2 名 → 贏過 1 位 → 33%（`(total − rank) / total`）。 */
     expect(self?.beats).toBe(33);
   });
 
-  /*
-   * 名次掉出榜外時，那一筆**必須還留著**，否則 UI 既沒有名次也沒有百分比可報（見
-   * `ui/leaderboard.ts` 的 `rank > LEADERBOARD_LIMIT` 分支）—— 這是「你的最佳」那一行的前提。
-   * When the rank falls off the board the row **has to survive**, or the UI has neither a rank nor
-   * a percentage to report (see the `rank > LEADERBOARD_LIMIT` branch in `ui/leaderboard.ts`) —
-   * which is the precondition for the whole "your best" line.
-   *
-   * 用一個很小的 `limit` 重現「排到榜外」：位元組上與 150 位玩家無異，但不必為了測一條界線塞
-   * 150 筆資料進存檔。
-   * A tiny `limit` reproduces "off the board": byte for byte the same situation as 150 players,
-   * without pushing 150 rows through storage to test one boundary.
-   */
   it('keeps the player on the record even at a rank past the listed top', () => {
     const many = Array.from({ length: 6 }, (_, index) =>
-      /* 三個數值一起遞減，讓每個分類的前三名都是同一批人，截斷才可預期。 */
       playerRow(`q${String(index)}`, 600 - index * 100, 60 - index * 10, 6 - index),
     );
 
@@ -343,20 +287,10 @@ describe('createLocalLeaderboard — 一位玩家一筆 / one row per player', (
 
     const snapshot = board.snapshot('score');
 
-    /* 榜身只列前三名，自己（第四名）不在裡面。 */
     expect(snapshot.entries.map((entry) => entry.id)).toEqual(['q0', 'q1', 'q2']);
 
     expect(snapshot.self).not.toBeNull();
     expect(snapshot.self?.rank).toBe(4);
-    /*
-     * 本機儲存只留得住各分類的前 `limit` 名，所以排到榜外的人在**留住的那些人**之中一定是
-     * 最後一名，百分比自然是 0 —— 這是本地版的極限，不是公式錯了。真正的跨玩家百分位要有
-     * 伺服器才知道分母（見 `game/leaderboard.ts` 的 `beats` 說明）。
-     * The local store only keeps each category's top `limit`, so anyone past it is necessarily
-     * last among the rows that were kept and the share is 0 — that is the local ceiling, not a
-     * broken formula. A real cross-player share needs a server that knows its own denominator (see
-     * the `beats` note in `game/leaderboard.ts`).
-     */
     expect(snapshot.self?.total).toBe(4);
     expect(snapshot.self?.beats).toBe(0);
   });
@@ -381,21 +315,11 @@ describe('createLocalLeaderboard — 時長跟著分數 / the duration follows t
     expect(board.snapshot('score').entries[0]).toMatchObject({ score: 900, durationMs: 240_000 });
   });
 
-  /*
-   * 這一條是這個欄位存在的理由：時長與分數**綁在一起**，不像 `maxCombo`／`merges` 各自取最大。
-   * 一局打得久但分數低，只該更新它自己那一項，不該把「最高分那一局」的時間蓋掉 —— 否則 HUD 與
-   * 榜上會出現「900 分 打了 12 分鐘」這種自相矛盾的兩格。
-   * This is why the field exists: the duration is **bound to the score**, unlike `maxCombo`/`merges`
-   * which each take their own maximum. A long low-scoring run should update only its own metric and
-   * leave the best-score run's time alone — otherwise the board shows "900 points, 12 minutes",
-   * two cells contradicting each other.
-   */
   it('does not let a longer but lower-scoring run overwrite the best run duration', () => {
     const { board } = makeBoard();
     board.setSharing(true);
 
     board.record({ score: 900, durationMs: 120_000, maxCombo: 1, merges: 1 });
-    /* 低分、打得久、連擊長：只該動 maxCombo 與 merges。 */
     board.record({ score: 100, durationMs: 720_000, maxCombo: 40, merges: 60 });
     board.sync();
 
@@ -422,13 +346,6 @@ describe('createLocalLeaderboard — 時長跟著分數 / the duration follows t
     const { board } = makeBoard();
     board.setSharing(true);
 
-    /*
-     * 主迴圈每幀都呼叫 `record()`，所以這是實際的呼叫形態：分數與時間一起往上跑。
-     * `main.ts` 在分數不再上升之後仍會繼續呼叫，留下來的就該是**最後一次刷新**那一刻的時間。
-     * The main loop calls `record()` every frame, so this is the real shape of the calls: score and
-     * time climb together. `main.ts` keeps calling after the score stops rising, and what survives
-     * has to be the time at the **last** improvement.
-     */
     for (let frame = 1; frame <= 60; frame += 1) {
       board.record({ score: frame * 10, durationMs: frame * 1_000, maxCombo: 1, merges: 1 });
     }
@@ -444,10 +361,6 @@ describe('createLocalLeaderboard — 時長跟著分數 / the duration follows t
     first.board.record({ score: 700, durationMs: 90_000, maxCombo: 1, merges: 1 });
     first.board.sync();
 
-    /*
-     * 用同一個儲存體重開一次：存檔裡的封條與時長都必須活著回來。
-     * Reopen over the same storage: the sealed envelope and the duration both have to survive.
-     */
     const second = createLocalLeaderboard({
       storage: first.storage,
       playerId: 'me',
@@ -459,7 +372,6 @@ describe('createLocalLeaderboard — 時長跟著分數 / the duration follows t
     expect(second.snapshot('score').entries[0]).toMatchObject({ score: 700, durationMs: 90_000 });
   });
 
-  /* 舊存檔（在時長這個欄位出現之前寫的）讀不到時補 0，而不是讓整筆紀錄失效。 */
   it('treats a row saved before the field existed as an unknown duration', () => {
     const legacy = { id: 'me', name: '阿爺', score: 500, maxCombo: 1, merges: 1, at: 1 };
     const { board } = makeBoard(LEADERBOARD_LIMIT, [legacy as unknown as LeaderboardEntry]);
@@ -511,13 +423,6 @@ describe('createLocalLeaderboard — 改名 / renaming', () => {
     first.record({ score: 77, maxCombo: 1, merges: 1 });
     first.sync();
 
-    /*
-     * 重開一個「新工作階段」再改名。舊版就是在這裡出事的：只有「沒有名字」的紀錄會被認領，
-     * 所以改名之後那些記錄留在舊名底下，玩家看到的就是「我的紀錄不見了」。
-     * Reopen a "new session" and rename. This is exactly where the previous version failed: only
-     * nameless records were claimed, so after a rename the records stayed under the old name and
-     * the player concluded his record was gone.
-     */
     const second = createLocalLeaderboard({ storage, keys, salt: TEST_SALT, now: () => 5 });
     second.setDisplayName('阿嬤');
 
@@ -554,7 +459,6 @@ describe('createLocalLeaderboard — 上載 / uploading', () => {
 
     board.record({ score: 500, maxCombo: 1, merges: 1 });
     board.setSharing(true);
-    /* 剛才那一次 push 已經把 `uploaded` 追上 `revision`，所以再叫一次是空轉。 */
     expect(board.sync()).toBe(false);
 
     board.record({ score: 900, maxCombo: 1, merges: 1 });
@@ -565,7 +469,6 @@ describe('createLocalLeaderboard — 上載 / uploading', () => {
     const { board } = makeBoard();
 
     board.record({ score: 500, maxCombo: 1, merges: 1 });
-    /* 「同意」本身就是上載的觸發點（使用者定案）。 */
     board.setSharing(true);
 
     expect(board.snapshot('score').entries).toHaveLength(1);
@@ -583,7 +486,6 @@ describe('createLocalLeaderboard — 上載 / uploading', () => {
       device: 'd',
     };
 
-    /* 第一段：同意之後刷新了一次紀錄，但沒等到任何上載時機就關掉分頁。 */
     const first = createLocalLeaderboard({
       storage,
       keys,
@@ -595,8 +497,8 @@ describe('createLocalLeaderboard — 上載 / uploading', () => {
     first.setDisplayName('阿爺');
     first.record({ score: 1234, maxCombo: 9, merges: 9 });
     /* 刻意不 `sync()`：模擬直接關掉分頁。 */
+    /* Deliberately no `sync()`: simulates closing the tab. */
 
-    /* 第二段：下次回來。 */
     const second = createLocalLeaderboard({ storage, keys, salt: TEST_SALT, now: () => 5 });
     expect(second.snapshot('score').entries).toHaveLength(0);
     expect(second.sync()).toBe(true);
@@ -650,7 +552,6 @@ describe('createLocalLeaderboard — 防竄改 / tamper check', () => {
     board.record({ score: 100, maxCombo: 1, merges: 1 });
     board.setSharing(true);
 
-    /* 被改過的那一筆當作不存在，所以留下來的是真的打出來的分數。 */
     expect(board.snapshot('score').entries[0]?.score).toBe(100);
   });
 
@@ -726,7 +627,6 @@ describe('createLocalLeaderboard — 舊存檔遷移 / migrating the old save', 
       keys: { entries: 'e', name: 'n', sharing: 's', prompt: 'p', profile: 'pr', device: 'd' },
     });
 
-    /* 新格式是信封，不再是裸陣列 —— 否則下次開啟會再遷移一次。 */
     const raw = storage.getItem('e') ?? '';
     expect(raw.startsWith('{')).toBe(true);
     expect(JSON.parse(raw)).toHaveProperty('d');
@@ -740,7 +640,6 @@ describe('createLocalLeaderboard — 儲存體的邊界情況 / storage edge cas
 
     expect(board.snapshot('score').entries).toHaveLength(0);
 
-    /* 壞資料之後仍然可以正常記錄。 */
     board.record({ score: 5, maxCombo: 0, merges: 0 });
     board.setSharing(true);
     expect(board.snapshot('score').entries).toHaveLength(1);
@@ -816,7 +715,6 @@ describe('createLocalLeaderboard — 儲存體的邊界情況 / storage edge cas
     board.record({ score: 500, maxCombo: 5, merges: 5 });
     expect(calls).toBe(1);
 
-    /* 每幀都會呼叫 `record()`，所以「沒有刷新就什麼都不做」是它便宜的原因。 */
     for (let frame = 0; frame < 100; frame += 1) {
       board.record({ score: 100, maxCombo: 1, merges: 1 });
     }
@@ -851,7 +749,6 @@ describe('createLocalLeaderboard — 首次的發布詢問 / the one-off publish
     expect(board.publishPromptDone).toBe(true);
     expect(calls).toBe(1);
 
-    /* 第二次不該再通知 —— 那會讓已開著的榜白白重繪。 */
     board.finishPublishPrompt();
     expect(calls).toBe(1);
   });

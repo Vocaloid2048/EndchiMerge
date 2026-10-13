@@ -1,12 +1,6 @@
 /**
- * 後端的單元測試。
- * Backend unit tests.
- *
- * 這裡刻意**不需要資料庫**：端點只依賴 `Store` 介面，而測試餵它 `MemoryStore`。所以「開局 → 提交 →
- * 上榜」這條完整路徑可以在毫秒內跑完，而且驗的是**真的處理器**，不是替身。
- * These deliberately **need no database**: an endpoint depends only on the `Store` interface, and the
- * tests hand it a `MemoryStore`. So the whole "start a run → submit → appear on the board" path runs in
- * milliseconds against the **real handlers**, not stand-ins.
+ * 後端的單元測試：設定、上界、憑證、處理器與外殼。
+ * Backend unit tests: config, bounds, tokens, handlers and the shell.
  */
 
 import { readFileSync } from 'node:fs';
@@ -45,7 +39,6 @@ const DEVICE = 'device-0000-1111';
 const OTHER_DEVICE = 'another-device-77';
 const VERSION = '0.1.0';
 
-/** 一組一定通過檢查的數字（60 秒、40 顆、30 次合成、900 分）。 */
 const GOOD_RUN = { score: 900, merges: 30, drops: 40, maxCombo: 5, durationMs: 60_000 };
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
@@ -120,7 +113,6 @@ async function startRun(deps: Deps, deviceId = DEVICE): Promise<StartBody> {
   return result.response.body as StartBody;
 }
 
-/** 用一張既有的憑證提交。`started` 可以被覆寫，用來製造「偽造的憑證」這類案例。 */
 async function submitRun(
   deps: Deps,
   started: StartBody,
@@ -147,10 +139,8 @@ async function submitRun(
 }
 
 /**
- * 玩一局然後提交：開局、把時鐘往前推（讓「宣稱的時長」站得住）、再送成績。
- * 一併回傳開局時拿到的憑證，重試的測試才可以用**同一張**再送一次。
- * Play a run and submit it: start, advance the clock so the claimed duration holds up, then submit.
- * The started run is returned too, so a retry test can send the **same** token again.
+ * 玩一局然後提交：開局、把時鐘往前推（否則宣稱的時長站不住）、再送成績。
+ * Play a run and submit it: start, advance the clock (or the claimed duration fails), then submit.
  */
 async function play(
   deps: Deps,
@@ -165,18 +155,9 @@ async function play(
   return { ...submitted, started };
 }
 
-/*
- * 榜的處理器回的是 `HandlerResult`（回應 ＋ 給接收紀錄用的線索），但測試只想看回應本身，所以這裡
- * 把 `response` 攤平出來 —— 呼叫端一律 `.body` / `.status`，不必到處寫 `.response.body`。
- * The board handler returns a `HandlerResult` (the response plus the hints the receive log needs), but
- * the tests only want the response, so this flattens `response` out — callers use `.body` / `.status`
- * uniformly instead of writing `.response.body` everywhere.
- */
 function board(deps: Deps, query = ''): Promise<ApiResponse> {
   return handleLeaderboard(request('GET', null, { query }), deps).then((result) => result.response);
 }
-
-/* ── 設定 ─────────────────────────────────────────────────────────────────── */
 
 describe('readConfig — 環境變數 / environment variables', () => {
   it('names what is missing rather than starting without it', () => {
@@ -187,11 +168,6 @@ describe('readConfig — 環境變數 / environment variables', () => {
     });
   });
 
-  /*
-   * 短秘密等於沒有秘密，所以它被當成**缺漏**而不是「有點弱但可以用」。HMAC 的建議下限是 32 位元組。
-   * A short secret is no secret, so it counts as **missing** rather than "weak but usable". The
-   * recommended floor for an HMAC key is 32 bytes.
-   */
   it('treats a short secret as missing', () => {
     expect(readConfig({ DATABASE_URL: 'postgres://x', RUN_TOKEN_SECRET: 'too-short' }).ok).toBe(false);
   });
@@ -216,18 +192,7 @@ describe('readConfig — 環境變數 / environment variables', () => {
   });
 });
 
-/* ── 上界必須跟著遊戲配置走 ───────────────────────────────────────────────── */
-
 describe('limits — 上界與配置同步 / the bounds track the game config', () => {
-  /*
-   * 這一條是整份測試裡最重要的一條。`limits.ts` 的三個常數是**從遊戲配置推導**出來的，所以配置
-   * 一改它們就會變成錯的 —— 而「錯的上界」比沒有上界更糟：它會安靜地放過作弊，或更糟地誤傷誠實
-   * 玩家。與其靠註解提醒，這裡直接讀回那兩個檔案比對。
-   * This is the most important test in the file. The three constants in `limits.ts` are **derived from
-   * the game config**, so changing the config makes them wrong — and a wrong bound is worse than none:
-   * it silently lets cheats through, or worse, rejects honest players. Rather than trusting a comment,
-   * this reads both files back and compares.
-   */
   it('matches dropCooldownMs, the top level score and the multiplier ceiling', () => {
     const levels = JSON.parse(
       readFileSync(new URL('../public/config/levels.json', import.meta.url), 'utf8'),
@@ -251,15 +216,6 @@ describe('limits — 上界與配置同步 / the bounds track the game config', 
     expect(checkRationality(GOOD_RUN)).toEqual({ verified: true });
   });
 
-  /*
-   * 兩端都是**閉區間**：剛好 5 秒的局不能判死（撞線之後的寬限就是 5 秒），剛好兩小時的無盡模式上限
-   * 也不能判死。這裡用一組「5 秒內投得出來」的數字，因為同一組數字在 5 秒內會有 40 顆，那本身就不
-   * 合理 —— 上界是**互相交織**的，測試也必須照這個事實寫。
-   * Both ends are **inclusive**: a run of exactly five seconds must not be rejected (the post-crossing
-   * grace is exactly five seconds), nor must one at the endless-mode ceiling of two hours. The numbers
-   * here have to be droppable within five seconds, because the same numbers with 40 drops would be
-   * implausible on their own — the bounds **interlock**, and the test has to reflect that.
-   */
   it('treats both duration ends as inclusive', () => {
     const short = { score: 100, merges: 10, drops: 12, maxCombo: 3 };
 
@@ -320,7 +276,6 @@ describe('checkClaimedDuration — 單邊檢查 / the one-sided check', () => {
 
   it('accepts any duration that fits inside the elapsed time', () => {
     expect(checkClaimedDuration(60_000, issued, issued + 60_000, 5_000)).toEqual({ verified: true });
-    /* 打得比流逝時間短是**合法**的：切到背景時模擬時鐘會停住。 */
     expect(checkClaimedDuration(10_000, issued, issued + 60_000, 5_000)).toEqual({ verified: true });
   });
 
@@ -329,15 +284,12 @@ describe('checkClaimedDuration — 單邊檢查 / the one-sided check', () => {
       verified: false,
       reason: 'duration_exceeds_elapsed',
     });
-    /* 容許差距是拿來吸量測噪音的，不是拿來放寬的：差一個數量級仍然要擋。 */
     expect(checkClaimedDuration(3_600_000, issued, issued + 60_000, 5_000)).toMatchObject({
       verified: false,
       reason: 'duration_exceeds_elapsed',
     });
   });
 });
-
-/* ── 憑證 ─────────────────────────────────────────────────────────────────── */
 
 describe('run tokens — T2', () => {
   const payload = { runId: 'run-1', deviceId: DEVICE, issuedAtMs: 1, expiresAtMs: 2 };
@@ -368,24 +320,18 @@ describe('run tokens — T2', () => {
   });
 });
 
-/* ── 接收紀錄 ─────────────────────────────────────────────────────────────── */
-
 describe('requests — 接收紀錄不收個人資料 / the receive log holds no personal data', () => {
-  /*
-   * 私隱硬規則：IP 與標頭屬個人資料，2026-10-13 起一律不落庫。這一條用黑名單的方式反過來檢查 ——
-   * 送一份帶憑證、代理位址與地理標頭的請求，然後確認落庫的那一列連它們的痕跡都沒有。
-   * Hard privacy rule: IPs and headers are personal data and are never persisted (since
-   * 2026-10-13). The test checks the blacklist in reverse — send a request carrying credentials, a
-   * proxy address and geo headers, then assert the persisted row shows no trace of any of them.
+  /**
+   * 私隱硬規則：請求落的庫不含 IP 與標頭。
+   * Hard privacy rule: a persisted request carries no IP and no headers.
    */
   it('stores no address and no header, not even a credential', async () => {
     const { deps, store } = makeDeps();
     setDependencies(deps);
 
-    /*
-     * 走**完整的外殼**（`endpoint`）：接收紀錄是外殼寫的，不是處理器 —— 直接呼叫處理器不會有那一列。
-     * Through the **full shell** (`endpoint`): the receive log is the shell's job, not the handler's —
-     * calling the handler directly writes no row.
+    /**
+     * 走完整的外殼（`endpoint`）：接收紀錄由外殼寫入，直接呼叫處理器不會落列。
+     * Through the full shell (`endpoint`): the receive log is the shell's job, so calling the handler writes no row.
      */
     const response = await endpoint(handleRunStart)(
       request('POST', { deviceId: DEVICE, version: VERSION }, {
@@ -412,8 +358,6 @@ describe('requests — 接收紀錄不收個人資料 / the receive log holds no
     setDependencies(null);
   });
 });
-
-/* ── 端到端：開局 → 提交 → 上榜 ───────────────────────────────────────────── */
 
 describe('handlers — 開局、提交與榜 / start, submit and the board', () => {
   it('issues a token and refuses a non-POST', async () => {
@@ -456,13 +400,6 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
     expect(body.self?.rank).toBe(1);
   });
 
-  /*
-   * 時長**跟著分數走**：一局打得久但分數低，只該刷新它自己那一項（連擊、合成），不該把「最高分那
-   * 一局」的時間蓋掉 —— 否則榜上會出現「900 分，打了 12 分鐘」這種自相矛盾的兩格。
-   * The duration **follows the score**: a long but lower-scoring run should refresh only its own
-   * metrics (combo, merges) and leave the best-scoring run's time alone — otherwise the board shows
-   * "900 points, 12 minutes", two cells contradicting each other.
-   */
   it('does not let a longer low-scoring run overwrite the best duration', async () => {
     const { deps, advance } = makeDeps();
 
@@ -502,7 +439,8 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
     expect(result.status).toBe(401);
   });
 
-  /* 開局是這個裝置，提交換一個裝置 —— 憑證綁的是開局的那一個。 */
+  /* 憑證綁在開局的裝置；換裝置提交會被擋。 */
+  /* A token is bound to the device that started the run. */
   it('rejects a token presented by another device', async () => {
     const { deps, advance } = makeDeps();
 
@@ -527,7 +465,6 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
     const { deps, advance } = makeDeps();
 
     const started = await startRun(deps);
-    /* 憑證有效期是「單局上限 ＋ 一分鐘」，所以再往前推一點就過期了。 */
     advance(deps.config.runTokenTtlMs + 1);
 
     const result = await submitRun(deps, started, GOOD_RUN);
@@ -537,7 +474,6 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
   it('marks a run that claims more time than has passed, and keeps it out of the board', async () => {
     const { deps, store, advance } = makeDeps();
 
-    /* 開局之後只過 10 秒，卻宣稱打了 60 秒。 */
     const started = await startRun(deps);
     advance(10_000);
 
@@ -545,7 +481,6 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
     expect(result.status).toBe(200);
     expect(result.body).toMatchObject({ verified: false, reason: 'duration_exceeds_elapsed' });
 
-    /* 未通過的提交寫進了 `scores`（留審計痕跡），但不進榜。 */
     expect(await store.getScore(started.runId)).not.toBeNull();
     expect(((await board(deps)).body as { total: number }).total).toBe(0);
   });
@@ -562,13 +497,9 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
     expect(((await board(deps)).body as { total: number }).total).toBe(0);
   });
 
-  /*
-   * 冪等：送出後斷線、客戶端重試是正常的。第二次必須用**同一張憑證、同一個局號**再送，而且會拿回
-   * 同一個裁決 —— 這時憑證早已被標記用過，所以這條同時驗證了「先查既有成績、再驗 `used_at`」的
-   * 順序是對的。
-   * Idempotency: losing the connection after sending and retrying is normal. The second call must send
-   * the **same token and the same run id** and get the same verdict back — by then the token is already
-   * marked used, so this also pins the order "check the stored score first, test `used_at` after".
+  /**
+   * 冪等：同一張憑證與同一個局號重送要拿回同一個裁決（先查既有成績，再驗 `used_at`）。
+   * Idempotent: the same token and run id return the same verdict (the stored score is checked before `used_at`).
    */
   it('returns the same verdict for a retry and does not double-count', async () => {
     const { deps, advance } = makeDeps();
@@ -602,12 +533,6 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
     const { deps, advance } = makeDeps();
 
     for (let index = 0; index < 20; index += 1) {
-      /*
-       * 每次都送一筆**不合理**的：被退回的提交也要算進速率，否則「先送一堆假成績」就等於繞過速率
-       * 限制，而速率限制正是為了擋這件事。
-       * Every one of them is **implausible** on purpose: rejected submissions have to count too,
-       * otherwise flooding fake scores would bypass the very limit that exists to stop it.
-       */
       const submitted = await play(deps, advance, { ...GOOD_RUN, score: 9_000_000 });
       expect(submitted.status).toBe(200);
     }
@@ -648,7 +573,6 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
     expect(body.total).toBe(3);
     expect(body.entries.map((entry) => entry.score)).toEqual([700, 700, 500]);
 
-    /* 同分時較早達成的那一筆排在前面（`player-bbbb` 先送）。 */
     const first = (await board(deps, 'limit=10&deviceId=player-bbbb-2222')).body as { self: { rank: number } };
     const second = (await board(deps, 'limit=10&deviceId=player-cccc-3333')).body as { self: { rank: number } };
 
@@ -664,16 +588,6 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
     }
   });
 
-  /*
-   * 榜有三個分頁，而**排序由伺服器決定**。這裡送兩個玩家：一個高分低連擊、一個低分高連擊，兩邊的榜
-   * 應該給出相反的順序。若榜一律按分數排（把重排留給客戶端），低分高連擊那位就不會出現在組合數那
-   * 一頁 —— 而榜只回前 `limit` 名，客戶端救不回來。
-   * The board has three tabs and **the server owns the ordering**. Two players are submitted — one with
-   * a high score and low combo, one with a low score and high combo — and the two boards must order them
-   * oppositely. If the board were always score-ordered (leaving the re-sort to the client), the
-   * low-score/high-combo player would be missing from the combo page, and since the board returns only
-   * the top `limit` the client could not recover them.
-   */
   it('orders each tab by its own column', async () => {
     const { deps, advance } = makeDeps();
 
@@ -701,13 +615,6 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
     expect(comboBoard.entries.map((entry) => entry.maxCombo)).toEqual([90, 3]);
   });
 
-  /*
-   * 玩家號是**存起來的**（不是每次算出來的），所以同一份資料抓兩次榜拿到同一個號 —— 那正是「同一個人在
-   * 不同時間玩不會被誤判成不同人」。同名的人靠這個號分開，所以每一列都要有。
-   * The player tag is **stored**, not derived per request, so two fetches of the same data return the
-   * same tag — which is exactly "the same player is never mistaken for a different one". Rows sharing
-   * a name are told apart by it, so every row must carry one.
-   */
   it('gives every board row a four-digit tag that does not move between fetches', async () => {
     const { deps, advance } = makeDeps();
 
@@ -724,12 +631,6 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
     expect(second.entries[0]?.tag).toBe(first.entries[0]?.tag);
   });
 
-  /*
-   * `self` 的名次也要跟著分頁走 —— 同一個人在三個分頁上的名次本來就不一樣，而摘要那一行寫的是
-   * 「你的最佳：{該分頁的數值} · 第 N 名」，兩者必須描述同一個分頁。
-   * The `self` rank must follow the tab too: one player's position differs across the three tabs, and the
-   * summary line reads "your best: {this tab's value} · Nth", so the two have to describe the same tab.
-   */
   it('reports the self rank for the requested tab', async () => {
     const { deps, advance } = makeDeps();
 
@@ -752,16 +653,10 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
       return body.self.rank;
     };
 
-    /* 低分高連擊的那一位：組合數榜第 1，分數榜第 2。 */
     expect(await rankOn('combo')).toBe(1);
     expect(await rankOn('score')).toBe(2);
   });
 
-  /*
-   * 不認識的分類**退回分數榜**而不是 400：榜是唯讀的，一個打錯的參數不值得讓整個請求失敗。
-   * An unknown category **falls back to the score board** rather than a 400: the board is read-only, and
-   * a mistyped parameter is not worth failing the request over.
-   */
   it('falls back to the score board for an unknown category', async () => {
     const { deps } = makeDeps();
 
@@ -806,9 +701,6 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
   });
 });
 
-/* ── 健康檢查 ─────────────────────────────────────────────────────────────── */
-
-/** 一個 `countProfiles` 會拋錯的 store；用來驗 503／500 的分流。 */
 class BrokenStore extends MemoryStore {
   constructor(private readonly failure: unknown) {
     super();
@@ -827,7 +719,6 @@ describe('health — 真的問一次資料庫 / it really asks', () => {
 
     expect(result.response.status).toBe(200);
     expect(result.response.body).toMatchObject({ ok: true, database: 'postgres', players: 0 });
-    /* 訊息裡**不得**出現連線字串或任何設定值。 */
     expect(JSON.stringify(result.response.body)).not.toContain('postgresql://');
   });
 
@@ -839,13 +730,6 @@ describe('health — 真的問一次資料庫 / it really asks', () => {
     });
   });
 
-  /*
-   * 分流是這一條的重點：**連不上**是基礎設施的事（503，重試有意義），**SQL 有問題**是程式或遷移的
-   * 事（500，重試沒有意義）。混成一個碼會讓「資料庫掛了」看起來像「程式有 bug」。
-   * The split is the point: **unreachable** is infrastructure (503, retrying helps) and **bad SQL** is
-   * code or migration (500, retrying does not). One code for both makes "the database is down" look
-   * like "the code has a bug".
-   */
   it('answers 503 when the database is unreachable', async () => {
     const config = makeConfig();
     const deps: Deps = {
@@ -873,7 +757,6 @@ describe('health — 真的問一次資料庫 / it really asks', () => {
 
     expect(result.response.status).toBe(500);
     expect(result.response.body).toMatchObject({ error: { code: 'database_error' } });
-    /* 內部訊息只進日誌，不回給客戶端。 */
     expect(JSON.stringify(result.response.body)).not.toContain('profiles');
   });
 
@@ -883,8 +766,6 @@ describe('health — 真的問一次資料庫 / it really asks', () => {
     expect((await handleHealth(request('POST', {}), deps)).response.status).toBe(405);
   });
 });
-
-/* ── 外殼：接收紀錄與 CORS ───────────────────────────────────────────────── */
 
 describe('runtime — 接收紀錄與 CORS / the receive log and CORS', () => {
   it('writes a receive row for every request, including rejected ones', async () => {
@@ -897,7 +778,6 @@ describe('runtime — 接收紀錄與 CORS / the receive log and CORS', () => {
 
     expect(response.status).toBe(400);
     expect(store.requestCount).toBe(1);
-    /* 收到的標頭（`user-agent`／`origin`）只餵 CORS 與處理器，**不落庫** —— 見 `runtime.logRequest`。 */
     expect(store.lastRequest).toMatchObject({
       method: 'POST',
       status: 400,
@@ -932,7 +812,6 @@ describe('runtime — 接收紀錄與 CORS / the receive log and CORS', () => {
     );
 
     expect(response.status).toBe(204);
-    /* 前置請求沒有主體、也沒有被處理，所以不該留下一筆紀錄。 */
     expect(store.requestCount).toBe(0);
 
     setDependencies(null);
@@ -963,7 +842,6 @@ describe('runtime — 接收紀錄與 CORS / the receive log and CORS', () => {
 
     expect(response.status).toBe(500);
     expect(JSON.stringify(response.body)).not.toContain('connection string leaked here');
-    /* 崩掉的那一次也留下了紀錄，那正是最需要看的一筆。 */
     expect(store.requestCount).toBe(1);
 
     setDependencies(null);
@@ -975,6 +853,7 @@ describe('runtime — 接收紀錄與 CORS / the receive log and CORS', () => {
   });
 });
 
-/* `MemoryStore` 在型別上要符合 `Store`；這個斷言讓「介面改了但實作沒跟上」在型別檢查就爆。 */
+/* `MemoryStore` 必須滿足 `Store`；不符時型別檢查就會失敗。 */
+/* `MemoryStore` must satisfy the `Store` type, so a drift fails type checking. */
 const storeContract: Store = new MemoryStore();
 void storeContract;

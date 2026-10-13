@@ -1,15 +1,6 @@
 /**
  * 完整性摘要的單元測試。
  * Unit tests for the storage integrity digest.
- *
- * 這裡驗的是「機制有沒有照設計運作」——同樣的輸入得到同樣的摘要、動過一個位元就對不上。它
- * **不是**在驗安全性：鹽是公開的，摘要也算不上密碼學，這件事在 `core/integrity.ts` 的檔頭
- * 寫得很清楚。有測試的好處是，日後有人「順手」把鹽或演算法換掉時，這些斷言會先講話。
- * What is checked here is that the mechanism does what it is designed to do — same input, same
- * digest; one altered byte and it no longer matches. It is **not** a security claim: the salt is
- * public and the digest is not cryptographic, which the header of `core/integrity.ts` says
- * outright. The value of testing it is that if anyone later swaps the salt or the algorithm out,
- * these assertions speak up first.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -51,7 +42,10 @@ describe('seal / open — 信封 / the envelope', () => {
 
   it('rejects a payload edited after sealing', () => {
     const raw = seal([{ id: 'a', score: 12 }], SALT);
-    /* 信封裡的那份 JSON 是字串，所以引號是跳脫過的（`score\":12`）。 */
+    /*
+     * 信封裡的 JSON 是字串，所以引號是跳脫過的（`score\":12`）。
+     * The envelope embeds the JSON as a string, so its quotes are escaped (`score\":12`).
+     */
     const edited = raw.replace('score\\":12', 'score\\":999999');
 
     expect(edited).not.toBe(raw);

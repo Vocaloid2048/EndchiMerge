@@ -1,12 +1,6 @@
 /**
- * 技能類別的單元測試。
- * Unit tests for the skill classes.
- *
- * 技能透過 `SkillBoard` 這個窄介面與遊戲互動，所以這裡可以用一個**假棋盤**精確觀察每個
- * 技能到底發了哪些動作、帶了哪些參數 —— 不必碰物理，也不必碰 Matter.js。
- * Skills talk to the game through the narrow `SkillBoard` interface, so a **fake board** can
- * record exactly which actions each skill issued and with which parameters — no physics and no
- * Matter.js involved.
+ * 技能類別的單元測試；用假棋盤觀察每個技能發出的動作與參數。
+ * Unit tests for the skill classes; a fake board records each skill's actions and parameters.
  */
 
 import { describe, expect, it } from 'vitest';
