@@ -23,8 +23,8 @@
 
 import { createPool, type Pool, type PoolConnection, type ResultSetHeader } from 'mysql2/promise';
 
-import { boardOrderKeys, type Dialect } from './dialect';
-import type { Driver, Row, SqlResult } from './types';
+import { boardOrderKeys, type Dialect } from './dialect.js';
+import type { Driver, Row, SqlResult } from './types.js';
 
 /** 與 Postgres 那邊同一個理由（見 `postgres.ts`）。 */
 const POOL_MAX = 2;

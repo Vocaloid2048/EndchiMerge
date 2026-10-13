@@ -7,6 +7,51 @@
 
 ---
 
+## 未發佈 — 上線後第一個請求就 500：`api/**` 的相對 import 要帶 `.js`（2026-10-13）
+
+四個端點在部署後全部 500，而**本機完全看不出來** —— `npm run dev`、`npx vitest run`、`npm run build`
+三個全過。這是它值得單獨記一節的原因。
+
+### 症狀
+
+```
+Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/task/api/_lib/handlers'
+imported from /var/task/api/leaderboard.js
+```
+
+### 根因 — 三個條件疊起來
+
+1. `package.json` 有 `"type": "module"`，所以部署後的 `.js` 一律被當成 ESM。
+2. `vercel.json` 把 `api/**/*.ts` 宣告成函式，Vercel 於是**逐檔轉譯、不打包**。
+3. 原始碼的相對 import **全部沒有副檔名**（`'./_lib/handlers'`）。`moduleResolution: "bundler"` 容許
+   這樣寫，但 **Node 的 ESM 解析器要求副檔名** —— 它不會去猜 `.js` 或目錄 index。
+
+**本機之所以看不出來**：`tsx`（`npm run dev`）與 Vite（`vitest`、`vite build`）**都會替我們補上副檔名**。
+
+### 修正
+
+- `api/**` 的 **51 處**相對 import 全部補上 `.js`（目錄 index 走 `/index.js`），共 18 檔。
+- `api/_lib/adapters/fetch.ts` 的 EdgeOne 用法範例（3 處）也補上，並在該註解寫明這條規則 —— 它原本
+  示範的正是會壞掉的那種寫法，而 EdgeOne 的 Node Functions 踩的是同一個坑。
+- `tsconfig.api.json` 的 `module`／`moduleResolution` 改為 **`nodenext`**：同一個錯誤在
+  `npm run typecheck` 就變成 **TS2835**，不必等部署才發現。這一檔只包含 `api`，所以 `src`（瀏覽器
+  端，照舊由 Vite 打包）不受影響。
+
+### 驗證
+
+- **先在本地重現，再修**：用 `esbuild`（`bundle: false`、`format: esm`）逐檔轉譯 `api/`，再以 Node
+  載入 —— 得到與正式環境**同一格**的 `ERR_MODULE_NOT_FOUND`。轉譯產物本身就是證據：
+  `import { handleLeaderboard } from "./_lib/handlers";`（無副檔名原封不動傳下去）。
+- **守門員實測**：故意新增一個無副檔名的 import → `tsc` 報 TS2835；刪掉後 `npm run typecheck` ✅。
+- `npx vitest run` ✅、`vite build` ✅、esbuild 逐檔轉譯 ＋ Node ESM smoke import 四個端點 ✅。
+
+### 硬規則（往後照這個走）
+
+**`api/**` 內每一處相對 import 都要帶 `.js`。** 部署正確與測試全綠是兩件事。`api/` 之外
+（`src`／`scripts`／`tests`）維持原樣 —— 那些由 bundler 或 `tsx` 處理，沒有這條限制。
+
+---
+
 ## 未發佈 — 客戶端接上後端：榜真的有別的玩家了（2026-10-13）
 
 `LeaderboardSource` 這個接縫從排行榜重寫那天就留著，這一節是它第一次真的被接上。UI 只多了**一行**。

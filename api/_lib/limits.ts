@@ -52,7 +52,7 @@
  * mismatch — because "someone will remember" is not a mechanism.
  */
 
-import { MAX_RUN_MS, MIN_RUN_MS } from './env';
+import { MAX_RUN_MS, MIN_RUN_MS } from './env.js';
 
 /** 兩顆之間的最短間隔（`levels.json` → `settings.dropCooldownMs`）。 */
 export const DROP_COOLDOWN_MS = 500;

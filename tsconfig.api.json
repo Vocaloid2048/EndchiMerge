@@ -4,8 +4,29 @@
 
     "target": "ES2023",
     "lib": ["ES2023"],
-    "module": "ESNext",
-    "moduleResolution": "bundler",
+
+    /*
+     * `nodenext` 不是風格偏好，是**部署條件**。`package.json` 是 `"type": "module"`，而 Vercel（以及
+     * EdgeOne 的 Node Functions）把 `api/**` 逐檔轉譯成 `.js`、**不打包** —— 所以部署後跑的是 Node 的
+     * ESM 解析器，而它**要求相對路徑帶副檔名**（`'./handlers.js'`）。
+     *
+     * 這裡若留在 `bundler`，編譯器會**接受**沒有副檔名的寫法，於是一路安靜到部署後才變成
+     * `ERR_MODULE_NOT_FOUND`；本機的 `tsx` 與 `vitest` 都會替我們補上副檔名，所以連跑測試也看不出來。
+     * 換成 `nodenext`，同一個錯誤在 `npm run typecheck` 就變成 **TS2835**，而且這一檔只包含 `api`，
+     * 所以不會把 `src`（瀏覽器端，本來就由 bundler 打包）拖進來。
+     * `nodenext` is not a style preference — it is a **deployment condition**. `package.json` is
+     * `"type": "module"`, and Vercel (and EdgeOne's Node Functions) transpile `api/**` file by file
+     * into `.js` **without bundling** — so what runs after deployment is Node's ESM resolver, which
+     * **requires an explicit extension** on relative paths (`'./handlers.js'`).
+     *
+     * Had this stayed on `bundler`, the compiler would have **accepted** the extension-less form and
+     * stayed silent all the way to a post-deploy `ERR_MODULE_NOT_FOUND`; locally, `tsx` and `vitest`
+     * both fill the extension in, so even the test run looks healthy. On `nodenext` the same mistake
+     * becomes **TS2835** at `npm run typecheck`. This project file only includes `api`, so `src` (the
+     * browser side, bundled by Vite as usual) is not dragged into the rule.
+     */
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
     "moduleDetection": "force",
     "isolatedModules": true,
     "skipLibCheck": true,

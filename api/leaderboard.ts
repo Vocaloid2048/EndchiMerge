@@ -9,7 +9,7 @@
  * uses for "Nth of M players" and for the out-of-range percentage.
  */
 
-import { handleLeaderboard } from './_lib/handlers';
-import { vercelEndpoint } from './_lib/adapters/vercel';
+import { handleLeaderboard } from './_lib/handlers.js';
+import { vercelEndpoint } from './_lib/adapters/vercel.js';
 
 export default vercelEndpoint(handleLeaderboard);

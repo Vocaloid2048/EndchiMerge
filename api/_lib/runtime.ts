@@ -25,12 +25,12 @@
  * here changes.
  */
 
-import { connectionNotesFor, createStore } from './db';
-import type { Driver } from './db/types';
-import { loadConfig, type Config } from './env';
-import type { CoreHandler, Deps } from './handlers';
-import { fail, type ApiRequest, type ApiResponse, type Handler } from './http';
-import { buildRequestRow, clientIp } from './requests';
+import { connectionNotesFor, createStore } from './db/index.js';
+import type { Driver } from './db/types.js';
+import { loadConfig, type Config } from './env.js';
+import type { CoreHandler, Deps } from './handlers.js';
+import { fail, type ApiRequest, type ApiResponse, type Handler } from './http.js';
+import { buildRequestRow, clientIp } from './requests.js';
 
 /**
  * 模組層級的相依快取。

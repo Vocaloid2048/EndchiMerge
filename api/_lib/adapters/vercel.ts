@@ -14,9 +14,9 @@
  * the core (`handlers.ts`, `runtime.ts`) does not change at all.
  */
 
-import { coerceBody, fail, normaliseHeaders, type ApiRequest, type ApiResponse, type Handler } from '../http';
-import type { CoreHandler } from '../handlers';
-import { endpoint } from '../runtime';
+import { coerceBody, fail, normaliseHeaders, type ApiRequest, type ApiResponse, type Handler } from '../http.js';
+import type { CoreHandler } from '../handlers.js';
+import { endpoint } from '../runtime.js';
 
 interface VercelRequestLike {
   readonly method?: string;

@@ -56,8 +56,8 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
 
-import { boardOrderKeys, type Dialect } from './dialect';
-import type { Driver, Row, SqlResult } from './types';
+import { boardOrderKeys, type Dialect } from './dialect.js';
+import type { Driver, Row, SqlResult } from './types.js';
 
 /**
  * 這一句會不會回傳列。

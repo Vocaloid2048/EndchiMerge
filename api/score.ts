@@ -9,7 +9,7 @@
  * verdict** (idempotent), so a network retry is safe.
  */
 
-import { handleScore } from './_lib/handlers';
-import { vercelEndpoint } from './_lib/adapters/vercel';
+import { handleScore } from './_lib/handlers.js';
+import { vercelEndpoint } from './_lib/adapters/vercel.js';
 
 export default vercelEndpoint(handleScore);

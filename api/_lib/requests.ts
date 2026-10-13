@@ -7,8 +7,8 @@
  * (`requests`).
  */
 
-import type { IpStorageMode } from './env';
-import { keyedFingerprint } from './tokens';
+import type { IpStorageMode } from './env.js';
+import { keyedFingerprint } from './tokens.js';
 
 /**
  * 會落庫的標頭。**白名單，不是黑名單。**

@@ -44,7 +44,7 @@
  * and limits are documented at the top of `sqlite.ts`.
  */
 
-import type { Driver } from './types';
+import type { Driver } from './types.js';
 
 export type DialectName = 'postgres' | 'mysql' | 'sqlite';
 

@@ -8,7 +8,7 @@
  * persist the returned `deviceId` into `endchimerge:device-id` — the server may mint one.
  */
 
-import { handleRunStart } from '../_lib/handlers';
-import { vercelEndpoint } from '../_lib/adapters/vercel';
+import { handleRunStart } from '../_lib/handlers.js';
+import { vercelEndpoint } from '../_lib/adapters/vercel.js';
 
 export default vercelEndpoint(handleRunStart);

@@ -24,10 +24,10 @@
  * What lives in `Dialect` is **syntax**: placeholders, time types, upserts, `RETURNING`, `NULLS LAST`.
  */
 
-import type { RequestRow } from './requests';
-import type { ProfileRow, RankProbe, RunTokenRow, ScoreRow, Store } from './store';
-import { Binder, BOARD_PRIMARY_COLUMN, type BoardCategory, type Dialect } from './db/dialect';
-import type { Driver, Row } from './db/types';
+import type { RequestRow } from './requests.js';
+import type { ProfileRow, RankProbe, RunTokenRow, ScoreRow, Store } from './store.js';
+import { Binder, BOARD_PRIMARY_COLUMN, type BoardCategory, type Dialect } from './db/dialect.js';
+import type { Driver, Row } from './db/types.js';
 
 const asText = (value: unknown): string => (typeof value === 'string' ? value : '');
 const asNullableText = (value: unknown): string | null =>

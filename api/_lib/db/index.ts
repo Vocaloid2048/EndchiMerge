@@ -9,14 +9,14 @@
  * `handlers.ts` nor any endpoint changed by a line — which is the whole point of this seam.
  */
 
-import type { Config } from '../env';
-import { SqlStore } from '../sqlStore';
-import type { Store } from '../store';
-import type { Dialect, DialectName } from './dialect';
-import { connectionNotes as mysqlNotes, createMysqlDriver, mysqlDialect } from './mysql';
-import { connectionNotes as postgresNotes, createPostgresDriver, postgresDialect } from './postgres';
-import { connectionNotes as sqliteNotes, createSqliteDriver, sqliteDialect } from './sqlite';
-import type { Driver } from './types';
+import type { Config } from '../env.js';
+import { SqlStore } from '../sqlStore.js';
+import type { Store } from '../store.js';
+import type { Dialect, DialectName } from './dialect.js';
+import { connectionNotes as mysqlNotes, createMysqlDriver, mysqlDialect } from './mysql.js';
+import { connectionNotes as postgresNotes, createPostgresDriver, postgresDialect } from './postgres.js';
+import { connectionNotes as sqliteNotes, createSqliteDriver, sqliteDialect } from './sqlite.js';
+import type { Driver } from './types.js';
 
 /**
  * 方言表。`Record<DialectName, …>` 而不是 `Partial`，所以**新增一個 `DialectName` 就一定編不過**——

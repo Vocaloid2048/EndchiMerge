@@ -16,7 +16,7 @@
  * default, rate limiting is on by default, and no cross-origin request is allowed by default.
  */
 
-import { dialectFromUrl, type DialectName } from './db/dialect';
+import { dialectFromUrl, type DialectName } from './db/dialect.js';
 
 /** IP 要怎麼落庫。 */
 export type IpStorageMode = 'raw' | 'truncated' | 'hashed';

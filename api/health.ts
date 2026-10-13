@@ -13,7 +13,7 @@
  * connection string, the host name, or any configuration value.
  */
 
-import { handleHealth } from './_lib/handlers';
-import { vercelEndpoint } from './_lib/adapters/vercel';
+import { handleHealth } from './_lib/handlers.js';
+import { vercelEndpoint } from './_lib/adapters/vercel.js';
 
 export default vercelEndpoint(handleHealth);

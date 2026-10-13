@@ -17,8 +17,8 @@
  * handlers.
  */
 
-import type { BoardCategory } from './db/dialect';
-import type { RequestRow } from './requests';
+import type { BoardCategory } from './db/dialect.js';
+import type { RequestRow } from './requests.js';
 
 /** `run_tokens` 的一列。 */
 export interface RunTokenRow {

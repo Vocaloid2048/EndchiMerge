@@ -25,14 +25,14 @@
  * because the first tells you someone is trying and the second only tells you someone is winning.
  */
 
-import type { ApiRequest, ApiResponse, JsonObject } from './http';
-import { asObject, fail, methodNotAllowed, ok, readInteger, readString } from './http';
-import { isConnectionError, isBoardCategory, type BoardCategory } from './db/dialect';
-import type { Config } from './env';
-import { MAX_RUN_MS } from './env';
-import { checkClaimedDuration, checkRationality } from './limits';
-import type { Store } from './store';
-import { isValidDeviceId, newRunId, signRunToken, tokenFingerprint, verifyRunToken } from './tokens';
+import type { ApiRequest, ApiResponse, JsonObject } from './http.js';
+import { asObject, fail, methodNotAllowed, ok, readInteger, readString } from './http.js';
+import { isConnectionError, isBoardCategory, type BoardCategory } from './db/dialect.js';
+import type { Config } from './env.js';
+import { MAX_RUN_MS } from './env.js';
+import { checkClaimedDuration, checkRationality } from './limits.js';
+import type { Store } from './store.js';
+import { isValidDeviceId, newRunId, signRunToken, tokenFingerprint, verifyRunToken } from './tokens.js';
 
 export interface Deps {
   readonly config: Config;

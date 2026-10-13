@@ -68,6 +68,10 @@ scripts/migrate.ts    npm run db:migrate —— 建表（任何方言）
 scripts/dev.ts        npm run dev —— 前端 ＋ 後端 ＋ SQLite，見 §6.5
 ```
 
+> ⚠️ **`api/**` 內每一處相對 import 都要帶 `.js`**（目錄要寫到 `/index.js`）：部署是**逐檔轉譯、
+> 不打包**，而 `package.json` 是 `"type": "module"` —— 少一個副檔名在部署後就是
+> `ERR_MODULE_NOT_FOUND`，本機卻完全看不出來。理由、出事的長相與怎麼防，見 §6。
+
 客戶端那一邊的兩支（都在 `src/game/`，見 §6.6）：
 
 ```
@@ -368,6 +372,30 @@ export const { onRequestGet, onRequestPost, onRequestOptions } =
 
 > **只想在本機跑起來的話不必看這一節** —— `npm run dev` 會自己起後端與 SQLite（見 §6.5）。這一節是
 > 「要上線」的路徑。
+
+### 部署前的硬規則：`api/**` 的相對 import 一律要帶 `.js`
+
+放在第 1 步前面，是因為違反它的代價是**四個端點全部 500**，而本機不會有任何徵兆。
+
+`package.json` 是 `"type": "module"`，而 `vercel.json` 把 `api/**/*.ts` 宣告成函式 —— Vercel 於是把它
+**逐檔轉譯成 `.js`、不打包**。部署後跑的因此是 Node 的 ESM 解析器，它**要求相對路徑帶副檔名**：
+`import` 一個沒有副檔名的路徑，它不會去猜 `.js` 或目錄 index，而是直接
+`ERR_MODULE_NOT_FOUND`。
+
+```ts
+import { handleScore } from './_lib/handlers.js';     // ✅
+import { createVercelHandler } from '../http.js';     // ✅
+import { createStore } from './db/index.js';          // ✅ 目錄要寫到 index
+import { handleScore } from './_lib/handlers';        // ❌ 部署後 500
+```
+
+**本機為什麼看不出來**：`tsx`（`npm run dev`）與 Vite（`npx vitest run`、`vite build`）都會替我們補上
+副檔名，所以測試全綠、`build` 成功，都**不代表**部署正確。這一條是 2026-10-13 上線後第一個請求就吃到
+500 才補上的（見 `CHANGELOG.md`）。
+
+**怎麼防**：`tsconfig.api.json` 用 `module: "nodenext"` ＋ `moduleResolution: "nodenext"`，於是同一個
+錯誤在 `npm run typecheck` 就變成 **TS2835**，不必等部署。這一檔只包含 `api`，所以 `src`（瀏覽器端，
+照舊由 Vite 打包）不受影響；`api/` 之外維持原本的寫法即可。
 
 1. **建資料庫**：Vercel 專案 → Storage → Marketplace → **Neon** → 建一個免費資料庫。Vercel 會自動
    把 `DATABASE_URL`（帶 `-pooler`）注入環境變數。

@@ -24,7 +24,7 @@
  * driver can open a TCP connection**. The first two are here; the third lives in `db/`.
  */
 
-import { coerceBody, fail, normaliseHeaders, type ApiRequest, type ApiResponse, type Handler } from '../http';
+import { coerceBody, fail, normaliseHeaders, type ApiRequest, type ApiResponse, type Handler } from '../http.js';
 
 export type FetchHandler = (request: Request) => Promise<Response>;
 
@@ -114,10 +114,20 @@ export interface EdgeOneContext {
  * 用法（`node-functions/api/score.js`）：
  * Usage (`node-functions/api/score.js`):
  *
+ * ⚠️ 相對路徑**要帶 `.js`**。`package.json` 是 `"type": "module"`，而函式平台是**逐檔轉譯、不打包**，
+ * 所以模組解析走的是 Node 的 ESM 規則 —— 少一個副檔名在部署後就是執行期的 `ERR_MODULE_NOT_FOUND`
+ * （本機看不出來，因為 `tsx` 與 `vitest` 都會替我們補上）。這條規則在 `api/**` 內**每一處**相對
+ * import 都成立，`api/` 之外則不適用。
+ * ⚠️ Relative paths **must carry `.js`**. `package.json` is `"type": "module"` and function platforms
+ * transpile **file by file, without bundling**, so module resolution follows Node's ESM rules — one
+ * missing extension is a runtime `ERR_MODULE_NOT_FOUND` after deployment (invisible locally, because
+ * `tsx` and `vitest` both fill it in for us). The rule holds for **every** relative import inside
+ * `api/**`; it does not apply outside `api/`.
+ *
  * ```js
- * import { endpoint } from '../../api/_lib/runtime';
- * import { handleScore } from '../../api/_lib/handlers';
- * import { createEdgeOneHandlers } from '../../api/_lib/adapters/fetch';
+ * import { endpoint } from '../../api/_lib/runtime.js';
+ * import { handleScore } from '../../api/_lib/handlers.js';
+ * import { createEdgeOneHandlers } from '../../api/_lib/adapters/fetch.js';
  *
  * export const { onRequestGet, onRequestPost, onRequestOptions } = createEdgeOneHandlers(endpoint(handleScore));
  * ```

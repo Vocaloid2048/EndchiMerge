@@ -13,8 +13,8 @@
 
 import { Pool, type PoolClient } from 'pg';
 
-import { boardOrderKeys, type Dialect } from './dialect';
-import type { Driver, Row, SqlResult } from './types';
+import { boardOrderKeys, type Dialect } from './dialect.js';
+import type { Driver, Row, SqlResult } from './types.js';
 
 /**
  * 每個實例最多幾條連線。開 2 而不是 1：一個請求可能同時要讀憑證與寫分數，只有一條會排隊；開太大
