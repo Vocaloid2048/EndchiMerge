@@ -1,102 +1,72 @@
 /**
- * 全域常數。
- * Global constants.
- *
- * 只放真正全域、且不適合外部化成 JSON 的值。可調參數一律放
- * `public/config/`，不要加進來。
- * Only values that are truly global and unsuitable for externalisation live
- * here. Anything tunable belongs in `public/config/`.
+ * 全域常數：只放真正全域、且不適合外部化成 JSON 的值，可調參數一律放 `public/config/`。
+ * Global constants: only values that are truly global and unsuitable for externalisation; anything tunable belongs in `public/config/`.
  */
 
 /**
- * 世界座標的虛擬高度。
- * Virtual height of the world.
- *
- * 鎖高度而非鎖寬度：垂直空間決定遊戲難度（堆疊高度、溢出線），鎖高度才能保證
- * 換裝置時難度曲線不變。寬度依容器實際像素寬度浮動。
- * Height is locked rather than width because vertical space determines
- * difficulty. Locking height keeps the difficulty curve stable across devices;
- * the width floats with the container.
+ * 世界座標的虛擬高度；鎖高度而非寬度，因為垂直空間決定難度（堆疊高度、溢位線），寬度隨容器寬度浮動。
+ * Virtual height of the world; the height is locked because vertical space drives difficulty, while the width floats with the container.
  */
 export const VIRTUAL_HEIGHT = 1000;
 
-/** 牆壁厚度，虛擬單位。同時用於把遊戲區往內縮，避免貼邊物體被畫出框外。 */
+/** 牆壁厚度，虛擬單位；同時用於把遊戲區往內縮，避免貼邊物體被畫出框外。
+ * Wall thickness in virtual units; it also insets the play area so wall-hugging bodies are not drawn outside the frame. */
 export const WALL_THICKNESS = 16;
 
 /**
- * Sprite 正規化的三個常數（design.md §1.5.1／D16／D28）。
- * The three sprite normalisation constants.
+ * Sprite 正規化的三個常數：素材已正規化成 512² 畫布、body 外框 304、body 中心 (256, 328)，其餘完全透明。
+ * The three sprite normalisation constants: a 512² canvas, a 304 body box, a body centre of (256, 328) and transparency elsewhere.
  *
- * 素材端已把每個角色正規化成「512² 畫布、body 外框 304、body 中心 (256, 328)、
- * 其餘完全透明」。因此渲染器**不需要**在 `levels.json` 存任何尺寸或偏移 ——
- * 只要這三個數字就能把任何等級的碰撞圓對上畫面。
- * The assets are normalised to a 512² canvas with a 304 body box centred at
- * (256, 328) and fully transparent padding, so the renderer needs no per-level size
- * or offset — these three numbers are enough to align any collision circle.
- *
- * 留白必須透明（§1.5.1）：§3.2 的輪廓白框是從 alpha 通道推導形狀的，若留白填白，
- * 剪影會變成整張畫布而讓所有量測靜默失效。
- * The padding must stay transparent: the D20 outline frame derives its shape from the
- * alpha channel, so opaque padding would silently turn the silhouette into the whole
- * canvas.
+ * 留白必須保持透明：輪廓白框由 alpha 通道推導形狀，填白會讓剪影變成整張畫布。
+ * The padding must stay transparent: the outline frame derives its shape from alpha, so opaque padding turns the silhouette into the whole canvas.
  */
 export const SPRITE_SIZE = 512;
 
-/** body 外框邊長，像素。實測為 304 ± 2。 */
+/** body 外框邊長，像素（實測 304 ± 2）。
+ * Body box edge length in pixels (measured 304 ± 2). */
 export const SPRITE_BODY = 304;
 
-/** body 中心在畫布中的位置，像素。y 偏下是因為裝飾多在身體上方。 */
+/** body 中心在畫布中的位置，像素；y 偏下是因為裝飾多在身體上方。
+ * Body centre within the canvas, in pixels; y sits lower because the decorations are mostly above the body. */
 export const SPRITE_ANCHOR = { x: 256, y: 328 } as const;
 
 /**
- * 「碰撞半徑 → sprite 繪製縮放」的換算率。
- * Conversion factor from collision radius to sprite draw scale.
- *
- * 與 design.md §1.5.1 的公式一致：`scale = (2 * radius) / SPRITE_BODY`。
- * Matches the formula in design.md §1.5.1.
+ * 「碰撞半徑 → sprite 繪製縮放」的換算率：`scale = (2 * radius) / SPRITE_BODY`。
+ * Conversion from collision radius to sprite draw scale: `scale = (2 * radius) / SPRITE_BODY`.
  */
 export function spriteScaleForRadius(radius: number): number {
   return (2 * radius) / SPRITE_BODY;
 }
 
 /**
- * 技力硬上限（程式常數）。
- * Hard ceiling for SP (a code constant).
+ * 技力硬上限（程式常數，不是玩法參數）：`skills.json` 的 `sp.max` 載入時會鉗制到此值以下，且必須是 1 到 10 之間的正整數。
+ * Hard ceiling for SP (a code constant, not a gameplay parameter): `skills.json`'s `sp.max` is clamped to it and must be a positive integer in 1–10.
  *
- * 這是安全閥，不是玩法參數：`skills.json` 的 `sp.max` 載入時會被鉗制到此值以下，
- * 而且必須是 **1 到 10 之間的正整數**（使用者定案）。存在理由是避免配置檔寫出一個
- * 爆掉 UI 的數字 —— 技力條「一點一條」，上限同時決定段數。
- * This is a safety valve rather than a gameplay parameter: `sp.max` from
- * `skills.json` is clamped to it on load and must be a **positive integer between 1 and
- * 10** (the user's decision), because the SP meter draws one pill per point and the cap
- * therefore also fixes the segment count.
+ * 存在理由是避免配置檔寫出一個爆掉 UI 的數字 —— 技力條一點一條，上限同時決定段數。
+ * It exists so a config can never break the UI: the meter draws one pill per point, so the cap also fixes the segment count.
  */
 export const SP_MAX_CEILING = 10;
 
-/** 技力上限的下界（正整數，至少 1 點）。 */
 export const SP_MIN = 1;
 
 /**
- * 技力上限的預設值（`skills.json → sp.max` 的內建替身）。
- * The default SP cap, mirroring `skills.json → sp.max`.
+ * 技力上限的預設值，等同 `skills.json → sp.max` 的內建替身。
+ * The default SP cap, the built-in stand-in for `skills.json → sp.max`.
  */
 export const SP_DEFAULT_MAX = 3;
 
 /**
- * 搖晃位移半徑的硬上限（容器寬度的 1/3，使用者定案）。
+ * 搖晃位移半徑的硬上限，以容器寬度的比例表示。
  * The hard cap on a shake's orbit radius, as a fraction of the container width.
  */
 export const SHAKE_RADIUS_FACTOR_MAX = 1 / 3;
 
 /**
- * 浮動結束後的溢位緩衝，毫秒（使用者定案 0.5 秒）。
- * The overflow buffer after a float ends, in ms (the user's decision: 0.5 s).
+ * 浮動結束後的溢位緩衝，毫秒。
+ * The overflow buffer after a float ends, in milliseconds.
  *
- * 浮動期間完全不計算溢位；結束後再等這一段緩衝才恢復計算，讓落回來的堆疊有時間安定，
- * 不會因為浮動剛結束就立刻被判越線。
- * Overflow is not evaluated at all while floating, and stays paused for this buffer
- * afterwards so the falling stack has time to settle instead of tripping the instant the
- * float ends.
+ * 浮動期間完全不計算溢位，結束後再等這一段緩衝才恢復計算，讓落回來的堆疊有時間安定。
+ * Overflow is not evaluated at all while floating and stays paused for this buffer afterwards, so the falling stack has time to settle.
  */
 export const FLOAT_OVERFLOW_BUFFER_MS = 500;
 
@@ -104,76 +74,46 @@ export const FLOAT_OVERFLOW_BUFFER_MS = 500;
  * 搖晃期間剛體速度的保險上限，世界單位／步。
  * A safety cap on body speed while a shake runs, in world units per step.
  *
- * 使用者給的晃動幅度（2 秒 5 圈、半徑最多 1/3 容器寬）換算成牆壁線速度是每步數十單位 ——
- * 照字面跑會把整箱方團團甩飛、甚至穿透薄牆。這個上限讓最壞情況仍然是「被搖得很厲害」
- * 而不是「炸開」，是**穩定性護欄**而非玩法參數。
- * The user's stated amplitude (5 revolutions in 2 s, radius up to 1/3 the width) works out to
- * tens of world units of wall travel per step — taken literally it flings the box and can tunnel
- * through the thin walls. This cap keeps the worst case at "vigorously shaken" rather than
- * "exploded"; it is a **stability guard**, not a gameplay parameter.
+ * 使用者給的晃動幅度照字面跑會把整箱方團團甩飛、甚至穿透薄牆；這是穩定性護欄，不是玩法參數。
+ * The stated amplitude taken literally flings the box and tunnels through the thin walls; a stability guard, not a gameplay parameter.
  */
 export const SHAKE_MAX_BODY_SPEED = 12;
 
 /**
- * 搖晃時，方團團吃到的加速度相對「容器本身加速度」的耦合比例。
- * How much of the container's own acceleration the dumplings actually receive during a shake.
+ * 搖晃時方團團吃到的加速度相對「容器本身加速度」的耦合比例。
+ * How much of the container's own acceleration the dumplings receive during a shake.
  *
- * 物理上，站在震動地面上的物體會感受到與地面**相同**的加速度（慣性力），也就是耦合
- * 應該等於 1。但容器寬 789 虛擬單位 × 半徑比例 0.12 × 2 秒 5 圈，峰值加速度換算成
- * 「每步速度增量」約 6.5 單位／步 —— 全量耦合會讓整箱方團團像彈珠一樣亂飛。
- * Physically a body standing on shaking ground feels the **same** acceleration as the ground, so
- * the coupling "should" be 1. Taken literally, a 789-unit-wide container at 0.12 × width with 5
- * cycles in 2 s works out to about 6.5 units/step of peak velocity — full coupling flings the
- * whole box around like marbles.
- *
- * 所以這個值把「物理正確」折衷成「玩起來對」：顆粒仍被確實甩動、卡住的堆疊會鬆開，
- * 但不會失控。它與 `SHAKE_MAX_BODY_SPEED` 是同一類東西 —— **手感護欄**，改它之前先試玩。
- * It trades physical exactness for feel: the pile is genuinely thrown around and jams break up,
- * without going out of control. Like `SHAKE_MAX_BODY_SPEED` it is a **feel guard**; play it
- * before changing it.
+ * 物理上應等於 1，但照字面換算的峰值加速度會讓整箱像彈珠一樣亂飛，所以是手感護欄。
+ * Physically it should be 1, but the literal peak acceleration flings the box; a feel guard.
  */
 export const SHAKE_BODY_ACCEL_COUPLING = 0.3;
 
 /**
- * 技能天花板那片隱形平面的厚度，虛擬單位（協議：浮動與搖晃！共用同一片）。
- * Thickness of the invisible skill-ceiling plane, in virtual units (Protocol: Float and
- * Shake! share the same plate).
+ * 技能天花板那片隱形平面的厚度，虛擬單位（浮動與搖晃共用同一片）。
+ * Thickness of the invisible skill-ceiling plane, in virtual units (Float and Shake share it).
  *
- * 平面本身不畫出來，厚度只影響兩件事：夠厚才不會被高速顆粒穿透，但太厚會在技能開始的
- * 那一刻「包住」正在下墜的顆粒。40 約等於兩片半牆厚 —— 遠大於任何一顆每步的位移，
- * 又遠小於投放點到天花板的距離。
- * The plane is never drawn; its thickness only matters twice over: thick enough that a fast body
- * cannot tunnel through, thin enough not to swallow a body that is mid-drop when the skill
- * starts. 40 is about two and a half wall thicknesses — far more than any body's per-step
- * travel, far less than the gap between the drop point and the ceiling.
- *
- * **40 → 100（使用者回報後加厚）**：浮動時整堆被追趕速度地板從下面頂住平面，最輕的那顆
- * 會像西瓜籽一樣被擠出薄平面（畫面上就是「浮到容器口外懸着」）。加厚之後，被擠入的顆粒
- * 離最近的出口（底面）更遠，求解器的最小平移修正一律把它推回下方；配合每步的
- * `containAtCeiling()`（見 `session.ts`），穿透在 8 單位內就會被壓回，根本到不了上半。
- * **40 → 100 (thickened after a user report)**: during a float the whole pile is rammed against
- * the plane from below by the catch-up velocity floor, and the lightest body gets squeezed
- * through a thin plane like a watermelon seed (on screen: "hovering outside the container
- * mouth"). Thicker means a body squeezed in is much closer to the near (bottom) face, so the
- * solver's minimum-translation correction always pushes it back down; combined with the per-step
- * `containAtCeiling()` (see `session.ts`), any penetration is pressed back within 8 units and
- * never reaches the upper half.
+ * 平面不畫出來，厚度只影響兩件事：夠厚才不會被高速顆粒穿透，太厚則會包住正在下墜的顆粒。
+ * The plane is never drawn; the thickness only trades tunnelling (too thin) against swallowing a body that is mid-drop (too thick).
  */
 export const CEILING_THICKNESS = 100;
 
-/** Matter.js 的重力縮放（與 `core/physics.ts` 的引擎設定必須一致）。 */
+/** Matter.js 的重力縮放；與 `core/physics.ts` 的引擎設定必須一致。
+ * Matter.js gravity scale; must match the engine setup in `core/physics.ts`. */
 export const ENGINE_GRAVITY_SCALE = 0.001;
 
-/** Matter.js 求解器迭代次數。提高位置迭代可減少堆疊穿透，代價是 CPU。 */
+/** Matter.js 的位置迭代次數；提高可減少堆疊穿透，代價是 CPU。
+ * Matter.js position iterations; more of them reduce stacking penetration at CPU cost. */
 export const ENGINE_POSITION_ITERATIONS = 8;
 
 /** Matter.js 速度迭代次數。 */
 export const ENGINE_VELOCITY_ITERATIONS = 6;
 
-/** 是否啟用休眠。靜止物體會停止計算，對大量堆疊的效能影響顯著。 */
+/** 是否啟用休眠：靜止物體會停止計算，對大量堆疊的效能影響顯著。
+ * Whether sleeping is enabled: resting bodies stop being simulated, which matters a lot for deep piles. */
 export const ENGINE_ENABLE_SLEEPING = true;
 
-/** 合成時的彈跳動畫時長，毫秒。 */
+/** 合成彈跳動畫的時長，毫秒。
+ * Duration of the merge pop animation, in milliseconds. */
 export const POP_ANIMATION_MS = 180;
 
 /** 彈跳動畫的峰值縮放倍率。 */

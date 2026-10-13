@@ -1,39 +1,22 @@
 /**
- * 由 sprite 的 alpha 輪廓推導碰撞多邊形（光柵化輪廓法）。
- * Derive collision polygons from a sprite's alpha outline (rasterised contour tracing).
- *
- * 這個模組是**純幾何**：輸入一個 alpha 遮罩（0/255 的灰階點陣），輸出以虛擬單位表示的
- * 多邊形。它不碰 canvas、不碰圖片解碼，因此可以在 node 環境下單元測試；把圖片變成遮罩的
- * 那一步（`OffscreenCanvas`）留在 `render/silhouetteLoader.ts`。
- * This module is **pure geometry**: an alpha mask (a 0/255 grey bitmap) goes in, polygons in
- * virtual units come out. It touches neither canvas nor image decoding, so it unit-tests in
- * node; turning an image into a mask (`OffscreenCanvas`) lives in `render/silhouetteLoader.ts`.
- *
- * 為什麼是輪廓而不是圓（使用者定案取代舊的「一律圓形」）：
- * Why an outline rather than a circle (the user's decision, replacing "always a circle"):
- *
- * 方團團的輪廓是**凹多邊形**（方形身體 ＋ 頭髮、翅膀、頭角等裝飾），用外接圓會讓兩顆明明
- * 沒碰到就互相推開。這支模組逐像素追出輪廓、簡化頂點，再交給 Matter 的凸分解。
- * A dumpling's outline is a **concave polygon** (a square body plus hair, wings and horns);
- * a circumscribed circle makes two dumplings push apart while visibly apart. This module
- * traces the outline pixel by pixel, simplifies the vertices, then hands them to Matter's
- * convex decomposition.
- *
- * 取樣步進（`step`）：在遮罩上每 `step` 像素才檢查一次，等於先用一格格的粗篩描出外形，
- * 再讓 RDP 把共線的點收掉。這讓 512² 的遮罩只需掃 ~1/16 的點，且不犧牲尖角。
- * Sampling stride: the mask is probed every `step` pixels, then RDP collapses collinear runs.
- * A 512² mask is therefore scanned at ~1/16 density without rounding off sharp corners.
+ * 由 sprite 的 alpha 遮罩推導碰撞多邊形（純幾何，可在 node 單元測試）。
+ * Derive collision polygons from a sprite's alpha mask (pure geometry, unit-testable in node).
  */
 
-/** 只讀的點陣；座標以左上角為原點。 */
+/**
+ * 只讀的點陣；座標以左上角為原點。
+ * A read-only bitmap whose coordinates start at the top-left corner.
+ */
 export interface Bitmap {
   width: number;
   height: number;
-  /** 每像素亮度；大於 `threshold` 視為「實心」。長度必須是 `width * height`。 */
+  /**
+   * 每像素亮度；大於 `threshold` 視為「實心」。長度必須是 `width * height`。
+   * Per-pixel luminance; values above `threshold` count as solid. Must be `width * height` long.
+   */
   data: Uint8ClampedArray | Uint8Array;
 }
 
-/** 虛擬單位下的二維點。 */
 export interface Point {
   x: number;
   y: number;
@@ -41,15 +24,18 @@ export interface Point {
 
 export interface TraceOptions {
   /**
-   * 遮罩掃描步進，像素。步進越大越快、輪廓越粗。
-   * Mask sampling stride in pixels. Larger is faster and coarser.
+   * 遮罩掃描步進，像素；越大越快、輪廓越粗。
+   * Mask sampling stride in pixels; larger is faster and coarser.
    */
   step?: number;
-  /** alpha 門檻（0..255）；大於此值算實心。 */
+  /**
+   * alpha 門檻（0..255）；大於此值算實心。
+   * Alpha threshold (0..255); values above it count as solid.
+   */
   threshold?: number;
   /**
-   * RDP 簡化容差，**像素**。越大頂點越少、越貼近凸包；越小越貼合但頂點越多。
-   * Ramer–Douglas–Peucker tolerance in **pixels**. Larger means fewer vertices.
+   * RDP 簡化容差，**像素**；越大頂點越少、越貼近凸包。
+   * Ramer–Douglas–Peucker tolerance in **pixels**; larger means fewer vertices.
    */
   epsilon?: number;
 }

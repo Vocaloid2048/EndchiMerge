@@ -1,32 +1,6 @@
 /**
- * 執行期配置載入器。
- * Runtime configuration loader.
- *
- * 唯一允許讀取 `public/config/*.json` 的地方（agent-readme §0.3）。其他模組一律
- * 透過這裡拿到的 `AllConfig`，不得自行 `fetch()`。
- * The single place allowed to read `public/config/*.json` (agent-readme §0.3).
- * Every other module consumes the `AllConfig` produced here and must not fetch
- * on its own.
- *
- * 三個原則 / Three principles:
- *
- * 1. **Fallback-first**：任何缺漏、型別錯誤或整份檔案壞掉，都降級成內建預設值，
- *    絕不讓整個遊戲因為一個參數而開不起來。
- *    Any missing field, wrong type, or broken file degrades to a built-in default;
- *    a single bad parameter never stops the game from booting.
- *
- * 2. **JSON-vs-HTML 形狀檢查**：`public/config/` 之所以放在 `public/` 而非 `src/`，
- *    就是為了讓 Vite 以靜態檔案提供。若路徑寫錯，伺服器會回 SPA fallback 的
- *    **HTML + 200**，`JSON.parse` 會拋錯，然後被靜默吞掉 —— 遊戲照跑但吃錯參數。
- *    因此這裡在 parse 之前先看開頭字元，明確報錯。
- *    The loader checks for an HTML body before parsing. Without it a wrong path
- *    returns the SPA fallback (HTML + 200), `JSON.parse` throws, and the game
- *    silently runs on defaults.
- *
- * 3. **載入期語意檢查**：例如某技能所需技力超過 `sp.max` 時它永遠解鎖不了。
- *    這種「配置自己矛盾」的情況必須發出警告，而非等玩家玩到才發現。
- *    Load-time semantic checks: a skill costing more than `sp.max` can never be
- *    unlocked. Such self-contradictory configs warn up front.
+ * 執行期配置載入器：唯一允許讀取 `public/config/*.json` 的地方，任何缺漏或非法欄位都降級成內建預設值。
+ * Runtime config loader: the only reader of `public/config/*.json`; any missing or invalid field degrades to a built-in default.
  */
 
 import { SP_DEFAULT_MAX, SP_MAX_CEILING, SP_MIN } from './constants';
@@ -48,13 +22,9 @@ import type {
 } from './types';
 
 /* -------------------------------------------------------------------------- *
- * 預設值 / Built-in defaults
- *
- * 這些是「配置整份壞掉」時的最後防線，數值必須與 `public/config/*.json` 同步。
- * 兩邊刻意重複：JSON 是作者調參的入口，這裡是玩家端開得起來的保證。
- * These are the last line of defence when a whole config file is unusable. The
- * values must be kept in sync with `public/config/*.json`. The duplication is
- * deliberate: the JSON is the authoring surface, these are the boot guarantee.
+ * 預設值：配置整份壞掉時的最後防線，數值必須與 `public/config/*.json` 同步。
+ * Built-in defaults: the last line of defence when a config file is unusable;
+ * keep them in sync with `public/config/*.json`.
  * -------------------------------------------------------------------------- */
 
 const DEFAULT_SETTINGS: GameSettings = {
@@ -68,7 +38,6 @@ const DEFAULT_SETTINGS: GameSettings = {
   dropCooldownMs: 500,
 };
 
-/** 合成鏈 10 級（design.md D2）。順序即等級順序。 */
 const DEFAULT_LEVELS: readonly LevelDef[] = [
   { id: 1, name: '萊萬汀', sprite: 'character/萊萬汀_img.webp', radius: 13.5, density: 0.001, restitution: 0.2, friction: 0.3, frictionAir: 0.005, score: 0, spawnWeight: 70, droppable: true, mergeResult: 2 },
   { id: 2, name: '潔爾佩塔', sprite: 'character/潔爾佩塔_img.webp', radius: 17.3, density: 0.001, restitution: 0.18, friction: 0.3, frictionAir: 0.005, score: 1, spawnWeight: 25, droppable: true, mergeResult: 3 },
@@ -90,7 +59,6 @@ const DEFAULT_SP: SpSettings = {
   overflowAllowed: false,
 };
 
-/** 技能表（design.md D11：數量由 JSON 決定，這裡只是壞檔時的替身）。 */
 const DEFAULT_SKILLS: readonly SkillDef[] = [
   { id: 'discard', name: '當棄即棄！', cost: 1, targeting: 'user_pick', pickCount: 1, unlock: { kind: 'sp' }, params: {} },
   { id: 'protocol_float', name: '協議：浮動', cost: 2, targeting: 'immediate', pickCount: 0, unlock: { kind: 'sp' }, params: { durationMs: 1500, liftFactor: 1.6 } },
@@ -125,21 +93,27 @@ const DEFAULT_BRANDING: BrandingConfig = {
 };
 
 /* -------------------------------------------------------------------------- *
- * 小工具 / Small helpers
+ * 小工具
+ * Small helpers
  * -------------------------------------------------------------------------- */
 
-/** 回報器：所有降級都會經過它，方便測試替換成陣列收集。 */
+/** 降級警告的回報器；測試可替換成收集用的函式。
+ * Warning sink for every degradation; tests swap in a collector. */
 export type ConfigWarning = (message: string) => void;
 
-/** 可注入的 fetch 形狀，方便測試餵入假的回應。 */
+/** 可注入的 `fetch` 形狀，供測試餵入假回應。
+ * An injectable `fetch` shape so tests can feed fake responses. */
 export type FetchLike = (input: string) => Promise<Response>;
 
 export interface LoadConfigOptions {
-  /** 配置檔的基底路徑；預設為 Vite 的 `BASE_URL`。 */
+  /** 配置檔的基底路徑；預設為 Vite 的 `BASE_URL`。
+   * Base URL for the config files; defaults to Vite's `BASE_URL`. */
   baseUrl?: string;
-  /** 取代全域 `fetch`；測試用。 */
+  /** 取代全域 `fetch`；測試用。
+   * Replaces global `fetch`; for tests. */
   fetcher?: FetchLike;
-  /** 取代 `console.warn`；測試用來斷言降級訊息。 */
+  /** 取代 `console.warn`；測試用來斷言降級訊息。
+   * Replaces `console.warn`; tests use it to assert degradation messages. */
   onWarn?: ConfigWarning;
 }
 
@@ -148,8 +122,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * 每個欄位的讀取器。回傳值必定合法：缺欄位 → 用 fallback（不吵），
- * 有欄位但不合法 → 警告後用 fallback（要吵，因為這是作者填錯）。
+ * 每個欄位的讀取器：缺欄位就用 fallback 且不警告，有欄位但不合法才警告後用 fallback（因為那是作者填錯）。
+ * Per-field readers: a missing key falls back silently, an invalid one warns and then falls back.
  */
 function makeReader(warn: ConfigWarning, section: string) {
   return {
@@ -195,7 +169,8 @@ function makeReader(warn: ConfigWarning, section: string) {
 }
 
 /* -------------------------------------------------------------------------- *
- * 各段配置的清理 / Per-section sanitisers
+ * 各段配置的清理
+ * Per-section sanitisers
  * -------------------------------------------------------------------------- */
 
 function sanitizeSettings(raw: unknown, warn: ConfigWarning): GameSettings {
@@ -206,7 +181,8 @@ function sanitizeSettings(raw: unknown, warn: ConfigWarning): GameSettings {
   const read = makeReader(warn, 'levels.settings');
   return {
     maxBodies: read.number(raw, 'maxBodies', DEFAULT_SETTINGS.maxBodies, { min: 1, integer: true }),
-    /* 重力允許 0（無重力）與負值（反向），但必須是有限數，故不設 min。 */
+    /* 重力允許 0（無重力）與負值（反向），只要是有限數即可，故不設 min。
+     * Gravity may be 0 or negative (inverted), so no `min` is set. */
     gravityY: read.number(raw, 'gravityY', DEFAULT_SETTINGS.gravityY),
     lockRotation: read.boolean(raw, 'lockRotation', DEFAULT_SETTINGS.lockRotation),
     spawnBlockEnabled: read.boolean(raw, 'spawnBlockEnabled', DEFAULT_SETTINGS.spawnBlockEnabled),
@@ -218,15 +194,11 @@ function sanitizeSettings(raw: unknown, warn: ConfigWarning): GameSettings {
 }
 
 /**
- * 讀取逐語系的名稱覆寫表。
- * Read the per-locale name overrides.
+ * 讀取逐語系的名稱覆寫表：只收支援的語系與非空字串，其餘略過並警告。
+ * Read the per-locale name overrides; only supported locales and non-empty strings are kept.
  *
- * 只收**支援的語系**與**非空字串**；其餘一律略過並警告。整份 `names` 沒有任何可用條目時
- * 回傳 `undefined`（＝完全退回 `name`），讓「還沒翻譯」與「翻譯了但全是空的」在資料上沒有
- * 分別。
- * Only **supported locales** and **non-empty strings** are kept; anything else is skipped with a
- * warning. When nothing usable remains the whole map is `undefined`, so "not yet translated"
- * and "translated to nothing" are indistinguishable in the data.
+ * 整份 `names` 沒有可用條目時回傳 `undefined`，讓「還沒翻譯」與「翻譯了但全是空的」在資料上沒有分別。
+ * When nothing usable remains the whole map is `undefined`, so "not yet translated" and "translated to nothing" are indistinguishable.
  */
 function sanitizeNames(
   raw: Record<string, unknown>,
@@ -263,7 +235,8 @@ function sanitizeLevel(raw: unknown, index: number, warn: ConfigWarning): LevelD
 
   const id = read.number(raw, 'id', fallback.id, { min: 1, integer: true });
 
-  /* mergeResult 是唯一允許 null 的欄位：null 代表終端等級，不再合成。 */
+  /* mergeResult 是唯一允許 null 的欄位：null 代表終端等級，不再合成。
+   * `mergeResult` is the only nullable field: `null` marks the terminal level. */
   let mergeResult: number | null = fallback.mergeResult;
   if ('mergeResult' in raw) {
     const value = raw.mergeResult;
@@ -322,15 +295,11 @@ function sanitizeSp(raw: unknown, warn: ConfigWarning): SpSettings {
   const read = makeReader(warn, 'skills.sp');
 
   /*
-   * 上限是**正整數，1 到硬上限之間**（使用者定案）。這裡用「鉗制 ＋ 警告」而不是
-   * 「不合法就整個退回預設」：作者寫 42 通常代表「開到最大」，把它變成預設的 3 反而更
-   * 意外；寫 3.5 則是打錯，四捨五入再提醒一次就夠。兩個方向都吵，因為這個數字同時決定
-   * 技力條段數，錯了畫面會直接少畫或爆版。
-   * The cap must be a **positive integer between 1 and the hard ceiling** (the user's
-   * decision). It is clamped with a warning rather than rejected: an author writing 42 means
-   * "as high as possible", and silently dropping to the default 3 would be more surprising;
-   * 3.5 is a typo that rounding fixes. Both directions warn, because the cap also fixes the
-   * meter's segment count — a wrong value shows up as missing pills or a blown-out panel.
+   * `sp.max` 必須是 1 到硬上限之間的正整數：超出範圍就鉗制並警告，非整數則四捨五入並警告，
+   * 而不是整份退回預設。兩個方向都要吵，因為這個數字同時決定技力條段數。
+   * `sp.max` must be a positive integer within [1, the hard ceiling]: out of range is clamped with
+   * a warning and non-integers are rounded, never rejected outright — the cap also fixes the
+   * meter's segment count.
    */
   let max = DEFAULT_SP.max;
   const rawMax = raw['max'];
@@ -370,7 +339,7 @@ function sanitizeParams(raw: unknown, fallback: SkillParams, section: string, wa
     return { ...fallback };
   }
   /**
-   * 選填數值：缺欄位就沿用 fallback（不吵），有欄位但非法就警告後用 fallback。
+   * 選填數值：缺欄位就沿用 fallback 且不警告，有欄位但非法才警告後用 fallback。
    * Optional numbers: a missing key inherits the fallback silently, an invalid one warns.
    */
   const optional = (key: keyof SkillParams, fallbackValue: number | undefined): number | undefined => {
@@ -392,11 +361,8 @@ function sanitizeParams(raw: unknown, fallback: SkillParams, section: string, wa
 }
 
 /**
- * 解析解鎖條件。缺欄位時沿用 fallback；無法辨識就退回 `{ kind: 'sp' }`，因為那是
- * 預設語意（當前技力值 ≥ 消耗），最不容易誤鎖。
- * Parse the unlock condition. A missing key inherits the fallback; an unrecognised one falls
- * back to `{ kind: 'sp' }`, the default meaning (current SP ≥ cost), which is the least likely
- * to lock a skill out by mistake.
+ * 解析解鎖條件；無法辨識時退回 `{ kind: 'sp' }`，因為那是預設語意（當前技力值 ≥ 消耗），最不容易誤鎖。
+ * Parse the unlock condition; an unrecognised value falls back to `{ kind: 'sp' }` (current SP ≥ cost), the least likely to lock a skill out.
  */
 function sanitizeUnlock(raw: unknown, fallback: SkillUnlock | undefined, section: string, warn: ConfigWarning): SkillUnlock {
   if (raw === undefined) return fallback ?? { kind: 'sp' };
@@ -429,7 +395,8 @@ function sanitizeSkill(raw: unknown, index: number, warn: ConfigWarning): SkillD
   }
   const read = makeReader(warn, `skills[${index}]`);
 
-  /* `id` 沒有預設值：它是對應技能實作的鍵，猜錯等於接錯效果，寧可整條丟掉。 */
+  /* `id` 沒有預設值：它是對應技能實作的鍵，猜錯等於接錯效果，寧可整條丟掉。
+   * `id` has no default: it keys the skill implementation, so a wrong guess wires the wrong effect — the entry is dropped instead. */
   const id = read.string(raw, 'id', '');
   if (id === '') {
     warn(`skills[${index}] has no usable id; skipping it.`);
@@ -468,18 +435,8 @@ function sanitizeSkill(raw: unknown, index: number, warn: ConfigWarning): SkillD
 }
 
 /**
- * 技能排序（design.md D13 ＋ 使用者定案）：
- * `sortOrder` 覆寫 > **免費／特殊條件技能殿後** > 消耗技力遞增 > 即時技能先於需選取技能。
- * Skill ordering (design.md D13 plus the user's decision): explicit `sortOrder` wins, then
- * **free / condition-gated skills last**, then ascending cost, then immediate skills before
- * ones that need a target selection.
- *
- * **為什麼特殊技能殿後而不是照消耗排**：命運互換消耗 0（免費），照消耗排會排到第一格 ——
- * 但它是最晚才解鎖的，放在最前反而最刺眼。使用者定案的技能欄順序是
- * 「當棄即棄 → 協議：浮動 → 搖晃！ → 命運互換」，所以免費技能固定排在最後。
- * **Why specials go last rather than by cost**: fate swap costs 0, so cost ordering would put
- * it first — yet it unlocks last, which makes the flashiest slot the most useless one. The
- * user's slot order is discard → float → shake → fate swap, so free skills always sort last.
+ * 技能排序：`sortOrder` 覆寫 > 免費／特殊條件技能殿後 > 消耗技力遞增 > 即時技能先於需選取技能。
+ * Skill ordering: explicit `sortOrder` wins, then free / condition-gated skills last, then ascending cost, then immediate before user-pick.
  */
 function sortSkills(skills: SkillDef[]): SkillDef[] {
   const isSpecial = (skill: SkillDef): number => (skill.unlock.kind === 'sp' ? 0 : 1);
@@ -529,7 +486,8 @@ function sanitizeContainer(raw: unknown, warn: ConfigWarning): ContainerConfig {
   const aspectMin = read.number(raw, 'aspectMin', DEFAULT_CONTAINER.aspectMin, { min: 0.05, max: 10 });
   const aspectMax = read.number(raw, 'aspectMax', DEFAULT_CONTAINER.aspectMax, { min: 0.05, max: 10 });
 
-  /* 上下限倒過來時只否決這一組，其他欄位照樣沿用作者填的值。 */
+  /* 上下限倒過來時只否決這一組，其他欄位照樣沿用作者填的值。
+   * An inverted range rejects only these two fields; the rest keep the author's values. */
   const usableRange = aspectMin < aspectMax;
   if (!usableRange) {
     warn(`container aspect range is inverted (${aspectMin} >= ${aspectMax}); using the default range.`);
@@ -564,21 +522,19 @@ function sanitizeBranding(raw: unknown, warn: ConfigWarning): BrandingConfig {
     gameNameZh: read.string(raw, 'gameNameZh', DEFAULT_BRANDING.gameNameZh),
     version: read.string(raw, 'version', DEFAULT_BRANDING.version),
     notice: read.string(raw, 'notice', DEFAULT_BRANDING.notice),
-    /* 非官方聲明是法定緩衝，不允許被空字串抹掉（agent-readme §0.4）。 */
+    /* 非官方聲明是法定緩衝，不允許被空字串抹掉。
+     * The non-official notice is a legal buffer and must not be erased by an empty string. */
     noticeZh: read.string(raw, 'noticeZh', DEFAULT_BRANDING.noticeZh),
     repoUrl: typeof raw.repoUrl === 'string' ? raw.repoUrl : DEFAULT_BRANDING.repoUrl,
   };
 }
 
 /**
- * 載入期語意檢查：消耗超過技力上限的技能永遠解鎖不了（design.md §5.1）。
+ * 載入期語意檢查：消耗超過技力上限的技能永遠解鎖不了。
  * Semantic check: a skill costing more than `sp.max` can never be unlocked.
  *
- * **只檢查「當前值 ≥ 消耗」那一種解鎖**：免費／特殊條件技能（`cumulativeSpent`）不看
- * `sp.max`，所以它們不會觸發這條警告。沒有這道區分的話，命運互換（消耗 0）也會被誤報。
- * **Only the `sp` unlock kind is checked**: free / condition-gated skills ignore `sp.max`, so
- * they must not trip this warning — without the distinction, fate swap (cost 0) would be
- * reported as well.
+ * 只檢查 `sp` 那一種解鎖：免費／`cumulativeSpent` 技能不看 `sp.max`，否則命運互換（消耗 0）也會被誤報。
+ * Only the `sp` kind is checked; free / `cumulativeSpent` skills ignore `sp.max` and must not trip this warning.
  */
 function checkSkillUnlockability(skills: SkillsConfig, warn: ConfigWarning): void {
   for (const skill of skills.skills) {
@@ -595,10 +551,8 @@ function checkSkillUnlockability(skills: SkillsConfig, warn: ConfigWarning): voi
  * 載入期語意檢查：免費／特殊條件技能不該同時收費。
  * Semantic check: a condition-gated skill must not also charge SP.
  *
- * 兩者同時存在時，`cumulativeSpent` 的累計與扣費會互相打架（用了還要扣，卻又說免費），
- * 所以這裡把它當成配置錯誤指出來。
- * With both present, "free" and "charges SP" contradict each other, so the combination is
- * reported as a config error.
+ * 兩者同時存在時「免費」與「扣費」互相矛盾，所以當成配置錯誤指出來。
+ * With both present, "free" and "charges SP" contradict each other, so the combination is reported as a config error.
  */
 function checkFreeSkillCost(skills: SkillsConfig, warn: ConfigWarning): void {
   for (const skill of skills.skills) {
@@ -614,11 +568,8 @@ function checkFreeSkillCost(skills: SkillsConfig, warn: ConfigWarning): void {
  * 載入期語意檢查：投放點必須高於溢位線。
  * Semantic check: the drop point must sit above the overflow line.
  *
- * 兩者都量自 U 形頂緣上方，所以「投放高度 > 溢位高度」才對。倒過來的話每一顆方團團一
- * 出現就越線，寬限倒數會從第一幀就開始跑。
- * Both are measured upward from the rim, so the drop height must exceed the line height.
- * Inverted, every dumpling crosses the line the instant it appears and the countdown starts
- * on frame one.
+ * 兩者都量自 U 形頂緣上方，所以「投放高度 > 溢位高度」才對；倒過來的話每一顆方團團一出現就越線。
+ * Both are measured upward from the rim, so the drop height must exceed the line height; inverted, every dumpling crosses it on spawn.
  */
 function checkDropClearsOverflow(container: ContainerConfig, warn: ConfigWarning): void {
   if (container.dropAboveRim <= container.overflowAboveRim) {
@@ -630,7 +581,8 @@ function checkDropClearsOverflow(container: ContainerConfig, warn: ConfigWarning
 }
 
 /* -------------------------------------------------------------------------- *
- * 抓取 / Fetching
+ * 抓取
+ * Fetching
  * -------------------------------------------------------------------------- */
 
 function joinUrl(base: string, path: string): string {
@@ -638,10 +590,8 @@ function joinUrl(base: string, path: string): string {
 }
 
 /**
- * 抓一份 JSON。任何失敗（網路、狀態碼、HTML 回應、parse 錯誤）都回傳 null，
- * 由呼叫端退回預設值 —— 這裡不拋錯，因為「配置讀不到」不該是致命錯誤。
- * Fetch one JSON file. Every failure returns null so the caller can fall back;
- * an unreadable config must not be fatal.
+ * 抓一份 JSON。任何失敗（網路、狀態碼、HTML 回應、parse 錯誤）都回傳 null，由呼叫端退回預設值 —— 這裡不拋錯。
+ * Fetch one JSON file; every failure (network, status, HTML body, parse error) returns null so the caller falls back — never fatal.
  */
 async function fetchJson(fetcher: FetchLike, url: string, warn: ConfigWarning): Promise<unknown> {
   let response: Response;
@@ -665,7 +615,8 @@ async function fetchJson(fetcher: FetchLike, url: string, warn: ConfigWarning): 
     return null;
   }
 
-  /* SPA fallback 會以 200 回傳 HTML，parse 前先擋掉，否則會被靜默吞掉。 */
+  /* SPA fallback 會以 200 回傳 HTML，parse 前先擋掉，否則會被靜默吞掉。
+   * A wrong path returns the SPA fallback as HTML with a 200, so it is rejected before parsing; otherwise it is silently swallowed. */
   if (text.trimStart().startsWith('<')) {
     warn(`${url} returned HTML instead of JSON (wrong path or SPA fallback); using defaults.`);
     return null;
@@ -680,9 +631,8 @@ async function fetchJson(fetcher: FetchLike, url: string, warn: ConfigWarning): 
 }
 
 /**
- * 載入全部配置。四份檔案並行抓取，各自獨立降級 —— 一份壞掉不影響其他三份。
- * Load every config file. The four fetches run in parallel and degrade
- * independently, so one broken file does not take the rest down with it.
+ * 載入全部配置：四份檔案並行抓取，各自獨立降級 —— 一份壞掉不影響其他三份。
+ * Load every config file: the four fetches run in parallel and degrade independently, so one broken file does not take the rest down.
  */
 export async function loadConfig(options: LoadConfigOptions = {}): Promise<AllConfig> {
   const warn: ConfigWarning = options.onWarn ?? ((message: string): void => console.warn(`[config] ${message}`));

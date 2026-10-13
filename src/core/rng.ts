@@ -1,33 +1,33 @@
 /**
- * 可注入種子的亂數來源。
- * Seedable random number source.
- *
- * 存在理由是**可測試性**：掉落抽取若直接用 `Math.random()`，測試便無法斷言
- * 序列，只能斷言「有抽到東西」。可注入種子後，權重分佈與邊界案例都能用固定序列驗證。
- * The point is testability: a spawner calling `Math.random()` directly can only be
- * asserted as "returned something". With an injectable seed, weight distribution
- * and boundary cases become deterministic.
+ * 可注入種子的亂數來源；存在理由是可測試性（固定序列才能斷言權重分佈與邊界案例）。
+ * A seedable random number source; it exists for testability — only a fixed sequence can assert weight distribution and edge cases.
  */
 
 export interface Rng {
-  /** 回傳 [0, 1) 的浮點數。 */
+  /**
+   * 回傳 [0, 1) 的浮點數。
+   * Returns a float in [0, 1).
+   */
   next(): number;
-  /** 回傳 [0, maxExclusive) 的整數。 */
+  /**
+   * 回傳 [0, maxExclusive) 的整數。
+   * Returns an integer in [0, maxExclusive).
+   */
   int(maxExclusive: number): number;
   /**
-   * 依權重抽取一個元素。
+   * 依權重抽取一個元素；權重為 0 的元素永遠不會被選中。
+   * Picks one element by weight; items with weight 0 are never selected.
    *
-   * 權重為 0 的元素永遠不會被選中。若全部權重皆為 0，代表配置錯誤，直接拋錯
-   * 而非靜默回傳任意元素 —— 靜默失敗會讓「掉落物永遠是同一種」這種 bug 極難察覺。
-   * Items with weight 0 are never selected. If every weight is 0 the config is
-   * wrong, so this throws rather than silently returning an arbitrary item: a
-   * silent failure here makes "the spawner is stuck on one level" very hard to
-   * notice.
+   * 全部權重皆為 0 時直接拋錯而非靜默回傳 —— 靜默失敗會讓「掉落物永遠是同一種」極難察覺。
+   * Throws when every weight is 0 rather than returning an arbitrary item: a silent failure makes "the spawner is stuck on one level" very hard to notice.
    */
   pickWeighted<T>(items: readonly T[], weightOf: (item: T) => number): T;
 }
 
-/** mulberry32：小、快、週期足夠，且對種子敏感。 */
+/**
+ * mulberry32：小、快、週期足夠，且對種子敏感。
+ * mulberry32: small, fast, with a long enough period and good seed sensitivity.
+ */
 function mulberry32(seed: number): () => number {
   let state = seed >>> 0;
   return (): number => {
@@ -39,7 +39,10 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-/** 建立一個指定種子的亂數來源。同種子必然產生同序列。 */
+/**
+ * 建立一個指定種子的亂數來源；同種子必然產生同序列。
+ * Creates a seeded random source; the same seed always yields the same sequence.
+ */
 export function createRng(seed: number): Rng {
   const next = mulberry32(seed);
 
