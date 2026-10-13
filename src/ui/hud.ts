@@ -1,22 +1,6 @@
 /**
- * HUD：NEXT、SCORE 與 COMBO 卡的 DOM 更新。
- * The HUD: DOM updates for the NEXT, SCORE and COMBO cards.
- *
- * 這個模組只**讀取**狀態並寫進 DOM，不碰遊戲邏輯。它每幀都會被呼叫，所以每個欄位
- * 都先比對上次的值，只有真的變了才動 DOM —— 每幀重設 `src` 會讓圖片不停重新解碼，
- * 也會讓瀏覽器不停重排。
- * This module only reads state and writes DOM; it owns no game logic. It is called
- * every frame, so each field compares against its previous value and touches the DOM
- * only on a real change — rewriting `src` each frame would re-decode the image and
- * force a reflow.
- *
- * NEXT 的內容來自 `session.upcomingLevelId`，也就是 `spawnQueue.peekAt(1)`：**放下手上
- * 這顆之後**才會上場的那一顆（D22）。它**不是**馬上要掉的那顆（那是
- * `session.pendingLevelId`，由準心預覽負責）。這裡絕不自行抽取或推測下一顆。
- * The NEXT content comes from `session.upcomingLevelId`, i.e. `spawnQueue.peekAt(1)`:
- * the one that takes the field **after** the dumpling in hand (D22). It is **not** the one
- * about to drop — that is `session.pendingLevelId`, which drives the aim preview. This
- * module never draws or guesses a level itself.
+ * HUD：NEXT、SCORE 與 COMBO 卡的 DOM 更新；只讀狀態寫 DOM，不含遊戲邏輯。
+ * The HUD: DOM updates for the NEXT, SCORE and COMBO cards; it reads state, owns no game logic.
  */
 
 import type { SpriteLoader } from '../render/spriteLoader';
@@ -32,17 +16,34 @@ export interface HudOptions {
 }
 
 export interface HudState {
-  /** NEXT 卡顯示的等級編號（＝放下手上這顆之後才上場的那顆）。 */
+  /**
+   * NEXT 卡顯示的等級編號，來自 `spawnQueue.peekAt(1)`：**放下手上這顆之後**才上場的那顆，
+   * 不是 `pendingLevelId`（那是即將掉落、由準心預覽負責的那顆）。
+   * The NEXT card's level id, from `spawnQueue.peekAt(1)`: the one after the dumpling in hand,
+   * not `pendingLevelId` (which is about to drop and drives the aim preview).
+   */
   nextLevelId: number;
   score: number;
   mergedCount: number;
-  /** 本次投放已合成的次數 —— COMBO 卡的大數字。 */
+  /**
+   * 本次投放已合成的次數 —— COMBO 卡的大數字。
+   * This drop's merge count — the COMBO card's big number.
+   */
   comboCount: number;
-  /** 本次投放合共賺了多少分 —— 第二行的 `+ 18`。 */
+  /**
+   * 本次投放合共賺了多少分 —— 第二行的 `+ 18`。
+   * This drop's total score — the `+ 18` on the second line.
+   */
   comboDropScore: number;
-  /** 最後一次合成所用的倍率；尚未合成為 1。渲染成 `×1.74`（小數兩位）。 */
+  /**
+   * 最後一次合成所用的倍率（已四捨五入到小數兩位）；尚未合成為 1。
+   * The last merge's multiplier (already rounded to two decimals); `1` before any merge.
+   */
   comboMultiplier: number;
-  /** 歷史最高分；由 `ProgressStore` 邊玩邊記，分數超越的當下就會更新。 */
+  /**
+   * 歷史最高分；由 `ProgressStore` 邊玩邊記，超越的當下即更新。
+   * The best score so far, updated live by `ProgressStore`.
+   */
   bestTry?: number;
 }
 
@@ -56,7 +57,10 @@ export class Hud {
   private readonly comboCountValue: HTMLElement;
   private readonly comboDetailValue: HTMLElement;
 
-  /** 上次寫入的值；初值用不可能的數字，保證第一次一定更新。 */
+  /**
+   * 上次寫入的值；初值用 NaN，保證第一次一定更新。
+   * Last written values; seeded with NaN so the first update always writes.
+   */
   private lastNextId = Number.NaN;
   private lastScore = Number.NaN;
   private lastMerged = Number.NaN;
@@ -77,7 +81,10 @@ export class Hud {
     this.comboDetailValue = hook<HTMLElement>(regions.combo, 'combo-detail');
   }
 
-  /** 套用一份新狀態。只有變動的欄位會被寫入 DOM。 */
+  /**
+   * 套用一份新狀態。只有變動的欄位會被寫入 DOM。
+   * Applies a new state; only changed fields are written to the DOM.
+   */
   update(state: HudState): void {
     if (state.nextLevelId !== this.lastNextId) {
       this.renderNext(state.nextLevelId);
@@ -89,27 +96,15 @@ export class Hud {
       this.lastScore = state.score;
     }
 
-    /*
-     * 這一局的時長**不在這裡**（使用者定案）：HUD 不再顯示當前這一局的時間，那個數字只在
-     * 排行榜上以 `HH:mm:ss` 出現（`ui/duration.ts`）。所以這個模組也不必認識時長 ——
-     * 少了它，「每幀都呼叫、每秒才變一次」那個比對字串的折衷也一併消失。
-     * The run's duration is deliberately **not here** (the user's decision): the HUD no longer shows
-     * how long the current run has lasted, and that number appears only on the leaderboard as
-     * `HH:mm:ss` (`ui/duration.ts`). This module therefore need not know about durations at all —
-     * and with it goes the compare-the-formatted-string compromise that existed only because this
-     * method runs every frame while the value changes once a second.
-     */
-
     if (state.mergedCount !== this.lastMerged) {
       this.mergedValue.textContent = String(state.mergedCount);
       this.lastMerged = state.mergedCount;
     }
 
     /*
-     * COMBO 卡大數字 ＝ **本次投放**的合成次數。零也要寫（投放後歸零），所以用數值比對
-     * 而不是「非零才寫」。
-     * The COMBO card's big number is how many merges **this drop** produced. Zero is a real
-     * value (right after a drop), so this compares numbers rather than skipping falsy values.
+     * COMBO 卡大數字 ＝ **本次投放**的合成次數。零也是真值（投放後歸零），所以用數值比對。
+     * The COMBO card's big number is how many merges **this drop** produced. Zero is a real value
+     * right after a drop, so this compares numbers rather than skipping falsy values.
      */
     if (state.comboCount !== this.lastComboCount) {
       this.comboCountValue.textContent = String(state.comboCount);
@@ -118,12 +113,9 @@ export class Hud {
 
     /*
      * 第二行：`+ 18 (×1.74)` —— 本次投放合共得分，加上最後一次合成所用的倍率。
-     * 倍率由 `comboMultiplier()` 算好並已四捨五入到小數兩位（使用者定案），這裡**直接顯示**
-     * —— 不可再對它套任何曲線或換算（先前有一版在這裡把倍率又套了一次指數曲線，是錯的）。
-     * The second line: `+ 18 (×1.74)` — this drop's total with the multiplier its last merge
-     * used. `comboMultiplier()` already rounds to two decimals (the user's decision); display
-     * it **as is** — never re-apply a curve here (an earlier version transformed the multiplier
-     * a second time, which was wrong).
+     * `comboMultiplier()` 已算好並四捨五入，這裡**直接顯示**，不可再套任何曲線或換算。
+     * The second line: `+ 18 (×1.74)` — this drop's total with its last merge's multiplier.
+     * `comboMultiplier()` already rounds it; display it **as is**, never re-apply a curve.
      */
     const detail = `+ ${String(state.comboDropScore)} (×${state.comboMultiplier.toFixed(2)})`;
     if (detail !== this.lastComboDetail) {
@@ -154,11 +146,13 @@ export class Hud {
     }
 
     const image = new Image();
-    /* 與名冊同一個輪廓白框（design.md §3.2），讓兩處的方團團看起來是同一個角色。 */
+    /* 與名冊共用的輪廓白框（`sprite-outline`）。 */
+    /* The white outline shared with the roster (`sprite-outline`). */
     image.className = 'card__preview-img sprite-outline';
     image.decoding = 'async';
     image.alt = level.name;
     /* 載入後才失敗（例如快取被清）時退回等級色塊。 */
+    /* Falls back to the level swatch when loading fails after the fact (e.g. a purged cache). */
     image.addEventListener('error', (): void => this.nextHost.replaceChildren(buildFallback(level)), {
       once: true,
     });
@@ -169,7 +163,10 @@ export class Hud {
   }
 }
 
-/** 素材不可用時的替代：等級色塊 + 數字，配色與名冊和 Canvas 佔位圖一致。 */
+/**
+ * 素材不可用時的替代：等級色塊 + 數字，配色與名冊和 Canvas 佔位圖一致。
+ * Fallback when art is unavailable: a level swatch with its number, matching the roster and canvas placeholders.
+ */
 function buildFallback(level: LevelDef): HTMLElement {
   const fallback = el('span', 'card__preview-fallback', String(level.id));
   fallback.style.setProperty('--fallback-tint', placeholderColor(level.id));

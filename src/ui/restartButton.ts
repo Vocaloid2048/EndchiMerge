@@ -1,37 +1,17 @@
 /**
- * 工具列重新開始鍵。
- * The toolbar restart button.
+ * 工具列重新開始鍵：按下先彈確認對話框，確認後才真正重設（誤觸代價太高）。
+ * The toolbar restart button: a press opens a confirmation dialog first, and only confirmation resets (a mis-press is too costly).
  *
- * 重新開始會**丟掉進行中的一局**，誤觸代價太高，所以按下時不直接重設，而是彈出一個
- * 確認對話框問「是否重新開始」；只有按下對話框裡的「重新開始」才會真的重設，取消（或
- * Esc／點背景）則原樣退回。
- * Restarting throws away the run in progress, so a press does not reset: it opens a
- * confirmation dialog asking whether to restart. Only the dialog's "restart" performs the
- * reset; cancel (or Esc / a backdrop click) leaves everything as it was.
- *
- * **為何不是「再按一次同一顆鈕」**：使用者定案改為對話框。二次按鈕的確認窗只有三秒、
- * 狀態還留在工具列上（整顆轉紅），玩家常在還來不及讀完提示時就逾時；對話框把問題講清楚、
- * 給一個看得見的出口，取消也不需要玩家自己發現「其實可以不理它」。對話框本身由
- * `ui/confirmDialog.ts` 提供 —— 這支只負責**把工具列按鈕接到那個對話框**，以及
- * 確認通過後呼叫 `onRestart`。
- * **Why not "press the same button twice"**: the user's decision is a dialog. The old two-tap
- * confirm had a three-second window and left its state on the toolbar (turning the button red),
- * so players often timed out before reading it; a dialog states the question plainly, gives a
- * visible way out, and cancelling needs no discovery. The dialog itself comes from
- * `ui/confirmDialog.ts` — this module only **wires the toolbar button to that dialog** and
- * calls `onRestart` once it is confirmed.
+ * 這支只負責把按鈕接到 `ui/confirmDialog.ts` 的對話框，並在確認後呼叫 `onRestart`。
+ * This module only wires the button to the dialog from `ui/confirmDialog.ts` and calls `onRestart` on confirmation.
  */
 
 import { i18n, t } from '../i18n';
 import { createConfirmDialog, type ConfirmDialogTexts } from './confirmDialog';
 
 /**
- * 對話框的文案（使用者定案），以**語系鍵**取得。
- * The dialog copy (the user's decision), looked up by locale key.
- *
- * 每次呼叫都重新查表，所以語系一換、下一次呼叫就是新語言（見下面的訂閱）。
- * Looked up afresh on every call, so after a locale change the next call is in the new language
- * (see the subscription below).
+ * 對話框的文案，以語系鍵取得；每次呼叫都重新查表，語系一換下一次就是新語言。
+ * The dialog copy, looked up by locale key; fetched afresh on every call, so a locale change applies on the next call.
  */
 function dialogTexts(): ConfirmDialogTexts {
   return {
@@ -43,18 +23,33 @@ function dialogTexts(): ConfirmDialogTexts {
 }
 
 export interface RestartConfirmOptions {
-  /** 工具列上的重新開始按鈕。 */
+  /**
+   * 工具列上的重新開始按鈕。
+   * The toolbar's restart button.
+   */
   button: HTMLButtonElement;
-  /** 對話框的掛載點；通常是 `layout.root`（同時也是縮放畫布）。 */
+  /**
+   * 對話框的掛載點；通常是 `layout.root`（同時也是縮放畫布）。
+   * Where the dialog mounts; usually `layout.root` (also the scaled stage).
+   */
   host: HTMLElement;
-  /** 確認通過後呼叫（真正執行重設的一方）。 */
+  /**
+   * 確認通過後呼叫（真正執行重設的一方）。
+   * Called once confirmed (the party that actually resets).
+   */
   onRestart: () => void;
 }
 
 export interface RestartConfirm {
-  /** 收起對話框（例如結算覆蓋層已經在處理重設時）。 */
+  /**
+   * 收起對話框（例如結算覆蓋層已經在處理重設時）。
+   * Closes the dialog (e.g. when the game-over overlay already handles the reset).
+   */
   close(): void;
-  /** 移除事件綁定與對話框；頁面層級 teardown 用。 */
+  /**
+   * 移除事件綁定與對話框；頁面層級 teardown 用。
+   * Removes the bindings and the dialog; for page-level teardown.
+   */
   dispose(): void;
 }
 
@@ -66,11 +61,8 @@ export function attachRestartConfirm(options: RestartConfirmOptions): RestartCon
   });
 
   /*
-   * 對話框只建一次，所以語系變更要主動把文案換掉 —— `i18n.applyTo()` 只認 `data-i18n`
-   * 標記過的節點，而這裡的文字是建立時就寫死的。
-   * The dialog is built once, so a locale change has to rewrite its copy by hand:
-   * `i18n.applyTo()` only knows nodes tagged with `data-i18n`, and this copy is written at
-   * construction time.
+   * 對話框只建一次，語系變更要主動把文案換掉：`i18n.applyTo()` 只認 `data-i18n` 標記過的節點。
+   * The dialog is built once, so a locale change must rewrite its copy by hand: `i18n.applyTo()` only knows nodes tagged with `data-i18n`.
    */
   const unsubscribe = i18n.subscribe((): void => dialog.setTexts(dialogTexts()));
 

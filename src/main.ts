@@ -31,16 +31,15 @@ import { createSkillHint, type SkillHint } from './ui/skillHint';
 import { createSpMeter, type SpMeter } from './ui/spMeter';
 
 /**
- * 應用程式入口。
- * Application entry point.
- *
- * `main.ts` 只做**組裝**：載入配置與素材、建立版面與視埠，再把各模組接起來。
- * 它不含任何遊戲邏輯（agent-readme §0.2 的依賴方向）。
- * This file only assembles: it loads config and assets, builds the layout and the viewport,
- * and wires the modules together. It holds no game logic.
+ * 應用程式入口：只做組裝 —— 載入配置與素材、建立版面與視埠，再串起各模組，不含任何遊戲邏輯。
+ * Application entry point: pure assembly — it loads config and assets, builds the layout and the
+ * viewport, and wires the modules together; no game logic lives here.
  */
 
-/** 執行期共享的組裝結果。 */
+/**
+ * 執行期共享的組裝結果。
+ * The shared assembly result, available at runtime.
+ */
 export interface AppContext {
   config: AllConfig;
   sprites: SpriteLoader;
@@ -55,25 +54,15 @@ export interface AppContext {
   hud: Hud;
   loop: FrameLoop;
   gameOver: GameOverView;
-  /** 榜單資料層（現階段為本地實作；接真後端時換掉這一個即可）。 */
   leaderboardSource: LeaderboardSource;
-  /** 排行榜彈窗。 */
   leaderboard: LeaderboardView;
-  /** 首次的發布詢問彈窗（名稱＋分享意願）。 */
   publishPrompt: PublishPromptView;
-  /** 玩家偏好（語系、規則總開關、無盡模式）。 */
   preferences: PreferencesStore;
-  /** 設定彈窗。 */
   settings: SettingsView;
-  /** 遊戲說明彈窗。 */
   help: HelpView;
-  /** 卸下投放輸入的事件綁定。 */
   detachInput: () => void;
-  /** 停止監看視窗尺寸與名冊尺寸。 */
   detachScale: () => void;
-  /** 取消語系變更的訂閱。 */
   detachI18n: () => void;
-  /** 取消偏好變更的訂閱。 */
   detachPreferences: () => void;
 }
 
@@ -85,47 +74,39 @@ async function bootstrap(): Promise<void> {
   }
 
   /*
-   * 本地儲存層**只建一次**，三個模組共用（M7-3）。共用才有意義：`revision` 是「有沒有東西
-   * 要上載」的單一答案，各建一個就等於各數一份，而解鎖進度與排行榜偏偏是兩份資料。
-   * The local store is built **once** and shared by all three modules (M7-3). Sharing is the whole
-   * point: `revision` is the single answer to "is there anything to upload", and building one per
-   * module would count separately — while unlock progress and the leaderboard are two different
-   * pieces of it.
+   * 本地儲存層只建一次，三個模組共用：`revision` 必須是「有沒有東西要上載」的單一答案。
+   * The local store is built once and shared by all three modules: `revision` must be the single
+   * answer to "is there anything to upload".
    */
   const localStore = createLocalStore();
 
   /*
-   * 偏好要**在版面之前**讀：版面建立時就會用 `i18nText` 把每個標籤寫成當下語系的字，所以
-   * 語系必須先確定。存檔有值就以存檔為準，沒有則跟隨裝置／瀏覽器語言（見
-   * `game/preferences.ts`）。
-   * Preferences are read **before the layout exists**: the layout writes every label with
-   * `i18nText` at build time, so the locale has to be settled first. A saved value wins;
-   * otherwise the device/browser language decides (see `game/preferences.ts`).
+   * 偏好必須在版面之前讀：版面建立時就會以當下語系寫死每個標籤，所以語系要先確定。
+   * Preferences must be read before the layout, which bakes every label in the current locale at
+   * build time, so the locale has to be settled first.
    */
   const preferences = createPreferencesStore({ store: localStore });
   i18n.setLocale(preferences.locale);
   i18n.setDocumentLang();
 
-  /* 先建版面：即使配置或素材全部失敗，玩家至少看得到骨架與非官方聲明。 */
+  /* 先建版面：即使配置或素材全部失敗，玩家至少看得到骨架與非官方聲明。
+     Build the layout first: even if all config/assets fail, the player still sees the skeleton and
+     the notice. */
   const layout = createLayout(host);
 
   /*
-   * 語系一換就把整個版面重寫一遍：`applyTo()` 走 `[data-i18n]` 等標記，所有靜態文字（含之後
-   * 才掛上去的排行榜、設定、說明彈窗，它們全都住在 `layout.root` 底下）一次換掉。動態文字
-   * （帶數字的句子）由各自的模組自己重畫。
-   * A locale change rewrites the whole layout in one `applyTo()` pass over the `[data-i18n]`
-   * tags — including the leaderboard, settings and help popups mounted later, since they all
-   * live under `layout.root`. Dynamic text (sentences with numbers) is redrawn by its own module.
+   * 語系一換就把整個版面重寫一遍：`applyTo()` 走 `[data-i18n]` 等標記，連之後才掛上的彈窗一併換掉。
+   * A locale change rewrites the whole layout in one `applyTo()` pass over the `[data-i18n]` tags,
+   * including the popups mounted later.
    */
   const detachI18n = i18n.subscribe((): void => {
     i18n.applyTo(layout.root);
     i18n.setDocumentLang();
   });
 
-  /*
-   * 版面一建好就開始等比縮放，而不是等配置載入完 —— 否則在那段時間裡畫面會是一張
-   * 超出視窗、被裁掉大半的 1920×1080 畫布。
-   */
+  /* 版面一建好就開始等比縮放，別等配置載入：否則畫面會是一張超出視窗、被裁掉大半的 1920×1080 畫布。
+     Start scaling as soon as the layout exists, rather than waiting for the config: otherwise the
+     1920×1080 canvas overflows the window in the meantime. */
   const detachScale = attachStageScale({ stage: layout.stage });
 
   const config = await loadConfig();
@@ -134,30 +115,27 @@ async function bootstrap(): Promise<void> {
   layout.notice.append(createNotice({ zh: config.branding.noticeZh, en: config.branding.notice }));
 
   /*
-   * 容器的左右展示餘裕（`container.json`）必須在畫布**被量測之前**套用：舞台一變寬，
-   * `Viewport.resize()` 算出的虛擬寬度就跟著變，而外框會再內縮同樣的距離 —— 兩者相抵，
-   * 容器尺寸與可玩寬度都不變，只是左右多了搖晃用的空間。
-   * The container's display margins must be applied **before the canvas is measured**: widening
-   * the stage changes the virtual width `Viewport.resize()` derives, and the frame insets by
-   * the same amount. The two cancel, so the container's size and the play width are untouched
-   * and only the room to shake is added.
+   * 容器的左右展示餘裕必須在畫布被量測之前套用：舞台變寬與外框內縮相抵，容器尺寸與可玩寬度不變。
+   * The container's display margins must be applied before the canvas is measured: the wider stage
+   * and the frame inset cancel, leaving the container's size and the play width unchanged.
    */
   layout.setContainerMargin(config.container.leftOffset, config.container.rightOffset);
 
-  /* 技力條的段數由 `sp.max` 決定（一點一條），所以要在配置到手之後才建。 */
+  /* 技力條的段數由 `sp.max` 決定（一點一條），所以要在配置到手之後才建。
+     The SP meter's segment count follows `sp.max` (one pill per point), so it is built after the
+     config arrives. */
   const spMeter = createSpMeter(hook<HTMLElement>(layout.regions.skill, 'sp-meter'));
   spMeter.update({ value: config.skills.sp.initial, max: config.skills.sp.max });
 
-  /* 素材載入失敗不會拋錯，失敗的等級之後會退回程式佔位圖。 */
+  /* 素材載入失敗不會拋錯，失敗的等級之後會退回程式佔位圖。
+     Asset loading does not throw; a failed level falls back to a drawn placeholder. */
   const sprites = new SpriteLoader();
   await sprites.loadAll(config.levels.levels);
 
   /*
-   * 輪廓碰撞框（光柵化輪廓法）：素材一到手就為整條合成鏈導出多邊形。失敗的等級記為
-   * `null`，遊玩時退回圓形 —— 缺一張圖不該讓整個遊戲開不起來。
-   * Outline colliders: outlines are derived for the whole chain as soon as assets arrive.
-   * A failed level is recorded as `null` and falls back to a circle; one bad image must not
-   * stop the game.
+   * 輪廓碰撞框：素材一到手就為整條合成鏈導出多邊形；失敗的等級記為 `null`、遊玩時退回圓形。
+   * Outline colliders: polygons are derived for the whole chain as assets arrive; a failed level is
+   * recorded as `null` and falls back to a circle.
    */
   const silhouettes = buildSilhouetteCache(config.levels.levels, sprites);
 
@@ -165,15 +143,15 @@ async function bootstrap(): Promise<void> {
   const viewport = new Viewport(canvas);
 
   /*
-   * meta-progression：解鎖與最高分跨局存活（design.md D5）。
-   * 鏈首（編號最小者）一律已解鎖，否則開局會完全沒有東西可掉。
-   * Meta-progression: unlocks and the high score outlive a run. The head of the chain (the
-   * lowest id) is always unlocked; without it nothing could ever be dropped.
+   * meta-progression：解鎖與最高分跨局存活；鏈首（編號最小者）一律已解鎖，否則開局沒東西可掉。
+   * Meta-progression: unlocks and the high score outlive a run; the head of the chain (the lowest id)
+   * is always unlocked, or nothing could ever be dropped.
    */
   const baselineId = Math.min(...config.levels.levels.map((level) => level.id));
   const progress = createProgressStore({ baseline: [baselineId], store: localStore });
 
-  /* 名冊在下方才建立，但解鎖事件可能在建立之前就觸發；用可變參考承接。 */
+  /* 名冊稍後才建立，但解鎖事件可能更早觸發；用可變參考承接。
+     The roster is built later but unlock events may fire first, so a mutable reference bridges the gap. */
   let meltingList: MeltingList | null = null;
   let gameOver: GameOverView | null = null;
 
@@ -181,18 +159,15 @@ async function bootstrap(): Promise<void> {
   const hud = new Hud({ layout, sprites, levels: config.levels.levels });
 
   /*
-   * 無盡模式由偏好驅動。它是**跨局設定**，所以在 `reset()` 之外（見 `game/session.ts`），
-   * 這裡只需在開局前交一次，之後跟著偏好變。
-   * Endless mode is driven by preferences. It is a **cross-run setting** and therefore lives
-   * outside `reset()` (see `game/session.ts`); it is handed over once before the first run and
-   * follows the preference from then on.
+   * 無盡模式由偏好驅動，是跨局設定（住在 `reset()` 之外），開局前交一次即可，之後跟著偏好變。
+   * Endless mode is preference-driven and cross-run (it lives outside `reset()`); handing it over once
+   * before the first run suffices, and it follows the preference from then on.
    */
   session.setEndless(preferences.endless);
 
   /**
-   * 偏好一變就同步兩件事：語系交給 `i18n`（它會通知版面重寫），規則交給 `session`。
-   * A preference change syncs two things: the locale goes to `i18n` (which notifies the layout
-   * rewrite) and the rules go to `session`.
+   * 偏好一變就同步兩件事：語系交給 `i18n`，規則交給 `session`。
+   * A preference change syncs two things: the locale to `i18n` and the rules to `session`.
    */
   const detachPreferences = preferences.subscribe((): void => {
     i18n.setLocale(preferences.locale);
@@ -200,26 +175,23 @@ async function bootstrap(): Promise<void> {
   });
 
   /*
-   * 技能名的語系解析。`GameSession` 刻意不認識語系（見 `SkillCardState.name`），所以
-   * `skills.json` 的逐語系名稱在這裡才被合併進去；技能欄每幀重畫，換語系時名字自然更新。
-   * Locale resolution for skill names. `GameSession` deliberately knows nothing about locales
-   * (see `SkillCardState.name`), so the per-locale names from `skills.json` are folded in here.
-   * The bar redraws every frame, so a locale change updates the names by itself.
+   * 技能名的語系解析：`GameSession` 刻意不認識語系，逐語系名稱在此併入；技能欄每幀重畫，換語系自然更新。
+   * Skill-name locale resolution: `GameSession` deliberately knows no locales, so the per-locale names
+   * are folded in here; the bar redraws each frame, so a locale change updates them by itself.
    */
   const skillNames = new Map(config.skills.skills.map((def) => [def.id, def.names]));
 
   /*
-   * 技能欄。可不可以按完全由 `GameSession` 決定（它才看得到技力與累計消耗），所以這裡
-   * 只需要在按下時把 id 交回去 —— 連「再按一次取消」也是 session 的規則。
-   * The skill bar. Whether a card is pressable is entirely `GameSession`'s call (it is the only
-   * thing that can see SP and cumulative spend), so this only hands the id back on press — even
-   * "press again to cancel" is a session rule.
+   * 技能欄：可不可以按完全由 `GameSession` 決定，這裡只把按下的 id 交回去（含「再按一次取消」）。
+   * The skill bar: whether a card is pressable is entirely `GameSession`'s call, so this only hands
+   * the pressed id back (even "press again to cancel" is a session rule).
    */
   const skillBar = createSkillBar({
     host: hook<HTMLElement>(layout.regions.skill, 'skill-grid'),
     onActivate: (id): void => {
       session.activateSkill(id);
-      /* 立刻反映一次，不必等下一個 frame —— 按下與畫面變化之間不該有一格延遲。 */
+      /* 立刻反映一次，別等下一個 frame —— 按下與畫面變化之間不該有一格延遲。
+         Reflect it immediately rather than waiting for the next frame. */
       skillBar.update(session.skillCards);
       spMeter.update({ value: session.spValue, max: session.spMax });
     },
@@ -229,14 +201,9 @@ async function bootstrap(): Promise<void> {
   skillBar.update(session.skillCards);
 
   /*
-   * 技能選取提示帶：當棄即棄／命運互換啟動時顯示。使用者定案：提示掛在 `.layout` 上、
-   * 與 `main.stage` **同層**（畫布外、舞台下緣與聲明之間），不在畫布內 —— 所以它永遠
-   * 不會蓋住容器，也不會與畫布或聲明重疊（容器底部留白相應減少，見 `container.json`）。
-   * The skill-selection hint strip, shown while Discard! or Fate Swap arms. The user's
-   * decision: the hint mounts on `.layout`, a **sibling** of `main.stage` (outside the
-   * canvas, in the gap between the stage's bottom edge and the notice) — so it never covers
-   * the container and never overlaps the canvas or the notice (the canvas's reserved bottom
-   * band shrinks accordingly, see `container.json`).
+   * 技能選取提示帶：當技能啟動時顯示，掛在 `.layout` 上、與 `main.stage` 同層，所以永不覆蓋畫布或聲明。
+   * The skill-selection hint strip, shown while a skill arms; it mounts on `.layout`, a sibling of
+   * `main.stage`, so it never covers the canvas or the notice.
    */
   const skillHint = createSkillHint({ host: layout.root });
   skillHint.update(session.skillCards);
@@ -246,7 +213,8 @@ async function bootstrap(): Promise<void> {
       nextLevelId: session.upcomingLevelId,
       score: session.score,
       mergedCount: session.mergedCount,
-      /* COMBO 卡：本次投放的合成次數（大數字）＋ 合共得分與倍率（第二行）。 */
+      /* COMBO 卡：本次投放的合成次數（大數字）＋ 合共得分與倍率（第二行）。
+         The COMBO card: this drop's merge count (big) and total score with multiplier (second line). */
       comboCount: session.comboCount,
       comboDropScore: session.dropScore,
       comboMultiplier: session.comboMultiplier,
@@ -255,28 +223,18 @@ async function bootstrap(): Promise<void> {
   };
 
   /**
-   * 這一局開跑時的歷史最高分。結算覆蓋層用它判斷「NEW BEST」：分數現在**邊玩邊記**
-   * （見下面的 frame callback），到結束那一刻 `progress.highScore` 已經包含本局分數，
-   * 不能再拿它跟自己比。
-   * The high score when this run started. The game-over overlay uses it to decide "NEW
-   * BEST": the score is now recorded *while playing* (see the frame callback below), so at
-   * the end `progress.highScore` already contains this run and cannot be compared to itself.
+   * 這一局開跑時的歷史最高分：分數現在邊玩邊記，結束時 `progress.highScore` 已含本局，不能再拿它跟自己比。
+   * The high score when this run started: the score is now recorded live, so by the end
+   * `progress.highScore` already includes this run and cannot be compared to itself.
    */
   let runStartBest = progress.highScore;
 
   /*
-   * 榜單資料層（**伺服器版**）。UI 只依賴 `LeaderboardSource` 介面 —— 換成本機版
-   * （`createLocalLeaderboard`）只改這一段，排行榜彈窗與其餘 UI 都不必改。
-   * 後端定案（使用者，2026-10-12）：**Vercel Functions ＋ 任何一個 Postgres／MySQL**，或是雲函式
-   * ＋ SQLite 的本機開發組合（見 `scripts/dev.ts`）；改的是連線字串，不是程式碼。
-   *
-   * `baseUrl` 留空 ＝ 同源：本機由 Vite 代理 `/api`（`scripts/dev.ts`），正式部署時前後端若不同
-   * 網域，填 `VITE_API_BASE_URL` 即可（伺服器那邊也要設 `ALLOWED_ORIGIN`）。
-   * The leaderboard data layer, **server-backed**. The UI depends only on the `LeaderboardSource`
-   * interface, so switching to the local build (`createLocalLeaderboard`) is a change to this block
-   * alone. `baseUrl` empty means same-origin: locally Vite proxies `/api` (`scripts/dev.ts`), and a
-   * production deploy with the API on another origin sets `VITE_API_BASE_URL` (the server then needs
-   * `ALLOWED_ORIGIN` too).
+   * 榜單資料層（伺服器版）；UI 只依賴 `LeaderboardSource`，換實作只改這一段。`baseUrl` 留空＝同源，
+   * 本機由 Vite 代理 `/api`，跨網域部署填 `VITE_API_BASE_URL`（伺服器另需 `ALLOWED_ORIGIN`）。
+   * The leaderboard data layer (server-backed); the UI depends only on `LeaderboardSource`, so
+   * swapping it changes this block alone. An empty `baseUrl` means same-origin: Vite proxies `/api`
+   * locally, and a cross-origin deploy sets `VITE_API_BASE_URL` (plus `ALLOWED_ORIGIN` server-side).
    */
   const leaderboardSource = createRemoteLeaderboard({
     store: localStore,
@@ -285,34 +243,19 @@ async function bootstrap(): Promise<void> {
   });
 
   /*
-   * 開一局：伺服器版會在這裡鑄一張一次性的憑證，而**憑證的頒發時刻就是這一局的起點** ——
-   * 反作弊靠它判斷宣稱的時長合不合理，所以必須在開局時呼叫，不能等到提交。本機版沒有這一步。
-   * Start a run: the server build mints a one-off token here, and **its issue time is the run's
-   * start** — the anti-cheat uses it to judge the claimed duration, so it has to happen now rather
-   * than at submission. The local build has no such step.
+   * 開一局：伺服器版在此鑄一張一次性憑證，其頒發時刻即為本局起點（反作弊靠它判斷宣稱時長），所以必須開局就呼叫。
+   * Start a run: the server build mints a one-off token here, and its issue time is the run's start
+   * (the anti-cheat's duration check), so it must happen now rather than at submission.
    */
   leaderboardSource.beginRun?.();
 
   /**
-   * 把**目前這一局**的成績併入本機紀錄。每幀呼叫。
-   * Fold the run in progress into the local record. Called every frame.
-   *
-   * 「這一局到底結束了沒有」在這裡完全不重要 —— 紀錄**只升不降**，所以中途記一次、結束再記
-   * 一次、關分頁前又記一次，結果都一樣：留下這台裝置跑過的最佳成績。上一版要逐一處理的五個
-   * 「記錄出口」（自然結束、重新開始、關分頁、切到背景、按儲存）因此收斂成這一條路。
-   * Whether the run is over does not matter here: the record is **monotonic**, so recording
-   * mid-run, at the end, and again on the way out all land on the same numbers — the best this
-   * device has produced. The five separate "recording exits" of the previous design (a natural
-   * game over, a restart, the page closing, the page being backgrounded, save being pressed)
-   * collapse into this one path.
-   *
-   * 規則總開關一開，這裡整個短路（使用者定案）：「開啟期間的成績一律不記入排行榜」是總開關的
-   * 定義。閘門必須在**這一條**唯一的寫入路徑上，而不是散在每個呼叫點各自檢查 —— 而且它只能
-   * 在這裡，因為本機紀錄就是**要上載的那一筆**，閘門放在更後面等於沒擋。
-   * With the master rule switch on this short-circuits entirely (the user's decision): "nothing is
-   * recorded while it is on" is what the switch means. The gate belongs on this one write path
-   * rather than being repeated at each call site — and it can only be here, because the local
-   * record is **the thing that gets uploaded**; a gate any later would be no gate at all.
+   * 把目前這一局的成績併入本機紀錄，每幀呼叫：紀錄只升不降，所以中途、結束、離開前各記一次結果都相同。
+   * 規則總開關一開就整個短路（「開啟期間不記入排行榜」）—— 閘門必須在這唯一的寫入路徑上，因為本機紀錄就是要上載的那一筆。
+   * Fold the run in progress into the local record, called every frame: the record is monotonic, so
+   * recording mid-run, at the end and on the way out all land on the same numbers. With the master
+   * rule switch on this short-circuits entirely ("nothing recorded while it is on") — the gate belongs
+   * on this one write path, since the local record is the thing that gets uploaded.
    */
   const recordRun = (): void => {
     if (preferences.rulesEnabled) return;
@@ -322,67 +265,53 @@ async function bootstrap(): Promise<void> {
       maxCombo: session.maxCombo,
       merges: session.mergedCount,
       /*
-       * 這一局**累計投放**了幾顆。伺服器的合理性檢查拿它當上界推導的基準（「合成數 ≤ 投放數」），
-       * 所以送的必須是投入量（`totalDrops`）而不是場上顆數（`dropCount`）—— 後者會被合成與回收
-       * 減少，一局玩久一點就會變成「合成 60 次但只投了 12 顆」而被退。
-       * How many drops **this run** made. The server's rationality check derives its bounds from it
-       * ("merges ≤ drops"), so what is sent has to be the input (`totalDrops`) and not the live body
-       * count (`dropCount`) — the latter is lowered by merging and recycling, and a longer run would
-       * read as "60 merges but only 12 drops" and be rejected.
+       * 這一局**累計投放**了幾顆：伺服器的合理性檢查拿它當上界（合成數 ≤ 投放數），
+       * 所以送的是投入量 `totalDrops` 而非場上顆數 `dropCount`（後者會被合成與回收減少）。
+       * How many drops **this run** made: the server's rationality check uses it as the upper bound
+       * ("merges ≤ drops"), so `totalDrops` is sent rather than the live body count `dropCount`, which
+       * merging and recycling lower.
        */
       drops: session.totalDrops,
       /*
-       * 時長跟著分數走（見 `LeaderboardEntry.durationMs`）：這裡每幀都在記，所以傳的是「目前為
-       * 止的時間」，最後留下的自然是**創下最高分那一刻**的時間。
-       * The duration follows the score (see `LeaderboardEntry.durationMs`): this records every
-       * frame, so what it passes is "the time so far", and what survives is the time at the moment
-       * the best score was reached.
+       * 時長跟著分數走（見 `LeaderboardEntry.durationMs`）：每幀都在記，留下的自然是創下最高分那一刻的時間。
+       * The duration follows the score (see `LeaderboardEntry.durationMs`); recording every frame
+       * leaves the time at which the best score was reached.
        */
       durationMs: session.elapsed,
     });
   };
 
   /**
-   * 上載：把本機紀錄推上排行榜。未同意分享、或沒有未上載的更新時什麼都不做。
-   * Upload: push the local record onto the board. Does nothing without consent, or with nothing
-   * pending.
-   *
-   * 呼叫的時機就是使用者定案的那幾個：該局結束、按重新開始、關分頁／切到背景、以及**下次回
-   * 來時**（下面那一次）。同意的那一刻由 `setSharing(true)` 自己處理 —— 玩家同意之後不必再手動
-   * 按任何東西。
-   * The call sites are exactly the ones the user named: the end of a run, a restart, the page
-   * being closed or backgrounded, and the next visit (the call just below). The moment of consent
-   * is handled by `setSharing(true)` itself, so a player who has agreed never presses anything.
+   * 上載：把本機紀錄推上排行榜；未同意分享、或沒有未上載的更新時什麼都不做。
+   * 呼叫時機：該局結束、重新開始、關分頁／切到背景，以及下次回來時。
+   * Upload: push the local record onto the board; does nothing without consent or with nothing
+   * pending. Call sites: the run's end, a restart, page close/backgrounding, and the next visit.
    */
   const syncRun = (): void => {
     leaderboardSource.sync();
   };
 
   /*
-   * 下次回來：上一次離開之後如果有刷新過（`revision` 領先 `uploaded`），在這裡補一次上載。
-   * 少了這一步，「離線期間刷新的成績」要等到再玩一局才會上榜。
-   * Next visit: if anything improved since the last upload, send it now. Without this, a record
-   * improved offline would sit there until the next run ended.
+   * 下次回來：上次離開後若有刷新（`revision` 領先 `uploaded`），在這裡補一次上載。
+   * Next visit: if anything improved since the last upload (`revision` ahead of `uploaded`), send it now.
    */
   syncRun();
 
   /**
-   * 重設進行中的一局。結算覆蓋層的「再玩一次」與工具列的重新開始鍵共用這一條路，
-   * 兩邊的行為（包括 BEST TRY 的基準點）才不會各養一份。
-   * Reset the run in progress. The overlay's "play again" and the toolbar's restart share
-   * this one path so both behaviours (including the BEST TRY baseline) stay identical.
+   * 重設進行中的一局：結算覆蓋層的「再玩一次」與工具列的重新開始共用這一條路。
+   * Reset the run in progress: the overlay's "play again" and the toolbar's restart share this path.
    */
   const restartRun = (): void => {
-    /* 先記再上載，最後才重設：`reset()` 會把這一局的成績清掉。 */
+    /* 先記再上載，最後才重設：`reset()` 會把這一局的成績清掉。
+       Record, upload, then reset — `reset()` clears this run's numbers. */
     recordRun();
     syncRun();
     session.reset();
     /*
-     * 新的一局要**重新鑄一張憑證**（見 `LeaderboardSource.beginRun`）。順序在 `syncRun()` 之後：
+     * 新的一局要重新鑄一張憑證（見 `LeaderboardSource.beginRun`），順序在 `syncRun()` 之後：
      * 上一局的提交需要上一局的憑證，而 `beginRun()` 會把「這一局的數字」清空。
-     * A new run **mints a fresh token** (see `LeaderboardSource.beginRun`). It comes after
-     * `syncRun()`: the previous run's submission needs the previous token, and `beginRun()` clears
-     * "this run's numbers".
+     * A new run mints a fresh token (see `LeaderboardSource.beginRun`), after `syncRun()`: the
+     * previous run's submission needs the previous token, and `beginRun()` clears this run's numbers.
      */
     leaderboardSource.beginRun?.();
     shownGameOver = false;
@@ -393,13 +322,10 @@ async function bootstrap(): Promise<void> {
   };
 
   /*
-   * 「這一局還沒結束就要走了」的兩個出口：分頁被關掉／切走。`pagehide` 涵蓋關閉、重新載入
-   * 與前後頁導覽；`visibilitychange → hidden` 涵蓋切到背景（手機切 app、切分頁）。兩者都只
-   * 是上載，所以之後玩家回來繼續玩、成績真的刷新時，下一次上載會把新的數字送出去。
-   * The two exits for "leaving before the run is over": the page closing or going away.
-   * `pagehide` covers close, reload and navigation; `visibilitychange → hidden` covers being
-   * backgrounded (app switch on mobile, tab switch). Both merely upload, so if the player comes
-   * back and beats the record, the next upload carries the new numbers.
+   * 「這一局還沒結束就要走了」的兩個出口：`pagehide` 涵蓋關閉、重新載入與導覽；
+   * `visibilitychange → hidden` 涵蓋切到背景（手機切 app、切分頁）。
+   * The two exits for "leaving before the run is over": `pagehide` covers close, reload and
+   * navigation; `visibilitychange → hidden` covers being backgrounded.
    */
   window.addEventListener('pagehide', syncRun);
   document.addEventListener('visibilitychange', (): void => {
@@ -407,9 +333,8 @@ async function bootstrap(): Promise<void> {
   });
 
   /**
-   * 技力條與技能欄每幀同步。兩個元件都只在值真的變了才動 DOM，所以這樣做是便宜的。
-   * The meter and the bar sync every frame; both only touch the DOM on a real change, so this
-   * stays cheap.
+   * 技力條與技能欄每幀同步；兩者只在值真的變了才動 DOM，所以這樣做是便宜的。
+   * The meter and the bar sync every frame; both only touch the DOM on a real change, so it stays cheap.
    */
   const updateSkills = (): void => {
     spMeter.update({ value: session.spValue, max: session.spMax });
@@ -418,10 +343,8 @@ async function bootstrap(): Promise<void> {
   };
 
   /*
-   * 結算覆蓋層。`shownGameOver` 讓它在同一局只彈一次 —— `isOver` 一旦成立就會一直是
-   * 真，少了這個旗標會每一幀都重設焦點與重播「新紀錄」。
-   * The overlay fires once per run: `isOver` stays true, so without the flag it would refocus
-   * and re-announce a new best every frame.
+   * 結算覆蓋層：`shownGameOver` 讓它在同一局只彈一次 —— `isOver` 一旦成立就會一直是真。
+   * The overlay fires once per run: `shownGameOver` guards it, since `isOver` stays true once set.
    */
   let shownGameOver = false;
   gameOver = createGameOver({

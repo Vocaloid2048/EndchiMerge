@@ -1,22 +1,11 @@
 /**
- * 極簡 DOM 建構工具。
- * Minimal DOM construction helpers.
- *
- * `ui/` 底下的模組不引入任何框架（agent-readme §0.2 的依賴方向與體積考量），
- * 這支把重複的 `document.createElement` + `className` + `textContent` 樣板收斂成
- * 兩個函式，避免十幾個模組各寫一份。
- * Modules under `ui/` use no framework, so these two helpers absorb the repetitive
- * create-element/assign-class boilerplate that would otherwise be copy-pasted into
- * every UI module.
+ * 極簡 DOM 建構工具：`ui/` 底下不引入框架，這兩個函式收斂重複的建立元素樣板。
+ * Minimal DOM construction helpers used by the framework-free `ui/` modules.
  */
 
 /**
  * 建立一個元素。
- * Create one element.
- *
- * @param tag 標籤名，例如 `'canvas'` / Tag name, e.g. `'canvas'`.
- * @param className 選填的 class 字串 / Optional class string.
- * @param text 選填的文字內容 / Optional text content.
+ * Creates one element.
  */
 export function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -29,7 +18,10 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-/** 依序附加多個子節點或字串。 */
+/**
+ * 依序附加多個子節點或字串。
+ * Appends several child nodes or strings in order.
+ */
 export function appendChildren(parent: HTMLElement, ...children: readonly (Node | string)[]): void {
   for (const child of children) {
     parent.append(typeof child === 'string' ? document.createTextNode(child) : child);
@@ -37,12 +29,8 @@ export function appendChildren(parent: HTMLElement, ...children: readonly (Node 
 }
 
 /**
- * 在容器內依 `data-hook` 找一個子元素。
- * Find a descendant by its `data-hook` value.
- *
- * 用 data-hook 而非 class：class 會被樣式調整而改名，hook 只為了程式取用而存在，
- * 兩者混用會讓「改個顏色」變成「弄壞功能」。
- * Hooks are separate from classes so that restyling never breaks behaviour.
+ * 在容器內依 `data-hook` 找一個子元素；找不到就丟錯。
+ * Finds a descendant by its `data-hook` value, throwing when none is found.
  */
 export function hook<T extends HTMLElement = HTMLElement>(root: ParentNode, name: string): T {
   const found = root.querySelector<T>(`[data-hook="${name}"]`);

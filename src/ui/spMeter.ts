@@ -1,32 +1,28 @@
 /**
- * 技力條。
- * The SP meter.
- *
- * 設計稿（`1408:2301` / `1408:2304` / `1408:2306`）畫的是**三顆** 120×16 的膠囊，而不是
- * 一條長條。三條不是裝飾：`skills.json` 的 `sp.max` 剛好是 3.0，也就是「**一條代表一點
- * 技力**」。因此這裡的段數跟著 `sp.max` 走，寫死三條會在 D12 把上限改成 5 的那天安靜地
- * 少畫兩格。
- * The mock draws **three** 120×16 pills rather than one bar. That is not decoration:
- * `skills.json` sets `sp.max` to 3.0, so **one pill is one point of SP**. The segment count
- * therefore follows `sp.max`; hard-coding three would silently under-draw the day D12 raises
- * the ceiling to 5.
- *
- * 只有真的變了才碰 DOM —— 這個模組之後會每幀被呼叫（M5 的技力會隨投放成長）。
- * The DOM is touched only on a real change, because M5 will call this every frame as SP
- * accrues.
+ * 技力條：一條代表一點技力，段數跟著 `sp.max` 走；只在真的變了才碰 DOM。
+ * The SP meter: one pill per SP point, the segment count following `sp.max`; the DOM is touched only on a real change.
  */
 
 import { el } from './dom';
 
 export interface SpMeterState {
-  /** 目前技力值，可為小數（部分填充的段）。 */
+  /**
+   * 目前技力值，可為小數（部分填充的段）。
+   * The current SP, possibly fractional (a partially filled pill).
+   */
   value: number;
-  /** 技力上限；決定段數。 */
+  /**
+   * 技力上限；決定段數。
+   * The SP cap; it fixes the segment count.
+   */
   max: number;
 }
 
 export interface SpMeter {
-  /** 段數，等於 `ceil(max)`。 */
+  /**
+   * 段數，等於 `ceil(max)`。
+   * The segment count, `ceil(max)`.
+   */
   readonly segments: number;
   update(state: SpMeterState): void;
   destroy(): void;
@@ -37,7 +33,10 @@ export function createSpMeter(host: HTMLElement): SpMeter {
   let fills: HTMLElement[] = [];
   let lastValue = Number.NaN;
 
-  /** 依 max 重建段數。段數沒變就整批重用，避免每幀重建節點。 */
+  /**
+   * 依 max 重建段數；段數沒變就整批重用，避免每幀重建節點。
+   * Rebuilds the segments for a new max; unchanged counts reuse the batch instead of rebuilding nodes every frame.
+   */
   function ensureSegments(count: number): void {
     if (count === segments) return;
 
@@ -65,9 +64,8 @@ export function createSpMeter(host: HTMLElement): SpMeter {
 
     for (let index = 0; index < fills.length; index += 1) {
       /*
-       * 第 i 段填 `value - i` 的比例，夾在 0..1。這樣 1.5 點技力會畫成一條滿、一條半。
-       * Segment i is filled by `value - i`, clamped, so 1.5 SP reads as one full pill and
-       * one half pill.
+       * 第 i 段填 `value - i` 的比例，夾在 0..1；1.5 點技力畫成一條滿、一條半。
+       * Segment i is filled by `value - i`, clamped, so 1.5 SP reads as one full pill and one half pill.
        */
       const ratio = Math.max(0, Math.min(1, state.value - index));
       fills[index]?.style.setProperty('width', `${String(ratio * 100)}%`);

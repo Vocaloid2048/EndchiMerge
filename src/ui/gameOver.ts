@@ -1,17 +1,6 @@
 /**
- * 結算覆蓋層。
- * The end-of-run overlay.
- *
- * 一局的結束（溢位逾時）需要一個明確的出口：告訴玩家這一局拿到多少、並給一個立刻再來
- * 一次的按鈕。少了它，`GameSession.reset()` 就沒有 UI 入口，玩家只能重新整理頁面。
- * A run's end (overflow timed out) needs a clear exit: it tells the player what they scored
- * and offers an immediate restart. Without it `GameSession.reset()` has no UI entry and the
- * player's only option is reloading the page.
- *
- * 這一支**只呈現結果**：分數由呼叫端算好（`GameSession.score` / `mergedCount` /
- * `ProgressStore.recordScore()`），覆蓋層不自己讀遊戲狀態。
- * This module only presents results: the caller computes them, and the overlay never reads
- * game state itself.
+ * 結算覆蓋層：一局結束時顯示分數、合成次數與最高分，並提供立即再玩一次。
+ * The end-of-run overlay: shows score, merges and best, and offers an immediate restart in-place.
  */
 
 import { i18nAriaLabel, i18nText, type MessageKey } from '../i18n';
@@ -20,27 +9,34 @@ import { appendChildren, el } from './dom';
 export interface GameOverSummary {
   score: number;
   merged: number;
-  /** 更新後的歷史最高分。 */
   best: number;
   /** 這一局是否刷新了最高分；決定要不要顯示「NEW BEST」。 */
   isNewBest: boolean;
 }
 
 export interface GameOverView {
-  /** 顯示覆蓋層並填入結果。 */
+  /**
+   * 顯示覆蓋層並填入結果。
+   * Shows the overlay and fills in the results.
+   */
   show(summary: GameOverSummary): void;
   hide(): void;
   readonly visible: boolean;
 }
 
 export interface GameOverOptions {
-  /** 掛載點；通常是 `layout.root`（同時也是縮放畫布）。 */
+  /**
+   * 掛載點；通常是 `layout.root`（同時也是縮放畫布）。
+   * The mount point, usually `layout.root` (which is also the scaled canvas).
+   */
   host: HTMLElement;
-  /** 玩家按下「再玩一次」時呼叫。 */
   onRestart: () => void;
 }
 
-/** 一格統計（標籤 ＋ 數值）。標籤收的是**鍵**，與 HUD 那兩列共用同一組 `label.*`。 */
+/**
+ * 一格統計（標籤 ＋ 數值）。標籤收的是**鍵**，與 HUD 那兩列共用同一組 `label.*`。
+ * One stat cell (term + value). The label is a **key**, shared with the HUD's `label.*` rows.
+ */
 function statRow(labelKey: MessageKey): { root: HTMLElement; value: HTMLElement } {
   const root = el('div', 'game-over__stat');
   const value = el('dd', 'game-over__stat-value', '0');
@@ -65,16 +61,6 @@ export function createGameOver(options: GameOverOptions): GameOverView {
   badge.hidden = true;
 
   const score = statRow('label.score');
-  /*
-   * 這一局的時長**不在結算卡上**（使用者定案）：那個數字只在排行榜上以 `HH:mm:ss` 出現。
-   * 這裡原本在分數與合成次數之間插了一格時長，移除之後三格讀起來仍然成句 ——「拿了幾分、
-   * 合成幾次、最高分多少」—— 而且不必再決定「一局沒上榜時那個時間要跟誰比」。
-   * The run's duration is deliberately **not on the game-over card** (the user's decision): that
-   * number appears only on the leaderboard, as `HH:mm:ss`. A duration cell used to sit between the
-   * score and the merge count; without it the three remaining cells still read as a sentence —
-   * "scored X, merged Y times, best is Z" — and there is no longer a question of what the time on a
-   * run that never reached the board is supposed to be compared against.
-   */
   const merged = statRow('label.merged');
   const best = statRow('label.best');
 
@@ -95,7 +81,8 @@ export function createGameOver(options: GameOverOptions): GameOverView {
   options.host.append(root);
 
   restart.addEventListener('click', (): void => {
-    /* 先收起覆蓋層再重設：反過來的話玩家會看到一幀疊著舊分數的畫面。 */
+    /* 先收起覆蓋層再重設，否則玩家會看到一幀疊著舊分數的畫面。 */
+    /* Hide the overlay before resetting, or a frame shows the old score on top. */
     view.hide();
     options.onRestart();
   });
@@ -112,6 +99,7 @@ export function createGameOver(options: GameOverOptions): GameOverView {
       badge.hidden = !summary.isNewBest;
       root.hidden = false;
       /* 焦點移到按鈕，鍵盤使用者不必先用 Tab 找出口。 */
+      /* Focus the button so a keyboard user need not Tab around to find the way out. */
       restart.focus();
     },
 
