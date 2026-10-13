@@ -6,12 +6,6 @@
 
 import { dialectFromUrl, type DialectName } from './db/dialect.js';
 
-/**
- * IP 要怎麼落庫。
- * How the IP is stored.
- */
-export type IpStorageMode = 'raw' | 'truncated' | 'hashed';
-
 export interface Config {
   readonly databaseUrl: string;
   /**
@@ -21,13 +15,6 @@ export interface Config {
    */
   readonly dbDialect: DialectName;
   readonly runTokenSecret: string;
-  readonly ipStorage: IpStorageMode;
-  /**
-   * 雜湊 IP 用的秘密，與 `RUN_TOKEN_SECRET` 分開（兩者輪替時機不同）；未設定時退回 `RUN_TOKEN_SECRET`。
-   * The secret for hashing IPs, kept separate from `RUN_TOKEN_SECRET` (they rotate on different
-   * schedules); falls back to `RUN_TOKEN_SECRET`.
-   */
-  readonly ipHashSecret: string;
   /** 允許的跨來源來源；空陣列 ＝ 不發 CORS 標頭（只接受同源）。
    * Allowed cross-origin origins; an empty array means no CORS headers (same-origin only). */
   readonly allowedOrigins: readonly string[];
@@ -69,11 +56,6 @@ function readCount(raw: string | undefined, fallback: number, min: number): numb
   if (!Number.isFinite(value)) return fallback;
 
   return Math.max(min, Math.trunc(value));
-}
-
-function readIpStorage(raw: string | undefined): IpStorageMode {
-  const value = (raw ?? '').trim().toLowerCase();
-  return value === 'raw' || value === 'hashed' ? value : 'truncated';
 }
 
 /**
@@ -118,8 +100,6 @@ export function readConfig(env: Readonly<Record<string, string | undefined>>): C
       databaseUrl,
       dbDialect: readDialect(env['DB_DIALECT'], databaseUrl),
       runTokenSecret,
-      ipStorage: readIpStorage(env['IP_STORAGE_MODE']),
-      ipHashSecret: (env['IP_HASH_SECRET'] ?? '').trim() || runTokenSecret,
       allowedOrigins,
       submissionsPerHour: readCount(
         env['SUBMISSIONS_PER_HOUR'],

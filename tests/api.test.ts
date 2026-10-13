@@ -37,7 +37,6 @@ import {
   checkRationality,
   maxDropsFor,
 } from '../api/_lib/limits';
-import { buildRequestRow, clientIp, storeIp } from '../api/_lib/requests';
 import { MemoryStore, type Store } from '../api/_lib/store';
 import { isValidDeviceId, signRunToken, tokenFingerprint, verifyRunToken } from '../api/_lib/tokens';
 
@@ -54,8 +53,6 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     databaseUrl: 'postgresql://user:pass@host/db',
     dbDialect: 'postgres',
     runTokenSecret: SECRET,
-    ipStorage: 'truncated',
-    ipHashSecret: 'h'.repeat(48),
     allowedOrigins: [],
     submissionsPerHour: 20,
     runTokenTtlMs: MAX_RUN_MS + RUN_TOKEN_SLACK_MS,
@@ -94,7 +91,6 @@ function request(
     query: new URLSearchParams(options.query ?? ''),
     headers: options.headers ?? {},
     body,
-    remoteAddress: '203.0.113.9',
   };
 }
 
@@ -204,23 +200,19 @@ describe('readConfig — 環境變數 / environment variables', () => {
     const result = readConfig({ DATABASE_URL: 'postgres://x', RUN_TOKEN_SECRET: SECRET });
     if (!result.ok) throw new Error('expected a valid config');
 
-    expect(result.config.ipStorage).toBe('truncated');
     expect(result.config.allowedOrigins).toEqual([]);
     expect(result.config.submissionsPerHour).toBe(20);
-    expect(result.config.ipHashSecret).toBe(SECRET);
   });
 
-  it('parses an origin list and ignores an unknown storage mode', () => {
+  it('parses an origin list', () => {
     const result = readConfig({
       DATABASE_URL: 'postgres://x',
       RUN_TOKEN_SECRET: SECRET,
       ALLOWED_ORIGIN: 'https://a.example , https://b.example',
-      IP_STORAGE_MODE: 'banana',
     });
     if (!result.ok) throw new Error('expected a valid config');
 
     expect(result.config.allowedOrigins).toEqual(['https://a.example', 'https://b.example']);
-    expect(result.config.ipStorage).toBe('truncated');
   });
 });
 
@@ -378,66 +370,46 @@ describe('run tokens — T2', () => {
 
 /* ── 接收紀錄 ─────────────────────────────────────────────────────────────── */
 
-describe('requests — 位址與標頭 / address and headers', () => {
-  it('takes the first forwarded address, since the rest are proxies', () => {
-    expect(clientIp({ 'x-forwarded-for': '198.51.100.7, 70.41.3.18' }, '10.0.0.1')).toBe('198.51.100.7');
-    expect(clientIp({ 'x-real-ip': '198.51.100.9' }, '10.0.0.1')).toBe('198.51.100.9');
-    expect(clientIp({}, '10.0.0.1')).toBe('10.0.0.1');
-  });
-
-  it('normalises ports and IPv4-mapped IPv6, so one source stays one source', () => {
-    expect(clientIp({ 'x-forwarded-for': '[2001:db8::1]:443' }, '')).toBe('2001:db8::1');
-    expect(clientIp({ 'x-forwarded-for': '198.51.100.7:51234' }, '')).toBe('198.51.100.7');
-    expect(clientIp({ 'x-forwarded-for': '::ffff:198.51.100.7' }, '')).toBe('198.51.100.7');
-  });
-
-  it('stores the address the way IP_STORAGE_MODE says', () => {
-    expect(storeIp('198.51.100.7', 'raw', SECRET)).toBe('198.51.100.7');
-    expect(storeIp('198.51.100.7', 'truncated', SECRET)).toBe('198.51.100.0');
-    expect(storeIp('2001:db8:1234:5678::1', 'truncated', SECRET)).toBe('2001:db8:1234::');
-    expect(storeIp('', 'raw', SECRET)).toBeNull();
-
-    const hashed = storeIp('198.51.100.7', 'hashed', SECRET);
-    expect(hashed).toMatch(/^h:[0-9a-f]{32}$/u);
-    /* 同一組輸入穩定、不同秘密不同值：可以對照，但換了秘密就推不回去。 */
-    expect(storeIp('198.51.100.7', 'hashed', SECRET)).toBe(hashed);
-    expect(storeIp('198.51.100.7', 'hashed', 'other'.repeat(10))).not.toBe(hashed);
-  });
-
+describe('requests — 接收紀錄不收個人資料 / the receive log holds no personal data', () => {
   /*
-   * 這一條是資安上的硬性要求：`cookie` 與 `authorization` **永遠不能**落庫。所以測試用黑名單的
-   * 方式反過來檢查 —— 送一組含憑證的標頭進去，然後確認輸出裡沒有任何一個鍵是憑證。
-   * This one is a hard security requirement: `cookie` and `authorization` must **never** be stored. The
-   * test therefore checks the blacklist in reverse — send a set of headers carrying credentials and
-   * assert that no credential key survives into the output.
+   * 私隱硬規則：IP 與標頭屬個人資料，2026-10-13 起一律不落庫。這一條用黑名單的方式反過來檢查 ——
+   * 送一份帶憑證、代理位址與地理標頭的請求，然後確認落庫的那一列連它們的痕跡都沒有。
+   * Hard privacy rule: IPs and headers are personal data and are never persisted (since
+   * 2026-10-13). The test checks the blacklist in reverse — send a request carrying credentials, a
+   * proxy address and geo headers, then assert the persisted row shows no trace of any of them.
    */
-  it('never stores credentials', () => {
-    const row = buildRequestRow({
-      method: 'POST',
-      path: '/api/score',
-      status: 200,
-      deviceId: DEVICE,
-      runId: null,
-      ip: '198.51.100.7',
-      headers: {
-        'user-agent': 'vitest',
-        'accept-language': 'zh-HK',
-        cookie: 'session=super-secret',
-        authorization: 'Bearer super-secret',
-        'x-api-key': 'super-secret',
-      },
-      ipStorage: 'truncated',
-      ipHashSecret: SECRET,
-    });
+  it('stores no address and no header, not even a credential', async () => {
+    const { deps, store } = makeDeps();
+    setDependencies(deps);
 
-    expect(row.userAgent).toBe('vitest');
-    expect(row.acceptLanguage).toBe('zh-HK');
-    expect(row.clientIp).toBe('198.51.100.0');
+    /*
+     * 走**完整的外殼**（`endpoint`）：接收紀錄是外殼寫的，不是處理器 —— 直接呼叫處理器不會有那一列。
+     * Through the **full shell** (`endpoint`): the receive log is the shell's job, not the handler's —
+     * calling the handler directly writes no row.
+     */
+    const response = await endpoint(handleRunStart)(
+      request('POST', { deviceId: DEVICE, version: VERSION }, {
+        headers: {
+          'user-agent': 'vitest',
+          'x-forwarded-for': '198.51.100.7, 70.41.3.18',
+          'x-vercel-ip-city': 'Hong Kong',
+          cookie: 'session=super-secret',
+          authorization: 'Bearer super-secret',
+        },
+      }),
+    );
+    expect(response.status).toBe(200);
+
+    const row = store.lastRequest;
+    expect(row).toMatchObject({ method: 'POST', path: '/api/test' });
 
     const stored = JSON.stringify(row);
+    expect(stored).not.toContain('198.51.100.7');
     expect(stored).not.toContain('super-secret');
-    expect(Object.keys(row.headers)).not.toContain('cookie');
-    expect(Object.keys(row.headers)).not.toContain('authorization');
+    expect(stored).not.toContain('Hong Kong');
+    expect(stored).not.toContain('user-agent');
+
+    setDependencies(null);
   });
 });
 
@@ -902,13 +874,13 @@ describe('runtime — 接收紀錄與 CORS / the receive log and CORS', () => {
 
     expect(response.status).toBe(400);
     expect(store.requestCount).toBe(1);
+    /* 收到的標頭（`user-agent`／`origin`）只餵 CORS 與處理器，**不落庫** —— 見 `runtime.logRequest`。 */
     expect(store.lastRequest).toMatchObject({
       method: 'POST',
       status: 400,
-      clientIp: '203.0.113.0',
-      userAgent: 'vitest',
-      origin: 'https://game.example',
     });
+    expect(store.lastRequest).not.toHaveProperty('clientIp');
+    expect(store.lastRequest).not.toHaveProperty('userAgent');
 
     setDependencies(null);
   });

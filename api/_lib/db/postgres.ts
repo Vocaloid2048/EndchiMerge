@@ -188,8 +188,8 @@ export const postgresDialect: Dialect = {
    */
   insertScore: () => `insert into scores (
        run_id, device_id, display_name, score, duration_ms, merges, drops, max_combo,
-       version, verified, rejected, client_ip, created_at
-     ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::timestamptz)
+       version, verified, rejected, created_at
+     ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::timestamptz)
      on conflict (run_id) do nothing
      returning run_id`,
 
@@ -242,7 +242,6 @@ export const postgresDialect: Dialect = {
        version      text        not null default '',
        verified     boolean     not null default true,
        rejected     text,
-       client_ip    text,
        created_at   timestamptz not null default now()
      )`,
     `create index if not exists scores_device_idx on scores (device_id, created_at desc)`,
@@ -263,19 +262,23 @@ export const postgresDialect: Dialect = {
        path            text        not null,
        status          integer     not null,
        device_id       text,
-       run_id          uuid,
-       client_ip       text,
-       user_agent      text,
-       accept_language text,
-       origin          text,
-       referer         text,
-       country         text,
-       region          text,
-       city            text,
-       headers         jsonb       not null default '{}'::jsonb
+       run_id          uuid
      )`,
     `create index if not exists requests_received_idx on requests (received_at desc)`,
     `create index if not exists requests_device_idx on requests (device_id, received_at desc)`,
-    `create index if not exists requests_ip_idx on requests (client_ip, received_at desc)`,
+
+    /* ⚠️ 私隱：IP 與標頭屬個人資料，永不落庫 —— 這些 drop 清掉舊庫的欄位與資料，新庫由 `if exists` 通過；索引依賴 `client_ip`，先刪它。
+     * ⚠️ Privacy: IPs and headers are personal data, never persisted — these drops clear them from an old
+     * database and pass straight through a new one; the index depends on `client_ip`, so it goes first. */
+    `drop index if exists requests_ip_idx`,
+    `alter table requests drop column if exists client_ip, drop column if exists user_agent,
+       drop column if exists accept_language, drop column if exists origin, drop column if exists referer,
+       drop column if exists country, drop column if exists region, drop column if exists city,
+       drop column if exists headers`,
+    `alter table scores drop column if exists client_ip`,
   ],
+
+  /* PG 的「欄位不存在」是 42703；上面的 drop 全走原生 `if exists`，這個成員只是把缺口補齊。
+   * PG's undefined column is 42703; the drops above are all native `if exists`, so this only completes the pattern. */
+  isMissingColumnError: (error) => (error as { code?: unknown } | null)?.code === '42703',
 };

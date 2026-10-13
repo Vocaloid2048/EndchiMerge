@@ -221,8 +221,8 @@ export const mysqlDialect: Dialect = {
    */
   insertScore: () => `insert into scores (
        run_id, device_id, display_name, score, duration_ms, merges, drops, max_combo,
-       version, verified, rejected, client_ip, created_at
-     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       version, verified, rejected, created_at
+     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      on duplicate key update run_id = run_id`,
 
   /*
@@ -283,7 +283,6 @@ export const mysqlDialect: Dialect = {
        \`version\`      varchar(32)  not null default '',
        \`verified\`     tinyint(1)   not null default 1,
        \`rejected\`     varchar(64)  null,
-       \`client_ip\`    varchar(64)  null,
        \`created_at\`   datetime(3)  not null default utc_timestamp(3),
        primary key (\`run_id\`),
        key \`scores_device_idx\` (\`device_id\`, \`created_at\` desc),
@@ -307,19 +306,33 @@ export const mysqlDialect: Dialect = {
        \`status\`          int          not null,
        \`device_id\`       varchar(64)  null,
        \`run_id\`          char(36)     null,
-       \`client_ip\`       varchar(64)  null,
-       \`user_agent\`      varchar(512) null,
-       \`accept_language\` varchar(64)  null,
-       \`origin\`          varchar(255) null,
-       \`referer\`         varchar(255) null,
-       \`country\`         varchar(64)  null,
-       \`region\`          varchar(64)  null,
-       \`city\`            varchar(64)  null,
-       \`headers\`         json         null,
        primary key (\`id\`),
        key \`requests_received_idx\` (\`received_at\` desc),
-       key \`requests_device_idx\` (\`device_id\`, \`received_at\` desc),
-       key \`requests_ip_idx\` (\`client_ip\`, \`received_at\` desc)
+       key \`requests_device_idx\` (\`device_id\`, \`received_at\` desc)
      ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_bin`,
+
+    /* ⚠️ 私隱：IP 與標頭屬個人資料，永不落庫 —— 這些 drop 清掉舊庫的欄位與資料；新庫沒有這些欄位，每條報 1091 後被判為已完成。索引先刪（它以 `client_ip` 開頭）。
+     * ⚠️ Privacy: IPs and headers are personal data, never persisted — these drops clear them from an old
+     * database; a new one raises 1091 per statement and each counts as done. The index goes first. */
+    `drop index \`requests_ip_idx\` on \`requests\``,
+    `alter table \`requests\` drop column \`client_ip\``,
+    `alter table \`requests\` drop column \`user_agent\``,
+    `alter table \`requests\` drop column \`accept_language\``,
+    `alter table \`requests\` drop column \`origin\``,
+    `alter table \`requests\` drop column \`referer\``,
+    `alter table \`requests\` drop column \`country\``,
+    `alter table \`requests\` drop column \`region\``,
+    `alter table \`requests\` drop column \`city\``,
+    `alter table \`requests\` drop column \`headers\``,
+    `alter table \`scores\` drop column \`client_ip\``,
   ],
+
+  /*
+   * MySQL 的「欄位／索引不存在」是 errno 1091（`ER_CANT_DROP_FIELD_OR_KEY`）；mysql2 把它放在 `errno` 與 `code` 兩處，兩處都認。
+   * MySQL's "check that column/key exists" is errno 1091 (`ER_CANT_DROP_FIELD_OR_KEY`); mysql2 carries it in both `errno` and `code`, and both are accepted.
+   */
+  isMissingColumnError: (error) => {
+    const e = error as { code?: unknown; errno?: unknown } | null;
+    return e?.code === 'ER_CANT_DROP_FIELD_OR_KEY' || e?.errno === 1091;
+  },
 };

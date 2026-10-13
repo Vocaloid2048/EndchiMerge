@@ -280,18 +280,8 @@ const api = createServer((req, res) => {
       {
         method: req.method,
         url,
-        /*
-         * 假裝有一個反向代理在前面。轉接頭讀的是 `x-forwarded-for`／`x-real-ip`（見 `fetch.ts`），
-         * 而 Vercel 一定會設前者 —— 少了這一行，接收紀錄裡的 IP 就永遠是空的，而「IP 是空的」正好是
-         * 本機與線上最容易一直沒發現的差異。真正的位址就是 `127.0.0.1`／`::1`，沒有東西可以外洩。
-         * Pretend a reverse proxy is in front. The adapter reads `x-forwarded-for` / `x-real-ip` (see
-         * `fetch.ts`) and Vercel always sets the former — without this line the request log's IP is
-         * always empty, and "the IP is empty" is exactly the local-versus-production difference that
-         * hides longest. The address really is `127.0.0.1` / `::1`, so there is nothing to leak.
-         */
-        headers: { ...req.headers, 'x-forwarded-for': req.socket.remoteAddress ?? '' },
+        headers: { ...req.headers },
         body: await readBody(req),
-        socket: req.socket,
       },
       res,
     );

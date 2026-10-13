@@ -24,9 +24,8 @@ import type { Dialect } from '../api/_lib/db/dialect';
 import { mysqlDialect } from '../api/_lib/db/mysql';
 import { postgresDialect } from '../api/_lib/db/postgres';
 import type { Driver, Row, SqlResult } from '../api/_lib/db/types';
-import type { RequestRow } from '../api/_lib/requests';
 import { SqlStore } from '../api/_lib/sqlStore';
-import type { RankProbe, RunTokenRow, ScoreRow } from '../api/_lib/store';
+import type { RankProbe, RequestRow, RunTokenRow, ScoreRow } from '../api/_lib/store';
 
 const DIALECTS: readonly Dialect[] = [postgresDialect, mysqlDialect];
 
@@ -123,7 +122,6 @@ function scoreRow(overrides: Partial<ScoreRow> = {}): ScoreRow {
     version: '0.1.0',
     verified: true,
     rejected: null,
-    clientIp: null,
     atMs: AT,
     ...overrides,
   };
@@ -136,15 +134,6 @@ function requestRow(): RequestRow {
     status: 200,
     deviceId: 'device-0000-1111',
     runId: null,
-    clientIp: '198.51.100.0',
-    userAgent: 'vitest',
-    acceptLanguage: 'zh-HK',
-    origin: null,
-    referer: null,
-    country: null,
-    region: null,
-    city: null,
-    headers: { 'user-agent': 'vitest' },
   };
 }
 
@@ -260,12 +249,16 @@ describe('SqlStore — 每一條語句的佔位符都要對得上參數 / placeh
   });
 
   /* headers 要以 JSON 綁定：Postgres 少了 `::jsonb` 會把它當成一段文字而寫不進 jsonb 欄位。 */
-  it('binds the headers as JSON on Postgres', async () => {
+  /* 接收紀錄只有五個維運欄位 —— 一個參數都不能多（多了就是在收個人資料）。 */
+  it('binds exactly the five operational fields on a request row', async () => {
     const driver = new RecordingDriver();
     await new SqlStore(driver, postgresDialect).insertRequest(requestRow());
 
-    expect(driver.calls[0]?.sql).toContain('::jsonb');
-    expect(driver.calls[0]?.params).toHaveLength(14);
+    expect(driver.calls[0]?.sql).not.toContain('client_ip');
+    expect(driver.calls[0]?.sql).not.toContain('user_agent');
+    expect(driver.calls[0]?.sql).not.toContain('headers');
+    expect(driver.calls[0]?.params).toHaveLength(5);
+    expect(driver.calls[0]?.params).toEqual(['POST', '/api/score', 200, 'device-0000-1111', null]);
   });
 
   /* 時間要用方言的型別：Postgres 收 ISO 字串，MySQL 收 `Date`。 */

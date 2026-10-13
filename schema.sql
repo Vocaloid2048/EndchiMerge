@@ -83,7 +83,6 @@ create table if not exists scores (
   -- 未通過合理性檢查者仍然寫入（留審計痕跡），但 `verified = false`，榜單一律排除。
   verified     boolean     not null default true,
   rejected     text,
-  client_ip    text,
   created_at   timestamptz not null default now()
 );
 
@@ -111,15 +110,15 @@ create table if not exists run_tokens (
 create index if not exists run_tokens_device_idx on run_tokens (device_id, issued_at desc);
 
 -- ── 接收紀錄 ────────────────────────────────────────────────────────────────
--- 使用者定案：接收記錄時的 IP 與 headers 要另外存進一張專門的表。
--- The user's decision: the IP and headers seen when a record is received go into a table of their
--- own.
+-- 每個請求一列，只記端點維運需要的五個欄位（方法、路徑、狀態、裝置、局號）。
+-- One row per request, with only the five fields operations needs (method, path, status, device, run).
 --
--- **只存白名單標頭。** `cookie` / `authorization` 這類憑證**永不入庫** —— 這張表是為了防濫用
--- 與除錯，不是拿來收集憑證的。IP 的儲存型態由 `IP_STORAGE_MODE` 決定（見 requests.ts）。
--- **Whitelisted headers only.** Credentials such as `cookie` / `authorization` are **never**
--- stored: this table exists for abuse handling and debugging, not for collecting secrets. How the
--- IP is stored is decided by `IP_STORAGE_MODE` (see requests.ts).
+-- ⚠️ 私隱：IP 與標頭屬個人資料，**一律不落庫**。下面的 drop 語句把舊版資料庫的舊欄位（連同舊資料）
+-- 清掉；全新資料庫沒有這些欄位，`if exists` 讓它們原樣通過。`requests_ip_idx` 依賴 `client_ip`，
+-- 先刪它才不會被依賴擋住。
+-- ⚠️ Privacy: IPs and headers are personal data and are **never** persisted. The drop statements below
+-- remove the legacy columns (and the data in them) from old databases; a fresh database has no such
+-- columns and `if exists` lets them pass. `requests_ip_idx` depends on `client_ip`, so it goes first.
 create table if not exists requests (
   id              bigserial primary key,
   received_at     timestamptz not null default now(),
@@ -127,20 +126,15 @@ create table if not exists requests (
   path            text        not null,
   status          integer     not null,
   device_id       text,
-  run_id          uuid,
-  client_ip       text,
-  user_agent      text,
-  accept_language text,
-  origin          text,
-  referer         text,
-  -- Vercel 會在標頭裡附上粗略地理位置；有就順手記下來，沒有就留 null。
-  country         text,
-  region          text,
-  city            text,
-  -- 其餘白名單標頭（見 requests.ts 的 HEADER_WHITELIST）。
-  headers         jsonb       not null default '{}'::jsonb
+  run_id          uuid
 );
 
 create index if not exists requests_received_idx on requests (received_at desc);
 create index if not exists requests_device_idx on requests (device_id, received_at desc);
-create index if not exists requests_ip_idx on requests (client_ip, received_at desc);
+
+drop index if exists requests_ip_idx;
+alter table requests drop column if exists client_ip, drop column if exists user_agent,
+  drop column if exists accept_language, drop column if exists origin, drop column if exists referer,
+  drop column if exists country, drop column if exists region, drop column if exists city,
+  drop column if exists headers;
+alter table scores drop column if exists client_ip;

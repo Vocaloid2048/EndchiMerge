@@ -80,21 +80,29 @@ export function createStore(config: Config): { store: Store; driver: Driver; dia
 }
 
 /**
- * 建表（可重複執行）：每個方言的 `schema()` 只用 `create table if not exists`，可當部署遷移也可當本機開發的第一步。
- * Creates the tables, safe to run repeatedly: every dialect's `schema()` uses only
- * `create table if not exists`, so it serves as both the deploy migration and the local-dev first step.
+ * 建表（可重複執行）：`create … if not exists` 加上清除舊欄位的冪等 drop，可當部署遷移與本機開發的第一步。
+ * Creates the tables, safe to run repeatedly: `create … if not exists` plus idempotent drops of legacy columns.
  *
- * @returns 執行了幾條語句。
- *   The number of statements run.
+ * 每個方言的 drop 靠原生 `if exists` 或 `isMissingColumnError`（見 `Dialect`）；其餘錯誤一律照丟。
+ * A dialect's drops rely on a native `if exists` or on `isMissingColumnError`; any other error is rethrown.
+ *
+ * @returns 實際執行成功的語句數（跳過的不計）。
+ *   The number of statements that actually ran (skips do not count).
  */
 export async function ensureSchema(driver: Driver, dialect: Dialect): Promise<number> {
   const statements = dialect.schema();
+  let applied = 0;
 
   for (const statement of statements) {
-    await driver.query(statement);
+    try {
+      await driver.query(statement);
+      applied += 1;
+    } catch (error) {
+      if (dialect.isMissingColumnError?.(error) !== true) throw error;
+    }
   }
 
-  return statements.length;
+  return applied;
 }
 
 export type { Dialect, DialectName, Driver };

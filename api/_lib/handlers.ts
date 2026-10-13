@@ -291,7 +291,6 @@ export const handleScore: CoreHandler = async (request, deps) => {
     version,
     verified: rationalityVerdict.verified,
     rejected: rationalityVerdict.verified ? null : rationalityVerdict.reason,
-    clientIp: null,
     atMs: now,
   });
 

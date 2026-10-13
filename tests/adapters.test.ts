@@ -34,7 +34,6 @@ const echo: Handler = async (request) =>
     query: Object.fromEntries(request.query),
     headers: request.headers,
     body: request.body,
-    remoteAddress: request.remoteAddress,
   });
 
 interface Echo {
@@ -44,7 +43,6 @@ interface Echo {
   query: Record<string, string>;
   headers: Record<string, string>;
   body: unknown;
-  remoteAddress: string;
 }
 
 /**
@@ -89,7 +87,7 @@ describe('fetch adapter — Web 標準 / the Web standard', () => {
     const response = await createFetchHandler(echo)(
       new Request('https://game.example/api/score?limit=5&deviceId=abc', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.7, 70.41.3.18' },
+        headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ score: 900 }),
       }),
     );
@@ -102,8 +100,6 @@ describe('fetch adapter — Web 標準 / the Web standard', () => {
     expect(body.path).toBe('/api/score');
     expect(body.query).toEqual({ limit: '5', deviceId: 'abc' });
     expect(body.body).toEqual({ score: 900 });
-    /* 取 forwarded 的**第一個** —— 後面的是代理，不是玩家。 */
-    expect(body.remoteAddress).toBe('198.51.100.7');
   });
 
   it('lowercases header names, so one header is not missed in one casing', async () => {
@@ -116,16 +112,6 @@ describe('fetch adapter — Web 標準 / the Web standard', () => {
     expect(headers['user-agent']).toBe('vitest');
     expect(headers['origin']).toBe('https://a.example');
     expect(headers['User-Agent']).toBeUndefined();
-  });
-
-  it('falls back to x-real-ip, then to nothing', async () => {
-    const withRealIp = await createFetchHandler(echo)(
-      new Request('https://game.example/api/x', { headers: { 'x-real-ip': '198.51.100.9' } }),
-    );
-    expect(((await withRealIp.json()) as Echo).remoteAddress).toBe('198.51.100.9');
-
-    const bare = await createFetchHandler(echo)(new Request('https://game.example/api/x'));
-    expect(((await bare.json()) as Echo).remoteAddress).toBe('');
   });
 
   it('treats a body that is not JSON as no body, rather than throwing', async () => {
@@ -190,7 +176,7 @@ describe('EdgeOne handlers — 具名匯出 / the named exports', () => {
     const response = await handlers.onRequestPost({
       request: new Request('https://game.example/api/score', {
         method: 'POST',
-        headers: { 'x-forwarded-for': '203.0.113.9' },
+        headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ score: 1 }),
       }),
     });
@@ -199,7 +185,6 @@ describe('EdgeOne handlers — 具名匯出 / the named exports', () => {
 
     expect(body.method).toBe('POST');
     expect(body.body).toEqual({ score: 1 });
-    expect(body.remoteAddress).toBe('203.0.113.9');
   });
 
   /*
@@ -232,7 +217,6 @@ describe('vercel adapter — Node 的 req／res / Node req and res', () => {
         url: '/api/score?limit=5',
         headers: { 'User-Agent': 'vitest' },
         body: { score: 900 },
-        socket: { remoteAddress: '203.0.113.9' },
       },
       fake.res,
     );
@@ -244,7 +228,6 @@ describe('vercel adapter — Node 的 req／res / Node req and res', () => {
     expect(body.path).toBe('/api/score');
     expect(body.query).toEqual({ limit: '5' });
     expect(body.body).toEqual({ score: 900 });
-    expect(body.remoteAddress).toBe('203.0.113.9');
   });
 
   it('parses a body that arrived as a string', async () => {
@@ -321,8 +304,6 @@ describe('vercelEndpoint — 外殼 ＋ 轉接頭 / the shell plus the adapter',
       databaseUrl: 'postgresql://user:pass@host/db',
       dbDialect: 'postgres',
       runTokenSecret: SECRET,
-      ipStorage: 'truncated',
-      ipHashSecret: 'h'.repeat(48),
       allowedOrigins: [],
       submissionsPerHour: 20,
       runTokenTtlMs: MAX_RUN_MS + RUN_TOKEN_SLACK_MS,

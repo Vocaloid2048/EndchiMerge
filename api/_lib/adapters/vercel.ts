@@ -13,7 +13,6 @@ interface VercelRequestLike {
   readonly url?: string;
   readonly headers: Readonly<Record<string, string | string[] | undefined>>;
   readonly body?: unknown;
-  readonly socket?: { readonly remoteAddress?: string };
 }
 
 interface VercelResponseLike {
@@ -51,7 +50,6 @@ export function createVercelHandler(handler: Handler) {
       query: parseQuery(url),
       headers: normaliseHeaders(req.headers),
       body: coerceBody(req.body),
-      remoteAddress: req.socket?.remoteAddress ?? '',
     };
 
     let response: ApiResponse;

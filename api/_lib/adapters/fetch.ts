@@ -9,22 +9,6 @@ import { coerceBody, fail, normaliseHeaders, type ApiRequest, type ApiResponse, 
 export type FetchHandler = (request: Request) => Promise<Response>;
 
 /**
- * 從請求標頭讀客戶端位址：邊緣平台幾乎都把真實來源放在 `x-forwarded-for` 最左邊；其餘正規化留在 `requests.ts` 的 `clientIp`。
- * Reads the client address from the request headers: edge platforms almost always put the real
- * source in the left-most `x-forwarded-for`; the rest of the normalisation stays in `requests.ts`'s
- * `clientIp`.
- */
-function forwardedAddress(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for');
-  if (forwarded !== null) {
-    const first = forwarded.split(',')[0]?.trim();
-    if (first !== undefined && first !== '') return first;
-  }
-
-  return request.headers.get('x-real-ip')?.trim() ?? '';
-}
-
-/**
  * 204／304 不得帶主體。
  * Statuses 204 and 304 must not carry a body.
  */
@@ -53,7 +37,6 @@ export function createFetchHandler(handler: Handler): FetchHandler {
       query: url.searchParams,
       headers: normaliseHeaders(Object.fromEntries(request.headers) as Record<string, string>),
       body: coerceBody(raw),
-      remoteAddress: forwardedAddress(request),
     };
 
     let response: ApiResponse;

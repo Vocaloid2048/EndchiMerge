@@ -5,7 +5,21 @@
  */
 
 import type { BoardCategory } from './db/dialect.js';
-import type { RequestRow } from './requests.js';
+
+/**
+ * `requests` 的一列（接收日誌）。
+ * One row of `requests` (the receive log).
+ *
+ * ⚠️ 私隱：**只有**端點維運需要的五個欄位 —— IP 與標頭屬個人資料，永不落庫。
+ * ⚠️ Privacy: **only** the five fields operations needs — IPs and headers are personal data and are never persisted.
+ */
+export interface RequestRow {
+  readonly method: string;
+  readonly path: string;
+  readonly status: number;
+  readonly deviceId: string | null;
+  readonly runId: string | null;
+}
 
 /**
  * `run_tokens` 的一列。
@@ -36,7 +50,6 @@ export interface ScoreRow {
   readonly version: string;
   readonly verified: boolean;
   readonly rejected: string | null;
-  readonly clientIp: string | null;
   readonly atMs: number;
 }
 

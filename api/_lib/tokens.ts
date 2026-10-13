@@ -79,15 +79,6 @@ export function tokenFingerprint(token: string): string {
 }
 
 /**
- * 帶秘密的指紋（給 IP 用）：IPv4 只有 43 億個值，純雜湊可被暴力反推，加了秘密就推不回去。
- * A keyed fingerprint (for IPs): IPv4 has only 4.3 billion values, so a plain hash is
- * brute-forceable — with a secret, it cannot be inverted.
- */
-export function keyedFingerprint(secret: string, value: string): string {
-  return createHmac('sha256', secret).update(value).digest('hex');
-}
-
-/**
  * 鑄一個新的局號。
  * Mints a new run id.
  */

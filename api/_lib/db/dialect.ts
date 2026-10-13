@@ -96,8 +96,22 @@ export interface Dialect {
   /**
    * 建表語句；`ensureSchema` 會逐條執行，所以每一條都必須**可重複執行**。
    * Schema statements; `ensureSchema` runs them one by one, so each must be **re-runnable**.
+   *
+   * 除了 `create … if not exists`，也可以放「清除舊欄位」的 drop：方言沒有 `drop column if exists` 時
+   * （MySQL／SQLite）靠 `isMissingColumnError` 達成冪等。
+   * Beyond `create … if not exists`, statements that drop legacy columns are allowed; where a dialect
+   * has no `drop column if exists` (MySQL / SQLite), `isMissingColumnError` supplies the idempotency.
    */
   schema(): readonly string[];
+
+  /**
+   * 這個錯誤是不是「要 drop 的欄位／索引本來就不存在」＝ schema 已是目標形狀。
+   * Whether this error means "the column / index to drop was never there" = already in target shape.
+   *
+   * 只服務 `schema()` 裡的 drop，不是通用的錯誤分類。
+   * Only for the drops inside `schema()`, not a general error classifier.
+   */
+  isMissingColumnError?(error: unknown): boolean;
 }
 
 /**

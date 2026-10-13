@@ -3,8 +3,7 @@
  * The dialect-driven store: the **logic is written once, the syntax is delegated to `Dialect`**.
  */
 
-import type { RequestRow } from './requests.js';
-import type { ProfileRow, RankProbe, RunTokenRow, ScoreRow, Store } from './store.js';
+import type { ProfileRow, RankProbe, RequestRow, RunTokenRow, ScoreRow, Store } from './store.js';
 import { Binder, BOARD_PRIMARY_COLUMN, type BoardCategory, type Dialect } from './db/dialect.js';
 import type { Driver, Row } from './db/types.js';
 
@@ -99,7 +98,7 @@ export class SqlStore implements Store {
 
     const { rows } = await this.driver.query(
       `select run_id, device_id, display_name, score, duration_ms, merges, drops, max_combo,
-              version, verified, rejected, client_ip,
+              version, verified, rejected,
               ${this.dialect.epochMs('created_at')} as at_ms
        from scores where run_id = ${b.bind(runId)}`,
       b.params,
@@ -120,7 +119,6 @@ export class SqlStore implements Store {
       version: asText(row['version']),
       verified: this.dialect.readBool(row['verified']),
       rejected: asNullableText(row['rejected']),
-      clientIp: asNullableText(row['client_ip']),
       atMs: this.dialect.readTime(row['at_ms']) ?? 0,
     };
   }
@@ -168,7 +166,6 @@ export class SqlStore implements Store {
       row.version,
       row.verified,
       row.rejected,
-      row.clientIp,
       /*
        * `atMs` 一定要綁進去：`scores.created_at` 同時是審計時間、速率限制視窗與 `getScore` 讀回的
        * `atMs`；漏掉不會報錯，只會讓兩個 store 實作靜靜地不一致（單元測試走的是 `MemoryStore`）。
@@ -313,16 +310,8 @@ export class SqlStore implements Store {
     const b = new Binder(this.dialect);
 
     await this.driver.query(
-      `insert into requests (
-         method, path, status, device_id, run_id, client_ip, user_agent, accept_language,
-         origin, referer, country, region, city, headers
-       ) values (
-         ${b.bind(row.method)}, ${b.bind(row.path)}, ${b.bind(row.status)}, ${b.bind(row.deviceId)},
-         ${b.bind(row.runId)}, ${b.bind(row.clientIp)}, ${b.bind(row.userAgent)},
-         ${b.bind(row.acceptLanguage)}, ${b.bind(row.origin)}, ${b.bind(row.referer)},
-         ${b.bind(row.country)}, ${b.bind(row.region)}, ${b.bind(row.city)},
-         ${b.bindJson(JSON.stringify(row.headers))}
-       )`,
+      `insert into requests (method, path, status, device_id, run_id)
+       values (${b.bind(row.method)}, ${b.bind(row.path)}, ${b.bind(row.status)}, ${b.bind(row.deviceId)}, ${b.bind(row.runId)})`,
       b.params,
     );
   }

@@ -51,9 +51,8 @@ api/
       index.ts        方言 → 驅動 → 儲存層的組裝點、ensureSchema
     sqlStore.ts       方言驅動的儲存層（邏輯只寫一次）
     store.ts          Store 介面 ＋ MemoryStore（測試用）
-    tokens.ts         簽章、驗章、指紋、run_id 產生
+    tokens.ts         簽章、驗章、run_id 產生
     limits.ts         上界（從遊戲配置推導）＋ 合理性檢查
-    requests.ts       客戶端 IP、標頭白名單、接收紀錄列的組裝
     env.ts            環境變數 → Config（純函式，啟動時驗完）
 schema.sql            人看的 Postgres 版 schema（與程式的一致性由測試守住，見 §7）
 vercel.json           建置設定與函式逾時
@@ -141,8 +140,6 @@ T2 的價值在**頒發時刻**：伺服器在開局時記下時間，於是提�
 | `DATABASE_URL`         | ✅  | —           | 任何 **Postgres 或 MySQL**；本機開發用 `sqlite:.mysql/endchi.db`。Neon 請用帶 **`-pooler`** 的主機名 |
 | `DB_DIALECT`           |    | 從 URL 推斷     | `postgres` / `mysql` / `sqlite`；看不出 scheme 或猜錯時才需要填         |
 | `RUN_TOKEN_SECRET`     | ✅  | —           | **≥ 32 字元**，短於此會被當成缺漏（短秘密等於沒有秘密）                       |
-| `IP_STORAGE_MODE`      |    | `truncated` | `raw` / `truncated`（IPv4→/24、IPv6→/48）/ `hashed`（帶秘密 HMAC） |
-| `IP_HASH_SECRET`       |    | 退回 token 秘密 | 與前者分開：輪替時機不同                                           |
 | `ALLOWED_ORIGIN`       |    | 空（只同源）      | 前端不在同一個網域時必填（例如前端在騰訊 EdgeOne Pages）                     |
 | `SUBMISSIONS_PER_HOUR` |    | `20`        | 每裝置每小時提交上限（含被退回的）                                      |
 | `RUNS_PER_HOUR`        |    | `120`       | 每裝置每小時開局上限（防無限鑄造憑證）                                    |
@@ -154,6 +151,19 @@ T2 的價值在**頒發時刻**：伺服器在開局時記下時間，於是提�
 
 `npm run dev` 會在**沒有設定時**替你填 `DATABASE_URL=sqlite:.mysql/endchi.db` 與一個公開的開發用
 `RUN_TOKEN_SECRET`（見 §6.5）—— 它只補沒有設的，所以 `.env` 永遠優先。
+
+### 私隱硬規則：IP 與標頭**不落庫**
+
+`requests` 表（接收日誌）只存五個欄位：`method`、`path`、`status`、`device_id`、`run_id`。**IP、
+User-Agent、地理位置等標頭一律不存** —— IP 在香港（PDPO）與歐盟（GDPR）都算個人資料，而這張表從
+未被讀回，存它買不到任何東西。`IP_STORAGE_MODE`／`IP_HASH_SECRET` 兩個環境變數與
+`api/_lib/requests.ts` 整個模組因此刪除；速率限制按 `device_id` 計，不依賴 IP，功能不受影響。
+
+既有資料庫的舊欄位由 `ensureSchema` 的冪等 drop 清掉（Postgres／SQLite 的索引走原生 `if exists`；
+MySQL 沒有 `drop column if exists`，由 `Dialect.isMissingColumnError` 把「欄位本來就不存在」判為
+已完成）。守門人是 `tests/db.integration.test.ts` 的遷移測試與 `tests/api.test.ts` 的黑名單測試
+（送入憑證標頭，斷言落庫的那一列連痕跡都沒有）—— **誰把 IP 或標頭加回來，測試就會紅**。
+若要連舊資料頁的殘餘位元也抹掉，在 Neon 手動跑一次 `vacuum full requests`（鎖表、一次性）。
 
 ### `sslmode`：別名會被寫成 `verify-full`
 
@@ -259,7 +269,7 @@ Vercel 自家的東西。
 | **平台** | `adapters/` | 一個檔案（`vercel.ts` / `fetch.ts`） |
 | **方言** | `db/` | 一個檔案（`postgres.ts` / `mysql.ts` / `sqlite.ts`） |
 
-中間的一切 —— `handlers.ts` 的反作弊、`sqlStore.ts` 的榜的邏輯、`requests.ts` 的標頭白名單 —— **一行
+中間的一切 —— `handlers.ts` 的反作弊、`sqlStore.ts` 的榜的邏輯 —— **一行
 都不用重複**。這不是「順便」：重複的邏輯會漂移，而漂移的症狀是「Vercel 上正常、騰訊上分數算錯」，
 那是最難查的一種 bug。
 
@@ -397,13 +407,15 @@ import { handleScore } from './_lib/handlers';        // ❌ 部署後 500
    把 `DATABASE_URL`（帶 `-pooler`）注入環境變數。
 2. **建表**：**Vercel 上不必手動做。** `vercel.json` 的 `buildCommand` 是
    `npm run build && npm run db:migrate`，所以每次部署都會對**該環境的** `DATABASE_URL` 跑一次
-   `ensureSchema`（語句全是 `create table if not exists`，可重複執行）。遷移失敗 ⇒ **建置失敗** ⇒
-   沒有表的版本不會開始收流量。
+   `ensureSchema`（語句全是 `create table if not exists` 加上清除舊欄位的冪等 drop，可重複執行）。
+   遷移失敗 ⇒ **建置失敗** ⇒ 沒有表的版本不會開始收流量。
 
-   ⚠️ **它只管建表。** `create table if not exists` 對「已經存在的表」什麼都不做，所以第一次真的要改
-   schema（加欄位、回填、加索引）時，它會**靜靜地不做事**。那時要在各 `dialect.schema()` 補上冪等的
-   `alter table … if not exists`（並在 `tests/dialect.test.ts` 守住「可重複執行」那一條），或引進遷移
-   工具。別因為建置會自動建表，就以為 schema 永遠跟得上 —— 目前**只有**「表不存在」這一種情況是自動的。
+   ⚠️ **它只管「建表」與「已經寫好的那些 drop」。** `create table if not exists` 對「已經存在的表」
+   什麼都不做，所以下一次真的要改 schema（加欄位、回填、加索引）時，要在各 `dialect.schema()` 補上
+   冪等的語句（MySQL／SQLite 沒有 `alter table … if not exists`，要靠 `Dialect.isMissingColumnError`
+   達成冪等；Postgres／SQLite 的索引有原生 `if exists`），並在 `tests/dialect.test.ts` 守住
+   「可重複執行」那一條 —— 刪除 IP／標頭欄位時就是這樣做的（見 §3 的私隱硬規則）。別因為建置會自動
+   建表，就以為 schema 永遠跟得上。
 
    手動跑只在三種情況需要：**本機開發**、**騰訊／EdgeOne**（不走 Vercel 的建置）、以及**不想等下一次
    部署**。
@@ -486,9 +498,7 @@ npm run dev:web    # 只有 Vite（純 UI 改動，打不到 API）
 走的是**正式環境那一個轉接頭**（`adapters/vercel.ts` 的 `createVercelHandler`），只把 Node 的
 `req`／`res` 交給它 —— 而 Vercel 的 `res` 介面（`statusCode`／`setHeader`／`end`）本來就是
 `node:http` 的 `ServerResponse` 的子集，所以連包裝都不必寫。本機與雲上因此跑的是**同一條**
-轉接頭 → 外殼 → 處理器 → 儲存層的路徑，只有傳輸層不同。唯一刻意加的東西是一行
-`x-forwarded-for`（假裝前面有反向代理），否則接收紀錄裡的 IP 永遠是空的 —— 而那個差異正是最容易一直
-沒發現的一種。
+轉接頭 → 外殼 → 處理器 → 儲存層的路徑，只有傳輸層不同。
 
 ### 路由是掃出來的
 
@@ -625,6 +635,6 @@ TEST_DATABASE_URL='mysql://…'      npx vitest run tests/db.integration.test.ts
   更新，但下一次抓榜會被真值蓋掉）。
 - **客戶端送出的是「某一局」的成績，不是存檔合併後的 profile**：解鎖清單（`endchimerge:unlocks`）
   因此仍然只存在本機。要跨裝置合併就得有 `profile/sync`。
-- **遷移只有「建表」**：`npm run db:migrate` 是 Vercel 建置的一部分（見 §6 第 2 步），但
-  `create table if not exists` 改不動既有表。第一次需要加欄位／索引時要做決定：補冪等的
-  `alter table … if not exists`，或引進遷移工具。規矩寫在 §6。
+- **遷移的界線**：`npm run db:migrate` 是 Vercel 建置的一部分（見 §6 第 2 步），管「建表」與
+  「已寫好的冪等 drop」（IP／標頭欄位就是這樣刪的）；**下一次**要加欄位／索引時，要照同一個模式在
+  `dialect.schema()` 補上冪等語句。規矩寫在 §6 與 §3。

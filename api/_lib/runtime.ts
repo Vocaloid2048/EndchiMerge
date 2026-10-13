@@ -9,7 +9,6 @@ import type { Driver } from './db/types.js';
 import { loadConfig, type Config } from './env.js';
 import type { CoreHandler, Deps } from './handlers.js';
 import { fail, type ApiRequest, type ApiResponse, type Handler } from './http.js';
-import { buildRequestRow, clientIp } from './requests.js';
 
 /**
  * 模組層級的相依快取：同一實例的多個請求共用一個連線池，避免每請求一池耗盡資料庫的連線數。
@@ -108,28 +107,24 @@ function preflight(request: ApiRequest, config: Config): ApiResponse | null {
 /**
  * 把接收紀錄寫進資料庫；失敗不得影響回應。
  * Writes the receive log to the database; a failure must never affect the response.
+ *
+ * ⚠️ 私隱：只寫端點維運需要的五個欄位 —— IP 與標頭屬個人資料，**不得**加回來（見 `RequestRow`）。
+ * ⚠️ Privacy: only the five fields operations needs — IPs and headers are personal data and must **not** be added back.
  */
 async function logRequest(
   request: ApiRequest,
   response: ApiResponse,
   context: { config: Config; store: Deps['store'] },
   handled: { deviceId: string | null; runId: string | null },
-  ip: string,
 ): Promise<void> {
   try {
-    await context.store.insertRequest(
-      buildRequestRow({
-        method: request.method,
-        path: request.path,
-        status: response.status,
-        deviceId: handled.deviceId,
-        runId: handled.runId,
-        ip,
-        headers: request.headers,
-        ipStorage: context.config.ipStorage,
-        ipHashSecret: context.config.ipHashSecret,
-      }),
-    );
+    await context.store.insertRequest({
+      method: request.method,
+      path: request.path,
+      status: response.status,
+      deviceId: handled.deviceId,
+      runId: handled.runId,
+    });
   } catch (error) {
     /*
      * 紀錄寫不進去只是少了審計痕跡，吞掉是刻意的：不讓一筆紀錄把成功的提交變成 500。
@@ -151,12 +146,6 @@ export function endpoint(core: CoreHandler): Handler {
     const early = preflight(request, current.config);
     if (early !== null) return early;
 
-    /*
-     * 客戶端位址只算一次：多個代理標頭、以及主體處理都不該改變它。
-     * The client address is computed once: proxy headers and body handling must not change it.
-     */
-    const ip = clientIp(request.headers, request.remoteAddress);
-
     let handled: { response: ApiResponse; deviceId: string | null; runId: string | null };
 
     try {
@@ -170,7 +159,7 @@ export function endpoint(core: CoreHandler): Handler {
       };
     }
 
-    await logRequest(request, handled.response, current, handled, ip);
+    await logRequest(request, handled.response, current, handled);
 
     return {
       ...handled.response,

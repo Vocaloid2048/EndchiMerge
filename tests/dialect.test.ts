@@ -314,9 +314,11 @@ describe('writes — 形狀差異 / shape differences', () => {
    */
   it('takes one placeholder per bound column, including the submission time', () => {
     for (const dialect of DIALECTS) {
-      expect(placeholderCount(dialect.insertScore(), dialect), dialect.name).toBe(13);
-      /* 時間是第 13 個 —— 靠 DDL 的預設值會讓 `SqlStore` 與 `MemoryStore` 分歧（見 `sqlStore.ts`）。 */
+      expect(placeholderCount(dialect.insertScore(), dialect), dialect.name).toBe(12);
+      /* 時間是最後一個 —— 靠 DDL 的預設值會讓 `SqlStore` 與 `MemoryStore` 分歧（見 `sqlStore.ts`）。 */
       expect(dialect.insertScore(), dialect.name).toContain('created_at');
+      /* 私隱硬規則：`client_ip` 已從落庫欄位中移除，誰把它加回來這一條就會紅。 */
+      expect(dialect.insertScore(), dialect.name).not.toContain('client_ip');
     }
   });
 
@@ -421,22 +423,37 @@ describe('schema — 必須可重複執行 / it must be repeatable', () => {
    *
    * MySQL 那一邊比較特別：它的索引是 `create table` 語句**的一部分**（`CREATE INDEX` 沒有
    * `IF NOT EXISTS`），所以那一條語句本身就是「可重複執行」的完整要求。
+   *
+   * drop 語句（清除舊欄位）的可重複執行有兩個來源：方言原生的 `if exists`（Postgres 全部、SQLite 的
+   * 索引），或方言有 `isMissingColumnError` 讓「要刪的東西本來就不存在」被判為已完成（MySQL 全部、
+   * SQLite 的 `alter table … drop column`）。
    * Without `if not exists` the second run (or a local run before a deploy) explodes on the CREATE.
    * `ensureSchema`'s whole design rests on this, which makes it the most important test in the file.
    *
    * MySQL is the odd one out: its indexes are **part of** the `create table` statement (`CREATE INDEX`
    * has no `IF NOT EXISTS`), so that one statement carries the whole repeatability requirement.
+   *
+   * A drop statement (removing legacy columns) is re-runnable through either a native `if exists` (all
+   * of Postgres; SQLite's index) or the dialect carrying `isMissingColumnError` so that "the target was
+   * never there" counts as done (all of MySQL; SQLite's `alter table … drop column`).
    */
-  it('uses only create … if not exists on every dialect', () => {
+  it('uses only re-runnable statements on every dialect', () => {
     for (const dialect of DIALECTS) {
       const statements = dialect.schema();
 
       expect(statements.length, dialect.name).toBeGreaterThan(0);
 
       for (const statement of statements) {
-        expect(statement.toLowerCase().replace(/\s+/gu, ' '), dialect.name).toContain(
-          'if not exists',
-        );
+        const flat = statement.toLowerCase().replace(/\s+/gu, ' ');
+
+        if (flat.startsWith('create')) {
+          expect(flat, dialect.name).toContain('if not exists');
+        } else {
+          expect(
+            flat.includes('if exists') || typeof dialect.isMissingColumnError === 'function',
+            `${dialect.name}: ${statement.slice(0, 60)}`,
+          ).toBe(true);
+        }
       }
     }
   });
@@ -628,7 +645,7 @@ describe('schema.sql — 人看的那一份要和程式一致 / the human-readab
     return normalise(sql)
       .split(';')
       .map((statement) => statement.trim())
-      .filter((statement) => statement.startsWith('create'));
+      .filter((statement) => statement !== '');
   }
 
   /*
@@ -976,5 +993,52 @@ describe('isConnectionError — 連不上 vs SQL 寫錯 / unreachable vs bad SQL
     expect(isConnectionError(new Error('boom'))).toBe(false);
     expect(isConnectionError(null)).toBe(false);
     expect(isConnectionError('ECONNREFUSED')).toBe(false);
+  });
+});
+
+describe('isMissingColumnError — drop 的冪等來源 / what makes a drop idempotent', () => {
+  /*
+   * 這個成員**只**服務 `schema()` 裡的 drop：命中＝「要刪的東西本來就不存在」＝ schema 已是目標形狀。
+   * 所以它必須嚴格 —— 寬鬆的話，真正的 SQL 錯誤會被當成「已完成」靜靜吞掉。
+   * This member serves **only** the drops inside `schema()`: a hit means "the target was never there"
+   * = the schema is already in shape. So it must be strict — a loose one would silently swallow real
+   * SQL errors as "already done".
+   */
+  it('accepts the missing-column errors of its own driver and nothing else', () => {
+    /* Postgres：42703（undefined_column）。 */
+    expect(postgresDialect.isMissingColumnError?.({ code: '42703' })).toBe(true);
+    expect(postgresDialect.isMissingColumnError?.({ code: '42P01' })).toBe(false);
+    expect(postgresDialect.isMissingColumnError?.({ code: '42601' })).toBe(false);
+    expect(postgresDialect.isMissingColumnError?.(new Error('boom'))).toBe(false);
+    expect(postgresDialect.isMissingColumnError?.(null)).toBe(false);
+
+    /* MySQL：errno 1091（ER_CANT_DROP_FIELD_OR_KEY）；mysql2 把它放在 `errno` 與 `code` 兩處。 */
+    expect(mysqlDialect.isMissingColumnError?.({ errno: 1091 })).toBe(true);
+    expect(mysqlDialect.isMissingColumnError?.({ code: 'ER_CANT_DROP_FIELD_OR_KEY' })).toBe(true);
+    expect(mysqlDialect.isMissingColumnError?.({ code: 'ER_NO_SUCH_TABLE' })).toBe(false);
+    expect(mysqlDialect.isMissingColumnError?.({ errno: 1146 })).toBe(false);
+    expect(mysqlDialect.isMissingColumnError?.(null)).toBe(false);
+
+    /* SQLite：node:sqlite 包成 ERR_SQLITE_ERROR，訊息以 no such column / no such index 開頭。 */
+    expect(
+      sqliteDialect.isMissingColumnError?.({
+        code: 'ERR_SQLITE_ERROR',
+        message: 'no such column: "client_ip"',
+      }),
+    ).toBe(true);
+    expect(
+      sqliteDialect.isMissingColumnError?.({
+        code: 'ERR_SQLITE_ERROR',
+        message: 'no such index: requests_ip_idx',
+      }),
+    ).toBe(true);
+    /* 「表不存在」不在豁免範圍：create 先跑，表缺席是真正該炸的錯。 */
+    expect(
+      sqliteDialect.isMissingColumnError?.({
+        code: 'ERR_SQLITE_ERROR',
+        message: 'no such table: requests',
+      }),
+    ).toBe(false);
+    expect(sqliteDialect.isMissingColumnError?.(new Error('boom'))).toBe(false);
   });
 });

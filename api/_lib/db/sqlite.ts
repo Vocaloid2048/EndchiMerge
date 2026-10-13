@@ -185,8 +185,8 @@ export const sqliteDialect: Dialect = {
    */
   insertScore: () => `insert into scores (
        run_id, device_id, display_name, score, duration_ms, merges, drops, max_combo,
-       version, verified, rejected, client_ip, created_at
-     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       version, verified, rejected, created_at
+     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      on conflict (run_id) do nothing
      returning run_id`,
 
@@ -248,7 +248,6 @@ export const sqliteDialect: Dialect = {
        version      text    not null default '',
        verified     integer not null default 1,
        rejected     text,
-       client_ip    text,
        created_at   integer not null default (${NOW_MS})
      )`,
     `create index if not exists scores_device_idx on scores (device_id, created_at desc)`,
@@ -269,19 +268,38 @@ export const sqliteDialect: Dialect = {
        path            text    not null,
        status          integer not null,
        device_id       text,
-       run_id          text,
-       client_ip       text,
-       user_agent      text,
-       accept_language text,
-       origin          text,
-       referer         text,
-       country         text,
-       region          text,
-       city            text,
-       headers         text    not null default '{}'
+       run_id          text
      )`,
     `create index if not exists requests_received_idx on requests (received_at desc)`,
     `create index if not exists requests_device_idx on requests (device_id, received_at desc)`,
-    `create index if not exists requests_ip_idx on requests (client_ip, received_at desc)`,
+
+    /* ⚠️ 私隱：IP 與標頭屬個人資料，永不落庫 —— 這些 drop 清掉舊庫的欄位與資料；新庫每條報「no such column」後被判為已完成。索引必須先刪：SQLite 拒絕刪除被索引引用的欄位。
+     * ⚠️ Privacy: IPs and headers are personal data, never persisted — these drops clear them from an old
+     * database; on a new one each raises "no such column" and counts as done. The index goes first:
+     * SQLite refuses to drop a column an index references. */
+    `drop index if exists requests_ip_idx`,
+    `alter table requests drop column client_ip`,
+    `alter table requests drop column user_agent`,
+    `alter table requests drop column accept_language`,
+    `alter table requests drop column origin`,
+    `alter table requests drop column referer`,
+    `alter table requests drop column country`,
+    `alter table requests drop column region`,
+    `alter table requests drop column city`,
+    `alter table requests drop column headers`,
+    `alter table scores drop column client_ip`,
   ],
+
+  /*
+   * node:sqlite 把 SQLite 的錯誤包成 `ERR_SQLITE_ERROR`，訊息以「no such column / no such index」開頭。
+   * node:sqlite wraps SQLite errors as `ERR_SQLITE_ERROR` with messages starting "no such column / no such index".
+   */
+  isMissingColumnError: (error) => {
+    const e = error as { code?: unknown; message?: unknown } | null;
+    return (
+      e?.code === 'ERR_SQLITE_ERROR' &&
+      typeof e.message === 'string' &&
+      /^no such (column|index):/i.test(e.message)
+    );
+  },
 };

@@ -14,9 +14,6 @@ export interface ApiRequest {
   /** 已解析的 JSON 主體；沒有主體時為 `null`。
    * The parsed JSON body; `null` when there is none. */
   readonly body: unknown;
-  /** 連線來源位址（未經代理判斷）；真正的客戶端位址見 `requests.ts` 的 `clientIp`。
-   * The connection's source address (no proxy judgement); the real client address is `clientIp` in `requests.ts`. */
-  readonly remoteAddress: string;
 }
 
 export interface ApiResponse {

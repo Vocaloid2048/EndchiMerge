@@ -45,9 +45,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDriver, dialectFor, ensureSchema } from '../api/_lib/db';
 import { dialectFromUrl, type Dialect } from '../api/_lib/db/dialect';
 import type { Driver } from '../api/_lib/db/types';
-import type { RequestRow } from '../api/_lib/requests';
 import { SqlStore } from '../api/_lib/sqlStore';
-import type { ProfileRow, RankProbe, ScoreRow } from '../api/_lib/store';
+import type { ProfileRow, RankProbe, RequestRow, ScoreRow } from '../api/_lib/store';
 
 /**
  * 要測哪一個資料庫。
@@ -91,7 +90,6 @@ function score(device: string, overrides: Partial<ScoreRow> = {}): ScoreRow {
     version: '0.1.0',
     verified: true,
     rejected: null,
-    clientIp: null,
     atMs: AT,
     ...overrides,
   };
@@ -377,7 +375,7 @@ describe('SqlStore — 真的資料庫 / a real database', () => {
 
   /* ── 接收紀錄 ──────────────────────────────────────────────────────────── */
 
-  it('stores a request row with the whitelisted headers as JSON', async () => {
+  it('stores a request row with the five operational fields only', async () => {
     const device = deviceId('request');
 
     const row: RequestRow = {
@@ -386,34 +384,27 @@ describe('SqlStore — 真的資料庫 / a real database', () => {
       status: 200,
       deviceId: device,
       runId: null,
-      clientIp: '198.51.100.0',
-      userAgent: 'vitest',
-      acceptLanguage: 'zh-HK',
-      origin: 'https://game.example',
-      referer: null,
-      country: 'HK',
-      region: null,
-      city: null,
-      headers: { 'user-agent': 'vitest', 'accept-language': 'zh-HK' },
     };
 
     await store.insertRequest(row);
 
     const { rows } = await driver.query(
-      `select method, status, client_ip, user_agent, headers from requests
-       where device_id = ${dialect.ph(1)}`,
+      `select * from requests where device_id = ${dialect.ph(1)}`,
       [device],
     );
 
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      method: 'POST',
-      status: 200,
-      client_ip: '198.51.100.0',
-      user_agent: 'vitest',
-    });
-    /* JSON 欄位真的存成了 JSON，不是一段被跳脫過的字串。 */
-    expect(JSON.stringify(rows[0]?.['headers'])).toContain('user-agent');
+    expect(rows[0]).toMatchObject({ method: 'POST', status: 200 });
+
+    /*
+     * 私隱硬規則：IP 與標頭欄位**不存在**（`select *` 後逐欄檢查，而不是只挑好看的欄位）。
+     * Hard privacy rule: the IP and header columns do **not** exist (checked column by column after
+     * `select *`, not just on the pretty ones).
+     */
+    const first = rows[0] as Record<string, unknown>;
+    for (const column of ['client_ip', 'user_agent', 'accept_language', 'origin', 'referer', 'country', 'region', 'city', 'headers']) {
+      expect(first).not.toHaveProperty(column);
+    }
   });
 
   /* ── 交易的原子性 ──────────────────────────────────────────────────────── */
@@ -484,6 +475,89 @@ describe('SqlStore — 真的資料庫 / a real database', () => {
  * passing on SQLite: an in-memory database costs microseconds, where checking the same thing on
  * Postgres / MySQL needs a container.
  */
+describe('ensureSchema — 舊欄位的清除遷移 / dropping the legacy columns', () => {
+  /*
+   * 用「舊形狀」的表模擬一個還沒遷移的資料庫：`requests` 帶九個個人資料欄位與它們的索引、`scores`
+   * 帶 `client_ip`，而且**裡面有真的舊資料**。`ensureSchema` 之後：欄位與舊資料一起消失、其他欄位
+   * 原樣保留，而**重跑一次**不得報錯 —— 那正是「可重複執行」的定義，也是部署管線每次都會做的事。
+   * A not-yet-migrated database is simulated with old-shaped tables: `requests` with the nine
+   * personal-data columns and their index, `scores` with `client_ip`, and **real legacy data inside**.
+   * After `ensureSchema`: the columns and the legacy data go together, the other columns stay
+   * untouched, and running it **again** must raise nothing — which is what "re-runnable" means, and
+   * what the deploy pipeline does every single time.
+   *
+   * 這一段自開記憶體 SQLite，不理會 `TEST_DATABASE_URL`（模擬舊形狀需要方言專屬的 DDL；分類器在
+   * `dialect.test.ts` 已按方言各自單測過）。
+   * This block opens its own in-memory SQLite and ignores `TEST_DATABASE_URL` (simulating the legacy
+   * shape needs dialect-specific DDL; the classifiers are unit-tested per dialect in
+   * `dialect.test.ts`).
+   */
+  it('drops the legacy IP and header columns and their data, and is re-runnable', async () => {
+    const driver = createDriver('sqlite', ':memory:');
+    const dialect = dialectFor('sqlite');
+
+    await driver.query(`create table requests (
+       id integer primary key,
+       received_at integer not null,
+       method text not null,
+       path text not null,
+       status integer not null,
+       device_id text,
+       run_id text,
+       client_ip text,
+       user_agent text,
+       accept_language text,
+       origin text,
+       referer text,
+       country text,
+       region text,
+       city text,
+       headers text not null default '{}')`);
+    await driver.query(`create index requests_ip_idx on requests (client_ip, received_at desc)`);
+    await driver.query(`create table scores (
+       run_id text primary key,
+       device_id text not null,
+       client_ip text,
+       created_at integer not null)`);
+    await driver.query(
+      `insert into requests (received_at, method, path, status, device_id, run_id, client_ip, user_agent, headers)
+       values (1, 'POST', '/api/score', 200, 'it-legacy', null, '198.51.100.7', 'vitest', '{"user-agent":"vitest"}')`,
+    );
+    await driver.query(
+      `insert into scores (run_id, device_id, client_ip, created_at)
+       values ('11111111-1111-4111-8111-111111111111', 'it-legacy', '198.51.100.7', 1)`,
+    );
+
+    await ensureSchema(driver, dialect);
+    await ensureSchema(driver, dialect);
+
+    const { rows } = await driver.query('select * from requests');
+    expect(rows).toHaveLength(1);
+
+    const request = rows[0] as Record<string, unknown>;
+    for (const column of [
+      'client_ip',
+      'user_agent',
+      'accept_language',
+      'origin',
+      'referer',
+      'country',
+      'region',
+      'city',
+      'headers',
+    ]) {
+      expect(request, column).not.toHaveProperty(column);
+    }
+    /* 其他欄位原樣保留 —— 遷移刪的是欄位，不是整份歷史。 */
+    expect(request).toMatchObject({ method: 'POST', path: '/api/score', device_id: 'it-legacy' });
+
+    const scores = await driver.query('select * from scores');
+    expect(scores.rows[0]).not.toHaveProperty('client_ip');
+
+    await driver.close();
+  });
+});
+
 describe('SQLite 驅動 / the SQLite driver', () => {
   /**
    * 一個孤立的記憶體資料庫，附帶本段共用的兩個小工具。
