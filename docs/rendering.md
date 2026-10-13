@@ -24,24 +24,29 @@ main.ts（組裝）
 | 1 | U 形內部填充（在方團團**之下**） | `render/container.ts` → `drawContainerBack()` |
 | 2 | 溢位警戒區：線與頂緣之間的淺紅帶（背景提示） | `render/stage.ts` → `drawOverflowZone()` |
 | 3 | 投放輔助虛線 | `render/stage.ts` → `drawAimGuide()` |
-| 4 | 全部方團團（依物理角度旋轉、依彈跳倍率縮放） | `render/stage.ts` → `drawBody()` |
+| 4 | 全部方團團（依物理角度旋轉、依彈跳倍率縮放，**受遊戲區裁切**） | `render/stage.ts` → `drawBody()` |
 | 5 | U 形線框（在方團團**之上**） | `render/container.ts` → `drawContainerFront()` |
 | 6 | 技能選取標示「」角括號 ＋ 外框（**不受遊戲區裁切**） | `render/stage.ts` → `drawSelectionBracket()` |
-| 7 | 溢位紅虛線（**最上層**，門檻必須隨時看得見） | `render/stage.ts` → `drawOverflowLine()` |
-| 8 | 投放預覽（壓在線框與紅線之上） | `render/stage.ts` → `drawBody()`（`globalAlpha = 0.85`） |
-| 9 | 除錯輔助線（僅 `?debug=1`） | `render/stage.ts` → `drawDebugOverlay()` |
+| 7 | 溢位紅虛線（在方團團**之上**，門檻必須隨時看得見） | `render/stage.ts` → `drawOverflowLine()` |
+| 8 | 溢位倒數徽章（警戒區正中央，畫在紅線之上） | `render/stage.ts` → `drawOverflowCountdown()` |
+| 9 | 投放預覽（**受遊戲區裁切、完全不透明**） | `render/stage.ts` → `drawBody()` |
+| 10 | 除錯輔助線（僅 `?debug=1`） | `render/stage.ts` → `drawDebugOverlay()` |
 
 > **第 2 步在方團團之下、第 7 步在方團團之上**是刻意的：警戒區是背景提示（不該遮住角色），
-> 紅線是門檻（不該被角色遮住）。
+> 紅線是門檻（不該被角色遮住）。警戒區、紅線與倒數徽章都只在 `overflow.danger` 為真時繪製——
+> 越線但尚未停定之前，整組警戒完全不畫。
 
 > **第 5 步是關鍵**：少了它，方團團看起來是貼在槽前面，而不是裝在槽裡面。
-> **第 6 步畫在遊戲區裁切之外**（`clipToPlayField()` 只涵蓋方團團）：它是**互動**提示，
+> **第 6 步畫在遊戲區裁切之外**（`clipToPlayField()` 只涵蓋方團團與預覽）：它是**互動**提示，
 > 任何時候都要讀得到，貼邊的那一顆才不會被切掉半個括號。
-> **第 8 步在第 5、6、7 步之後**是刻意的：預覽還沒進到槽裡，所以它應該壓在線框與紅線之上。
+> **第 9 步在最後（除錯層之前）**是刻意的：預覽還沒進到槽裡，畫在最上層；同樣套用遊戲區裁切，
+> 且**完全不透明** —— 預覽是「這一顆確定會掉下去」的承諾，半透明讀起來像「可能會掉」。
+> 冷卻期間的隱藏由 `aim === null` 負責，不靠調 alpha。
 >
 > 第 6 步的樣式集中在 `SELECTION_STYLE`（線寬、留白、括號長度、圓角與兩種顏色）；
 > 脈動相位由 `game/loop.ts` 以時鐘推導（週期約 900ms），渲染器不存狀態。標示的幾何**完全由
 > 半徑推導**，所以它永遠跟著方團團，卻不會反過來影響物理。
+> 第 8 步的徽章樣式在 `OVERFLOW_STYLE`（底色、邊框、字級、內距與最小尺寸）。
 
 ---
 
@@ -61,13 +66,13 @@ main.ts（組裝）
 | **溢位紅線在容器頂緣上方多高** | `container.json → overflowAboveRim` | `30`（**必須小於上一項**，否則一生成就越線；載入器會警告） |
 | 技能天花板在頂緣下方多深 | `container.json → floatCeilingBelowRim` | `20`（浮動與搖晃共用） |
 | 容器左右兩側的展示餘裕 | `container.json → leftOffset / rightOffset` | `50 / 50`（寬度不變；見 §2.5） |
-| 一個方團團的半徑 | `public/config/levels.json → levels[].radius` | `20 … 115` |
+| 一個方團團的半徑 | `public/config/levels.json → levels[].radius` | `15 … 110` |
 | 密度／彈性／摩擦／空氣阻力 | `levels.json → levels[].density / restitution / friction / frictionAir` | 見該檔 |
 | 各級分數 | `levels.json → levels[].score` | `0, 1, 2, 4, … 256` |
 | 重力 | `levels.json → settings.gravityY` | `1` |
 | **方團團是否可旋轉** | `levels.json → settings.lockRotation` | `false` ＝ 依真實物理翻滾 |
 | 溢位寬限秒數 | `levels.json → settings.overflowGraceMs` | `5000` |
-| 連擊窗口 | `levels.json → settings.comboWindowMs` | `1000` |
+| 投放冷卻 | `levels.json → settings.dropCooldownMs` | `500` |
 | 合成冷卻 | `levels.json → settings.mergeCooldownMs` | `100` |
 | 技能／技力 | `public/config/skills.json` | 見 `agent-readme.md` §SP |
 | 品牌與非官方聲明 | `public/config/branding.json` | — |
@@ -158,13 +163,14 @@ npm run dev
 http://127.0.0.1:5173/?debug=1
 ```
 
-開發模式下會疊加三組輔助線（`FrameLoopOptions.debug` → `StageFrame.debug`）：
+開發模式下會疊加四組輔助線（`FrameLoopOptions.debug` → `StageFrame.debug`）：
 
 | 顏色 | 代表 |
 |---|---|
 | 洋紅實線 | 容器 `frame` 矩形（＝ U 形外框；物理就是從它推導，會隨搖晃平移） |
 | 青色實線 | 物理空腔 `cavity`（方團團可活動的內緣） |
 | 黃色虛線 | 投放高度 `spawnYValue` |
+| 紅邊 ＋ 藍色頂點圓點 | 每顆方團團的碰撞框（凸部件逐個描邊；與輪廓追蹤工具的畫面一致） |
 
 > `display`（裁切範圍）畫布本身就等於它的邊界，所以沒有另外畫線；它**不隨搖晃移動**（§2.5）。
 
@@ -179,17 +185,3 @@ http://127.0.0.1:5173/?debug=1
 - 容器、投放與旋轉：`agent-readme.md` §「容器、投放與旋轉」。
 - 合成、連擊、溢位與解鎖的**規則**：`docs/gameplay.md`。
 - 物理模型與半徑推導：`docs/physics.md`。
-
-### 驗證腳本
-
-畫面上的東西改完之後，除了單元測試，還有一支瀏覽器端的端到端檢查可以用：
-
-```
-# 先跑 dev server（`npm run dev`），再另開一個終端
-node .tmp-verify/m4m6.cjs        # 合成／冷卻／彈跳／連擊／溢位／結算／解鎖／持久化
-node .tmp-verify/overflow-probe.cjs   # 只驗溢位計時的波形
-```
-
-手法是**停掉 rAF 迴圈（`endchi.loop.stop()`）再手動餵固定步**，所以物理完全確定、
-彈跳動畫（180ms）這種短暫狀態也截得到。`endchi.loop` 停了之後 HUD 不會自己更新，
-所以每次手動步進後要自己呼叫一次 `endchi.hud.update(...)`（腳本裡的 `__t.sync()`）。

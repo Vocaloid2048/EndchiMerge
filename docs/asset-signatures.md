@@ -16,7 +16,8 @@
 
 > SVG / PNG / WebP 都是**使用者可直接編輯**的格式。任何簽名都能被移除或覆寫。
 > 這個簽名是**署名與溯源**，**不是防拷貝 / DRM**。
-> 真正的保護是：授權聲明（`LICENSE-ASSETS.md`、`NOTICE.md`）＋ 署名 ＋ **git 時間戳**。
+> 真正的保護是：授權聲明（repo 根目錄的 `LICENSE`、`public/assets/character/README.md`）＋
+> 署名 ＋ **git 時間戳**。
 
 ---
 
@@ -96,20 +97,16 @@ node scripts/sign-assets.mjs --dry-run public/assets/character
 
 ---
 
-## 5. ⚠️ 關鍵問題：Action 完成前的 commit，別人拿得到未簽名版本嗎？
+## 5. Action 完成前的 commit，別人拿得到未簽名版本嗎？
 
-**拿得到。而且用 GitHub Action 做「事後補簽」在架構上無法阻止這件事。**
+**拿得到。用 GitHub Action 做「事後補簽」在架構上無法阻止這件事**，原因有三：
 
-三個獨立的原因：
-
-1. **時序**：GitHub Actions 只能在 `push` **成功之後**才被觸發。Action 開始跑的那一刻，
+1. **時序**：GitHub Actions 只能在 `push` **成功之後**才被觸發；Action 開始跑的那一刻，
    未簽名的 commit 已經存在於遠端 repo。
-2. **補簽只是多加一個 commit**：若 Action 用「補簽 + 自動 commit」的方式，原本那個未簽名的
-   commit 仍在歷史中，任何人用 `git fetch origin <sha>` 都能取得（SHA 可由 PR 頁面或用戶端 reflog 得知）。
-3. **就算 rewrite 也來不及**：即使 Action 用 force-push 改寫分支讓未簽名 commit 從分支頂端消失，
-   它仍會在物件庫中殘留一段時間，且**任何在窗口期間 fetch 過的人手上已經有一份**。
-
-### 結論
+2. **補簽只是多加一個 commit**：未簽名的那個 commit 仍在歷史中，任何人用
+   `git fetch origin <sha>` 都能取得（SHA 可由 PR 頁面或 reflog 得知）。
+3. **就算 rewrite 也來不及**：force-push 改寫分支後，未簽名的 commit 仍會在物件庫中殘留一段
+   時間，且**任何在窗口期間 fetch 過的人手上已經有一份**。
 
 | 做法 | 未簽名版本會不會進到遠端？ |
 | --- | --- |
@@ -117,7 +114,7 @@ node scripts/sign-assets.mjs --dry-run public/assets/character
 | GitHub Action 事後補簽 | 會 —— 只能亡羊補牢 |
 | GitHub Action 只驗證並失敗 | 會，但至少**不會被合併進 `main`** |
 
-因此本專案採「**hook 為主、CI 為輔**」，CI 刻意**不做**自動補簽 commit。
+所以本專案採「**hook 為主、CI 為輔**」，CI 刻意**不做**自動補簽 commit。
 
 ### 那要怎麼做到「遠端永不出現未簽名版本」？
 

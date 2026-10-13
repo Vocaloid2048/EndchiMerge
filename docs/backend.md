@@ -1,10 +1,8 @@
 # 後端
 
-這份文件說明 M9 交付的後端：它由什麼組成、怎麼設定、部署到哪裡，以及**資料庫可以放哪裡** ——
-最後一項是使用者明確問的三個問題，答案在「§4 資料庫放哪裡」。
+這份文件說明後端的組成、設定方式、部署路徑，以及**資料庫可以放哪裡**。
 
-> **範圍**：M9 = 分析事件 ＋ 反作弊檢查（`design.md` §8）。反作弊只做 **T2**（伺服器頒發的短期
-> 憑證），不做 T1 對稱簽章、也不做 T3 伺服器端重放 —— 這是使用者的定案。
+> **範圍**：反作弊只做 **T2**（伺服器頒發的短期憑證），不做 T1 對稱簽章、也不做 T3 伺服器端重放。
 
 ---
 
@@ -27,11 +25,7 @@
 
 **客戶端已經接上**（見 §6.6）：`src/game/remoteLeaderboard.ts` 是走 HTTP 的那一個
 `LeaderboardSource`，`src/game/leaderboard.ts` 的本機實作留著當離線／無後端的退路，兩者共用同一份
-本機紀錄邏輯。所以榜上現在真的會有別的裝置的成績。
-**The client is wired up** (see §6.6): `src/game/remoteLeaderboard.ts` is the HTTP-backed
-`LeaderboardSource`; the local implementation in `src/game/leaderboard.ts` stays as the offline /
-no-backend fallback, and the two share one copy of the local-record logic. The board now really does
-carry other devices' scores.
+本機紀錄邏輯。
 
 ### 檔案佈局
 
@@ -70,7 +64,7 @@ scripts/dev.ts        npm run dev —— 前端 ＋ 後端 ＋ SQLite，見 §6.
 
 > ⚠️ **`api/**` 內每一處相對 import 都要帶 `.js`**（目錄要寫到 `/index.js`）：部署是**逐檔轉譯、
 > 不打包**，而 `package.json` 是 `"type": "module"` —— 少一個副檔名在部署後就是
-> `ERR_MODULE_NOT_FOUND`，本機卻完全看不出來。理由、出事的長相與怎麼防，見 §6。
+> `ERR_MODULE_NOT_FOUND`，本機卻完全看不出來。詳見 §6。
 
 客戶端那一邊的兩支（都在 `src/game/`，見 §6.6）：
 
@@ -81,8 +75,8 @@ remoteLeaderboard.ts   榜在伺服器的實作：打 /api/run/start、/api/scor
 
 **分層的理由**：端點檔案只匯出一行，所有邏輯住 `_lib`。這樣單元測試可以**不碰資料庫**直接呼叫
 處理器（餵 `MemoryStore` ＋ 注入時鐘），見 `tests/api.test.ts`。**平台**與**方言**各自只有一個接縫，
-所以要換掉任何一個都只動一個檔案。客戶端同理：`LeaderboardSource` 是那條接縫，而它現在真的被兩個
-實作共用（見 §6.6）。
+所以要換掉任何一個都只動一個檔案。客戶端同理：`LeaderboardSource` 是那條接縫，兩個實作共用它
+（見 §6.6）。
 
 ---
 
@@ -166,13 +160,13 @@ T2 的價值在**頒發時刻**：伺服器在開局時記下時間，於是提�
 `pg` 8.x 把 `sslmode=prefer`／`require`／`verify-ca` **一律當成 `verify-full`** —— 憑證鏈**有**被驗。
 但 `pg` v9（＋ `pg-connection-string` v3）會讓它們改用 libpq 語意，`require` 屆時退化成「加密但不驗
 憑證鏈」。換句話說：**升級 `pg` 會默默地放寬連線的安全等級**，而升級不會有任何編譯或測試錯誤提醒你 ——
-唯一會發現的方式是回頭讀連線字串。這也是每次冷啟動都在日誌裡印那段 `SECURITY WARNING` 的原因。
+唯一會發現的方式是回頭讀連線字串。
 
 所以 `db/postgres.ts` 在建立連線池**之前**把這三個別名明確寫成 `verify-full`
 （`normaliseSslMode()`）。行為與現在**完全相同**，差別只在升級那天不會無聲降級。Neon 注入的
 `DATABASE_URL` 帶的正是 `?sslmode=require`，所以這條路是真的會走到的。
 
-唯一不動的情況：連線字串帶了 `uselibpqcompat=true` —— 那是讀過那段警告之後**明確**要 libpq 語意，
+唯一不動的情況：連線字串帶了 `uselibpqcompat=true` —— 那是**明確**要 libpq 語意的選擇，
 替它改就是推翻這個選擇。
 
 **產生秘密**：
@@ -187,8 +181,6 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 ---
 
 ## 4. 資料庫放哪裡
-
-這一節回答使用者問的三個問題。
 
 ### Q1：在本地 NAS 架 Postgres，可行嗎？
 
@@ -229,9 +221,6 @@ Vercel 自家的東西。
 > ⚠️ **Neon 是 Postgres，不是 MySQL。** Vercel Marketplace 上的 Neon 與 Supabase 都只提供
 > **PostgreSQL** 協議。所以「Vercel ＋ Neon」與「騰訊免費 MySQL」是**兩個不同的方言**，而那正是
 > 這個後端同時實作兩個方言、並把差異抽成 `Dialect` 的原因（見 §5）。
-> ⚠️ **Neon is Postgres, not MySQL.** Both Neon and Supabase on the Vercel Marketplace speak only
-> **PostgreSQL**. So "Vercel + Neon" and "Tencent's free MySQL" are **two different dialects** — which
-> is exactly why this backend implements both and folds the differences into `Dialect` (see §5).
 
 ### Q3：那到底該選哪個？
 
@@ -242,15 +231,13 @@ Vercel 自家的東西。
 | **本機開發／測試**           | **SQLite**（`npm run dev` 自己起，不必裝任何東西）；想貼近正式環境就指向 Neon 的開發分支 |
 | **自架版發行（Docker 三容器）** | NAS 上的 Postgres 或 MySQL ＋ 連線池，`design.md` §6.1 / Q15 的方向    |
 
-> **「本機開發」那一行從 Docker 改成 SQLite**，理由是 Docker 在 Windows 上要先裝 Docker Desktop、
-> 要先有 WSL2，而且每次開機都要等它醒 —— 這些成本全部落在那個「只是想改個 UI」的人身上。SQLite 是
-> 一個檔案，`npm run dev` 就建好了；要測 Postgres／MySQL 專屬的行為時，`.env` 填一個真的連線字串
-> 即可（`.env` 永遠優先於開發預設值）。見 §5.1.1。
+> **為什麼本機開發是 SQLite 而不是 Docker**：Docker 在 Windows 上要先裝 Docker Desktop、要先有 WSL2，
+> 而且每次開機都要等它醒 —— 這些成本全部落在那個「只是想改個 UI」的人身上。SQLite 是一個檔案，
+> `npm run dev` 就建好了；要測 Postgres／MySQL 專屬的行為時，`.env` 填一個真的連線字串即可（`.env`
+> 永遠優先於開發預設值）。見 §5.1.1。
 >
-> 這對應 `design.md` 的 **Q10（DB 選型）**：Vercel 走 **Neon**、騰訊走 **MySQL**，兩者都支援。
-> **Q15（託管分工）** 因此更進一步收斂：可移植性現在不只是 「換一個環境變數」，而是「換一個環境變數
-> ＋ 一個轉接頭」。加上 SQLite 之後，這條接縫第一次真的被用來**加一個方言**（`sqlStore.ts` 一行都
-> 沒有動）。
+> 這對應 `design.md` 的 **Q10（DB 選型）**：Vercel 走 **Neon**、騰訊走 **MySQL**，兩者都支援；
+> **Q15（託管分工）** 的可移植性因此是「換一個環境變數 ＋ 一個轉接頭」。
 
 ---
 
@@ -313,8 +300,8 @@ Postgres 只要一個參數、在 MySQL／SQLite 要三個 —— 修法是**每
 >    `affectedRows` 由「真正寫入的行」改成「**匹配到的**行」，於是刻意的 no-op upsert
 >    （`on duplicate key update run_id = run_id`）在既有列上回報 `1`，每次重試都被當成新的一局。
 >    由 `mysql.ts` 的 `MYSQL_CLIENT_FLAGS = ['-FOUND_ROWS']` 關掉（`mergeFlags` 認得 `-` 前綴），
->    `tests/dialect.test.ts` 釘住「旗標在、裸的 `FOUND_ROWS` 不在」。這是**跑真的 MySQL 才發現的** ——
->    假驅動看不出來，Postgres 也完全不受影響。
+>    `tests/dialect.test.ts` 釘住「旗標在、裸的 `FOUND_ROWS` 不在」。假驅動看不出這個問題，
+>    Postgres 也完全不受影響。
 > 4. **`scores.device_id` 不是外鍵**，而且這是**功能性**的要求，不是風格：有外鍵的話，新裝置的第一次
 >    提交（`saveScore` 先寫 `scores`、才寫 `profiles`，而冪等是由第一句的結果決定的）與被退回的提交
 >    （`verified = false` 故意不建 profile，要留審計痕跡卻不進榜）都會被拒絕——也就是說有外鍵就等於
@@ -324,9 +311,6 @@ Postgres 只要一個參數、在 MySQL／SQLite 要三個 —— 修法是**每
 >    會讓兩個 `Store` 實作靜靜分歧，而單元測試走的正是 `MemoryStore`。SQLite 的 `strftime` 更只有
 >    **秒**的解析度，靠預設值連精度都對不上。
 
-> 第 4、5 點都是**把整合測試從 gated 改成一律會跑**之後才發現的（見 §7）——兩者都不會拋錯，只會讓某
-> 些東西永遠寫不進去、或讓本機與線上算出不同的名次。
-
 ### 5.1.1 SQLite：本機開發的資料庫
 
 `api/_lib/db/sqlite.ts` 是一個**檔案**而不是一個服務，所以 `npm run dev` 與
@@ -335,11 +319,10 @@ Postgres 只要一個參數、在 MySQL／SQLite 要三個 —— 修法是**每
 `Driver` 換一個實作）。
 
 ⚠️ 它**不是**部署選項：Vercel／EdgeOne／騰訊雲的函式都跑在拋棄式檔案系統上，一個請求寫進去的檔案下
-一個請求不一定看得到。所以 `connectionNotes()` 對它永遠回一條警告，而 `docs` 這裡再講一次。
+一個請求不一定看得到。所以 `connectionNotesFor()` 對它永遠回一條警告，而 `docs` 這裡再講一次。
 
-**它修掉了一個真的卡住的問題。** 使用者原本要的是「每次啟動一個 MySQL，資料庫檔案放在 `.mysql/`」，
-而這個 repo 的路徑含中文（`團圓大作戰`）—— `mysqld` 會**在第一個中文字截斷路徑**：
-`--initialize-insecure` 成功，但啟動時讀不到自己的 error log（`Could not open file
+**為什麼本機不用 MySQL**：這個 repo 的路徑含中文（`團圓大作戰`），而 `mysqld` 會**在第一個中文字
+截斷路徑**：`--initialize-insecure` 成功，但啟動時讀不到自己的 error log（`Could not open file
 'E:\hkust_repo\Vocaloid2048.err'` → `[MY-010119] Aborting`），而且對**相對路徑**也一樣。該目錄也沒有
 8.3 短檔名可用。SQLite 走的是 Node 的 UTF-8 路徑處理，所以完全沒有這個問題。
 
@@ -365,12 +348,12 @@ EdgeOne Pages 有**兩種**函式，差別決定了能不能連資料庫：
 **所以 EdgeOne 那邊要用 Node Functions**：它跑完整的 Node.js，`mysql2` 與 `pg` 都能用，我們的
 `db/` 那一層可以整包照搬。Edge Functions（V8）沒有 TCP，接了也沒用。
 
-接上去只要一行（`node-functions/api/score.js`）：
+接上去只要一個檔案（例如 `node-functions/api/score.js`）：
 
 ```js
-import { handleScore } from '../../api/_lib/handlers';
-import { endpoint } from '../../api/_lib/runtime';
-import { createEdgeOneHandlers } from '../../api/_lib/adapters/fetch';
+import { handleScore } from '../../api/_lib/handlers.js';
+import { endpoint } from '../../api/_lib/runtime.js';
+import { createEdgeOneHandlers } from '../../api/_lib/adapters/fetch.js';
 
 export const { onRequestGet, onRequestPost, onRequestOptions } =
   createEdgeOneHandlers(endpoint(handleScore));
@@ -404,8 +387,7 @@ import { handleScore } from './_lib/handlers';        // ❌ 部署後 500
 ```
 
 **本機為什麼看不出來**：`tsx`（`npm run dev`）與 Vite（`npx vitest run`、`vite build`）都會替我們補上
-副檔名，所以測試全綠、`build` 成功，都**不代表**部署正確。這一條是 2026-10-13 上線後第一個請求就吃到
-500 才補上的（見 `CHANGELOG.md`）。
+副檔名，所以測試全綠、`build` 成功，都**不代表**部署正確。
 
 **怎麼防**：`tsconfig.api.json` 用 `module: "nodenext"` ＋ `moduleResolution: "nodenext"`，於是同一個
 錯誤在 `npm run typecheck` 就變成 **TS2835**，不必等部署。這一檔只包含 `api`，所以 `src`（瀏覽器端，
@@ -417,18 +399,11 @@ import { handleScore } from './_lib/handlers';        // ❌ 部署後 500
    `npm run build && npm run db:migrate`，所以每次部署都會對**該環境的** `DATABASE_URL` 跑一次
    `ensureSchema`（語句全是 `create table if not exists`，可重複執行）。遷移失敗 ⇒ **建置失敗** ⇒
    沒有表的版本不會開始收流量。
-   On Vercel this is not a manual step: the build runs the migration against that environment's own
-   `DATABASE_URL`.
 
    ⚠️ **它只管建表。** `create table if not exists` 對「已經存在的表」什麼都不做，所以第一次真的要改
    schema（加欄位、回填、加索引）時，它會**靜靜地不做事**。那時要在各 `dialect.schema()` 補上冪等的
    `alter table … if not exists`（並在 `tests/dialect.test.ts` 守住「可重複執行」那一條），或引進遷移
    工具。別因為建置會自動建表，就以為 schema 永遠跟得上 —— 目前**只有**「表不存在」這一種情況是自動的。
-   ⚠️ It only creates tables. `create table if not exists` does nothing to a table that already exists,
-   so the first real change (a column, a backfill, an index) is **silently skipped**. Add an idempotent
-   `alter table … if not exists` to each `dialect.schema()` (keeping the "repeatable" assertion in
-   `tests/dialect.test.ts`), or bring in a migration tool. "The build migrates" does not mean the schema
-   keeps itself current — only the "table does not exist" case is automatic.
 
    手動跑只在三種情況需要：**本機開發**、**騰訊／EdgeOne**（不走 Vercel 的建置）、以及**不想等下一次
    部署**。
@@ -445,8 +420,6 @@ import { handleScore } from './_lib/handlers';        // ❌ 部署後 500
    —— **不含帳密**（見 `describeConnectionTarget`）。這一行的用途很具體：Neon 的 Vercel 整合**每個環境
    各開一個 branch**，所以「我跑過遷移了」與「正式環境還是空的」可以同時成立；那一行讓部署日誌自己
    回答「剛剛遷移的是哪個 branch」，不必用猜的。
-   It prints the **target**, credentials removed — because Neon's Vercel integration opens a separate
-   branch per environment, so "I ran the migration" and "production is still empty" can both be true.
 3. **加秘密**：Vercel → Project Settings → Environment Variables 填 `RUN_TOKEN_SECRET`（≥ 32 字元）。
    其餘選填見 `.env.example`。
    > ⚠️ `DATABASE_URL` 的 **Build** scope 也要打開。`.env.example` 與 Neon 整合預設都會給，但如果
@@ -457,11 +430,9 @@ import { handleScore } from './_lib/handlers';        // ❌ 部署後 500
    > ⚠️ **前提：Vercel 專案的 Node.js Version 要是 22.x**（Project → Settings → General）。
    > 建置階段會跑 Node 程式（`tsx`、`node:sqlite`、`--env-file-if-exists`），Node 20 會讓
    > `npm run db:migrate` 以一個看不懂的錯誤結束 —— 而那個錯誤會讓**整個部署失敗**。
-   > The build runs Node code that needs 22.x; on Node 20 the migration fails with an opaque error,
-   > which fails the whole deploy.
 5. **確認**：打開 `/api/health` —— 它會真的問一次資料庫。回 `{ ok: true, database: "postgres", players: N }`
    就是通了。`503` 是連不上（檢查 `DATABASE_URL`、Neon 的 IP allowlist 與 branch），`500` 是**資料庫
-   拒絕了查詢**（Vercel 上現在不該是「表沒建好」——建置已經建過了；若真遇到，先看建置日誌裡那行
+   拒絕了查詢**（Vercel 上不該是「表沒建好」——建置已經建過了；若真遇到，先看建置日誌裡那行
    `applying the … schema to …`，確認它跑在哪一個 branch）。
 6. **前端若不在同一個網域**：把前端的網域填進 `ALLOWED_ORIGIN`，否則瀏覽器會擋下回應。
 
@@ -537,7 +508,8 @@ npm run dev:web    # 只有 Vite（純 UI 改動，打不到 API）
 ## 6.6 客戶端接上 HTTP
 
 `src/game/remoteLeaderboard.ts` 是 `LeaderboardSource` 的伺服器實作。UI（`ui/leaderboard.ts`）只多了
-**一行** `source.refresh?.()`，其餘完全沒動 —— 那正是當初把「榜從哪裡來」抽成介面的目的。
+**一行** `source.refresh?.()`（與載榜時的 `isFetching` 狀態），其餘完全沒動 —— 這正是把「榜從哪裡來」
+抽成介面的目的。
 
 ### 一次遊玩的完整時序
 
@@ -613,19 +585,13 @@ TEST_DATABASE_URL='postgresql://…' npx vitest run tests/db.integration.test.ts
 TEST_DATABASE_URL='mysql://…'      npx vitest run tests/db.integration.test.ts
 ```
 
-### 整合測試為什麼**不再**是 gated 的
+### 整合測試的預設資料庫
 
-它從前只有設了 `TEST_DATABASE_URL` 才跑，理由是「這個 repo 與 CI 不該為了跑測試而背一個資料庫」。
-那個理由在加了 SQLite 之後消失了：記憶體資料庫連檔案都不是，所以**預設值就是
-`sqlite::memory:`**，這個 suite 現在**一律會跑真的 SQL**。
+`tests/db.integration.test.ts` 預設打 **`sqlite::memory:`**，所以這個 suite **一律會跑真的 SQL**，
+不必先起任何東西、也不會寫出任何檔案。
 
 而**單元測試永遠測不到真 SQL**：`sqlStore.test.ts` 的假驅動驗的是「我們產生了什麼」，整合測試驗的是
 「資料庫真的接受它」。兩者的交集才是「能跑」。
-
-**把 gated 拿掉本身就是收穫**：一改成一律執行，SQLite 立刻抓到兩個從來沒人看過的缺陷 ——
-`scores.device_id` 的外鍵讓「新裝置的第一次提交」與「被退回的提交」永遠寫不進去，以及
-`scores.created_at` 從來沒有被綁進去（於是 `SqlStore` 與 `MemoryStore` 對速率限制的判斷不一致）。兩個
-都是在真庫上也存在、但因為 gated 而從來沒被執行過的路徑，見 §5.1 的第 4、5 點。
 
 要貼近正式環境時，把 `TEST_DATABASE_URL` 指向真的資料庫：`mysql-memory-server`（devDependency）也可以
 起一個**拋棄式的 MySQL**（下載一次、開在隨機空閒埠、`stop()` 就清乾淨）。
@@ -646,10 +612,10 @@ TEST_DATABASE_URL='mysql://…'      npx vitest run tests/db.integration.test.ts
 
 ## 8. 待辦與接縫
 
-- **EdgeOne 骨架**：轉接層（`adapters/fetch.ts` 的 `createEdgeOneHandlers`）已經做好並有測試，但
-  尚未建立 `node-functions/` 目錄、`edgeone` 設定與部署流程。要上的時候見 §5.2。
-- **前後端不同網域時的 CORS**：客戶端的 `baseUrl` 與伺服器的 `ALLOWED_ORIGIN` 兩個都要設，否則請求
-  會被擋掉（本機同源，所以開發時看不到這個問題）。
+- **EdgeOne 部署**：轉接層（`adapters/fetch.ts` 的 `createEdgeOneHandlers`）已經做好並有測試，但
+  `node-functions/` 目錄、`edgeone` 設定與部署流程還沒建立。要上的時候見 §5.2。
+- **前後端不同網域時的 CORS**：客戶端的 `VITE_API_BASE_URL`（`baseUrl`）與伺服器的 `ALLOWED_ORIGIN`
+  兩個都要設，否則請求會被擋掉（本機同源，所以開發時看不到這個問題）。
 - **分析事件**：`design.md` §6.8 的 `events` 表與上報還沒做（schema 也還沒建）。
 - **完整名稱驗證**：`handlers.ts` 的 `sanitiseName` 目前只做最低限度清洗（去控制／零寬字元、
   夾長度）。§6.4 的完整管線（32 加權單位、NFKC、字元白名單、七層關鍵詞摺疊）是後續工作，而且
@@ -659,12 +625,6 @@ TEST_DATABASE_URL='mysql://…'      npx vitest run tests/db.integration.test.ts
   更新，但下一次抓榜會被真值蓋掉）。
 - **客戶端送出的是「某一局」的成績，不是存檔合併後的 profile**：解鎖清單（`endchimerge:unlocks`）
   因此仍然只存在本機。要跨裝置合併就得有 `profile/sync`。
-- **還沒有在任何真的 Postgres／MySQL 上跑過完整的流程**：整合測試現在一律會跑，但預設打的是記憶體
-  SQLite。SQLite 與 Postgres 幾乎同形（`on conflict`、`returning`、`nulls last`、部分索引），所以它擋
-  得住大部分的語法錯誤，**但擋不住方言差異本身** —— MySQL 的 `FOUND_ROWS` 就是這樣才被抓到的。
-  2026-10-13 正式環境上線時，**連線那一半已經確認了**（整條 `vercelHandler → runtime → handlers →
-  sqlStore → PostgresDriver → pg-pool` 都跑到，Neon 回的是一個 SQL 錯誤而不是連線失敗）；待辦的是
-  在真的 Neon 上跑完一次「開局 → 提交 → 讀榜」。
-- **遷移只有「建表」**：`npm run db:migrate` 現在是 Vercel 建置的一部分（見 §6 第 2 步），但
+- **遷移只有「建表」**：`npm run db:migrate` 是 Vercel 建置的一部分（見 §6 第 2 步），但
   `create table if not exists` 改不動既有表。第一次需要加欄位／索引時要做決定：補冪等的
   `alter table … if not exists`，或引進遷移工具。規矩寫在 §6。

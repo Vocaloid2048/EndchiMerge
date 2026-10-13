@@ -4,8 +4,6 @@
 
 ## Expected contents
 
-事件清單取自 `design.md`：(1) 放下、(2) 合成、(3) 背景音樂、(4) 使用技力。
-
 | 檔案 | 觸發時機 |
 | --- | --- |
 | `drop.*` | 方團團成功投放 |
@@ -15,6 +13,6 @@
 
 ## Notes
 
-- 使用者已確認**先留 on-click listener 與 SoundPlayer**，素材稍後再補。
+- 先留 on-click listener 與 `SoundPlayer`，素材稍後再補。
 - 音樂為獨立開關（工具列音符鍵），與音效分開控制。
 - 完整格式與取樣率待定；加入前先確認授權。
