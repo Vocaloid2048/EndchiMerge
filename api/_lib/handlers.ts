@@ -1,28 +1,6 @@
 /**
- * 端點的核心邏輯（不含 HTTP 平台細節，也不含日誌外殼）。
- * The endpoints' core logic — no platform-specific HTTP, no logging shell.
- *
- * 每個處理器都只吃 `ApiRequest` 與一份注入的 `Deps`，回一個 `HandlerResult`。這讓整條路徑在單元
- * 測試裡可以直接呼叫：給一個 `MemoryStore`、一個固定的時鐘，就能驗完「發憑證 → 提交 → 上榜」。
- * Each handler takes an `ApiRequest` and an injected `Deps`, and returns a `HandlerResult`. That makes
- * the whole path callable in a unit test: hand it a `MemoryStore` and a fixed clock, and "issue a
- * token → submit → appear on the board" is fully exercised.
- *
- * 反作弊的兩個檢查放在這裡，順序刻意如下：
- *   1. **先擋速率**（比對憑證便宜，比讀資料庫便宜）；
- *   2. **再驗憑證**（這一局是不是伺服器發的、是不是這個裝置、過期了沒）；
- *   3. **再驗時間**（宣稱的時長不能超過憑證頒發以來的實際時間）；
- *   4. **最後驗合理性**（上界推導見 `limits.ts`）。
- * The two anti-cheat families live here, deliberately in this order: rate limit first (cheapest),
- * then the token (is this run the server's, for this device, still valid), then time (the claimed
- * duration cannot exceed the time since the token was issued), and finally the rationality bounds
- * (derived in `limits.ts`).
- *
- * **未通過檢查的提交仍然寫進 `scores`**，只是 `verified = false`。留著的理由是審計：一次「明顯在
- * 試」的提交比一次成功的作弊更有價值，因為前者告訴你有人在試，而後者只告訴你有人在贏。
- * **A submission that fails the checks is still written to `scores`**, with `verified = false`. It is
- * kept for the audit trail: an obviously probing submission is worth more than a successful cheat,
- * because the first tells you someone is trying and the second only tells you someone is winning.
+ * 端點核心邏輯：吃 `ApiRequest` 與注入的 `Deps`，回 `HandlerResult`；反作弊依序為速率、憑證、時間、合理性。
+ * The endpoints' core logic: an `ApiRequest` plus injected `Deps` go in, a `HandlerResult` comes out.
  */
 
 import type { ApiRequest, ApiResponse, JsonObject } from './http.js';
@@ -37,64 +15,44 @@ import { isValidDeviceId, newRunId, signRunToken, tokenFingerprint, verifyRunTok
 export interface Deps {
   readonly config: Config;
   readonly store: Store;
-  /** 注入時鐘，測試才不必等真的時間過去。 */
   readonly now: () => number;
 }
 
 export interface HandlerResult {
   readonly response: ApiResponse;
-  /** 給 `requests` 表用的線索；解析不出來時是 `null`。 */
+  /** 給 `requests` 表用的線索；解析不出來時是 `null`。
+   * A hint for the `requests` table; `null` when it cannot be parsed. */
   readonly deviceId: string | null;
   readonly runId: string | null;
 }
 
 export type CoreHandler = (request: ApiRequest, deps: Deps) => Promise<HandlerResult>;
 
-/**
- * 宣稱時長與憑證頒發時間之間的容許差距。
- * The tolerated gap between the claimed duration and the token's issue time.
- *
- * 檢查是**單邊**的（見 `limits.ts`），所以這 5 秒只用來吸掉量測噪音：網路往返、計時器合併、
- * 客戶端把模擬時鐘對齊到第一幀的偏移。真正的作弊（宣告一局不存在的兩小時）差的是好幾個數量級，
- * 不會躲在 5 秒裡面。
- * The check is **one-sided** (see `limits.ts`), so these five seconds only absorb measurement noise:
- * the round trip, timer coalescing, and the client aligning its simulated clock on the first frame. A
- * real cheat — claiming a two-hour run that never happened — is orders of magnitude away and does not
- * hide inside five seconds.
- */
+/** 宣稱時長與憑證頒發時刻之間容許的差距，只用來吸收量測噪音（檢查是單邊的，見 `limits.ts`）。
+ * Tolerance between the claimed duration and the token's issue time, absorbing measurement noise only. */
 const CLOCK_TOLERANCE_MS = 5_000;
 
 const HOUR_MS = 60 * 60 * 1000;
 
-/** 榜上一次最多回幾個（客戶端只顯示前 100，留一點餘裕）。 */
 const MAX_BOARD_LIMIT = 200;
 const DEFAULT_BOARD_LIMIT = 100;
 
-/* 提交欄位的上限。這些是**形狀**的上限（陣列不可能是負的、時長不可能超過兩小時），不是裁決：
- * 裁決在 `checkRationality`，那裡才是會寫進 `rejected` 的地方。 */
+/* 提交欄位的**形狀**上界（不是裁決 —— 裁決在 `checkRationality`，那裡才寫進 `rejected`）。
+ * Shape upper bounds for submitted fields; the verdict lives in `checkRationality`. */
 const SCORE_MAX = 100_000_000;
 const COUNT_MAX = 1_000_000;
 const NAME_MAX = 32;
 const VERSION_MAX = 32;
 
-/**
- * 名稱的**最低限度**清洗：移除控制字元與零寬字元、夾到長度上限。
- * The **minimum** name cleanup: strip control and zero-width characters, cap the length.
- *
- * 完整的 §6.4 規則（32 個加權單位、NFKC 正規化、字元白名單、七層關鍵詞摺疊）是 M7-4 的工作，
- * 而且必須是**客戶端與伺服器共用同一份實作** —— 兩邊各寫一套的話，客戶端放行而伺服器退回的名稱
- * 會變成一個玩家看得到、我們解釋不清的錯誤。這裡先只做不會有爭議的部分。
- * The full §6.4 pipeline (32 weighted units, NFKC normalisation, a character whitelist, seven layers of
- * keyword folding) is M7-4's job, and it has to be **one shared implementation** for client and
- * server: two implementations means a name the client accepts and the server rejects, which becomes an
- * error the player can see and we cannot explain. Only the uncontroversial part is done here.
- */
+/** 名稱的**最低限度**清洗：移除控制與零寬字元，並夾到長度上限。
+ * The **minimum** name cleanup: strip control and zero-width characters, cap the length. */
 export function sanitiseName(raw: string): string {
   let cleaned = '';
   for (const character of raw) {
     const code = character.codePointAt(0) ?? 0;
 
-    /* C0/C1 控制字元、刪除字元、零寬與方向控制字元一律剔除。 */
+    /* C0/C1 控制字元、刪除字元、零寬與方向控制字元一律剔除。
+     * C0/C1 controls, delete characters, and zero-width/direction controls are all dropped. */
     const isControl = code < 0x20 || (code >= 0x7f && code <= 0x9f);
     const isInvisible =
       code === 0x200b || code === 0x200c || code === 0x200d || code === 0xfeff || (code >= 0x202a && code <= 0x202e);
@@ -105,14 +63,14 @@ export function sanitiseName(raw: string): string {
   return [...cleaned.trim()].slice(0, NAME_MAX).join('');
 }
 
-/** 讀一個必填的識別碼欄位（局號或裝置碼）。 */
 function readId(body: JsonObject, key: string): string | null {
   const value = readString(body, key, 64);
 
   return value !== null && isValidDeviceId(value) ? value : null;
 }
 
-/** 把一次提交的裁決寫成回應（重試時也走這裡，所以兩次回應一模一樣）。 */
+/** 把一次提交的裁決寫成回應；重試也走這裡，所以兩次回應一模一樣。
+ * Renders a submission's verdict; retries reuse it so both responses are identical. */
 function verdictResponse(input: {
   readonly verified: boolean;
   readonly reason: string | null;
@@ -138,16 +96,8 @@ function verdictResponse(input: {
 
 /* ── POST /api/run/start ──────────────────────────────────────────────────── */
 
-/**
- * 開一局：伺服器鑄一張憑證。
- * Start a run: the server mints a token.
- *
- * 憑證綁定 `(run_id, device_id, 頒發時刻)`，而**頒發時刻是最關鍵的那一欄** —— 它讓伺服器在收到
- * 成績時知道這一局是什麼時候開始的（見 `limits.ts` 的 `checkClaimedDuration`）。
- * The token binds `(run_id, device_id, issued_at)`, and **issued_at is the field that matters**: it is
- * how the server knows, at submission time, when the run began (see
- * `limits.checkClaimedDuration`).
- */
+/** 開一局：伺服器鑄一張憑證，綁定 `(run_id, device_id, issued_at)`；`issued_at` 是關鍵欄位（見 `limits.checkClaimedDuration`）。
+ * Start a run: the server mints a token binding `(run_id, device_id, issued_at)`, keyed on `issued_at`. */
 export const handleRunStart: CoreHandler = async (request, deps) => {
   if (request.method !== 'POST') {
     return { response: methodNotAllowed(['POST']), deviceId: null, runId: null };
@@ -155,14 +105,8 @@ export const handleRunStart: CoreHandler = async (request, deps) => {
 
   const body = asObject(request.body) ?? {};
 
-  /*
-   * 裝置碼優先沿用客戶端已經有的那一組（`endchimerge:device-id` 早就存在），形狀不對才由伺服器
-   * 頒發。強制換新的話，既有玩家會忽然變成「新玩家」，而這個 id 的唯一用途只是把同一台裝置的
-   * 歷史綁在一起。
-   * The device id prefers whatever the client already has (`endchimerge:device-id` predates the
-   * backend) and is only minted when the shape is wrong. Forcing a new one would turn existing players
-   * into new players, and the id's only job is to tie one device's history together.
-   */
+  /* 裝置碼優先沿用客戶端已有的那一組；形狀不對才由伺服器頒發（強制換新會讓既有玩家變成新玩家）。
+   * The device id prefers the client's existing one and is minted only when the shape is wrong. */
   const provided = readString(body, 'deviceId', 64);
   const deviceId = provided !== null && isValidDeviceId(provided) ? provided : newRunId();
 
@@ -251,7 +195,8 @@ export const handleScore: CoreHandler = async (request, deps) => {
   const version = readString(body, 'version', VERSION_MAX) ?? '';
   const now = deps.now();
 
-  /* ① 速率限制。算的是這個裝置在上一小時內的**所有**提交，含被退回的那些。 */
+  /* ① 速率限制：這個裝置上一小時內的**所有**提交，含被退回的那些。
+   * ① Rate limit: all submissions from this device in the last hour, including rejected ones. */
   if ((await deps.store.countSubmissionsSince(deviceId, now - HOUR_MS)) >= deps.config.submissionsPerHour) {
     return {
       response: fail(429, 'rate_limited', 'too many submissions in the last hour'),
@@ -260,7 +205,6 @@ export const handleScore: CoreHandler = async (request, deps) => {
     };
   }
 
-  /* ② 憑證。 */
   const tokenRow = await deps.store.getRunToken(runId);
   if (tokenRow === null) {
     return { response: fail(401, 'unknown_run', 'no token was issued for this run'), deviceId, runId };
@@ -277,13 +221,8 @@ export const handleScore: CoreHandler = async (request, deps) => {
     expiresAtMs: tokenRow.expiresAtMs,
   };
 
-  /*
-   * 憑證驗兩件事：簽章（是不是我們發的）與資料庫裡的**指紋**（是不是同一張）。只驗簽章的話，
-   * 一張在別處外洩的憑證可以照用；只驗指紋的話，偽造的簽章也會通過。
-   * Two things are checked: the signature (did we issue it) and the stored **fingerprint** (is it the
-   * same token). Signature alone would accept a token leaked from elsewhere; fingerprint alone would
-   * accept a forged signature.
-   */
+  /* 憑證驗兩件事：簽章（是不是我們發的）與資料庫裡的**指紋**（是不是同一張）；只驗其一都可被繞過。
+   * Two checks: the signature and the stored fingerprint; either one alone can be bypassed. */
   if (!verifyRunToken(deps.config.runTokenSecret, token, payload)) {
     return { response: fail(401, 'bad_token', 'the token does not match this run'), deviceId, runId };
   }
@@ -292,14 +231,8 @@ export const handleScore: CoreHandler = async (request, deps) => {
     return { response: fail(401, 'bad_token', 'the token does not match this run'), deviceId, runId };
   }
 
-  /*
-   * 冪等：這一局已經收過就直接回同一個裁決。放在**消耗憑證之前** —— 送出後斷線、客戶端重試是
-   * 正常的，那時憑證早已被標記用過，若先檢查 `used_at` 就會把一次成功的提交回成錯誤。
-   * Idempotency: if this run was already accepted, return the same verdict. Checked **before** the
-   * token is consumed — losing the connection after sending and retrying is normal, and by then the
-   * token is already marked used, so testing `used_at` first would turn a successful submission into
-   * an error.
-   */
+  /* 冪等：這一局已收過就回同一裁決，且放在**消耗憑證之前** —— 斷線重試時憑證早已標記用過。
+   * Idempotent: reuse the verdict, checked **before** the token is consumed, so retries still succeed. */
   const existing = await deps.store.getScore(runId);
   if (existing !== null) {
     const profile = await deps.store.getProfile(deviceId);
@@ -327,7 +260,8 @@ export const handleScore: CoreHandler = async (request, deps) => {
     return { response: fail(401, 'token_expired', 'this run started too long ago'), deviceId, runId };
   }
 
-  /* ③④ 時間與合理性。兩者都不通過時只回報第一個理由，那是唯一寫進 `rejected` 的值。 */
+  /* ③④ 時間與合理性：兩者都不通過時只回報第一個理由，那是唯一寫進 `rejected` 的值。
+   * ③④ Time and rationality: on failure only the first reason is reported and stored in `rejected`. */
   const durationVerdict = checkClaimedDuration(
     durationMs,
     tokenRow.issuedAtMs,
@@ -404,15 +338,8 @@ export const handleLeaderboard: CoreHandler = async (request, deps) => {
     ? Math.min(MAX_BOARD_LIMIT, Math.max(1, Math.trunc(parsedLimit)))
     : DEFAULT_BOARD_LIMIT;
 
-  /*
-   * 分頁。**排序由伺服器決定，不是把同一份榜交給客戶端重排** —— 榜只回前 `limit` 名，而在分數榜
-   * 排第 500 名的玩家，很可能正是組合數榜的第一名。如果一律用分數排序再取前 100，那一列根本不會
-   * 出現在組合數那一頁，客戶端再怎麼排都救不回來。
-   * The tab. **The server owns the ordering rather than handing one board over to be re-sorted by the
-   * client**: the board returns only the top `limit`, and the player ranked 500th by score may well be
-   * first by combo. Ordering by score and slicing 100 would leave that row out entirely, and no amount
-   * of client-side sorting can bring it back.
-   */
+  /* 分頁：**排序由伺服器決定**，且只回前 `limit` 名 —— 名次會隨分類而不同，客戶端重排救不回來。
+   * Paging: the server owns the ordering and returns only the top `limit`; rank varies per category. */
   const rawCategory = request.query.get('category');
   const category: BoardCategory = isBoardCategory(rawCategory) ? rawCategory : 'score';
 
@@ -440,7 +367,6 @@ export const handleLeaderboard: CoreHandler = async (request, deps) => {
     const profile = await deps.store.getProfile(deviceId);
 
     if (profile !== null && profile.bestScore > 0) {
-      /* 名次要**跟著分頁走** —— 同一個人在三個分頁上的名次本來就不一樣。 */
       const rank = await deps.store.rankOf(
         {
           deviceId,
@@ -469,22 +395,11 @@ export const handleLeaderboard: CoreHandler = async (request, deps) => {
 
 /* ── GET /api/health ──────────────────────────────────────────────────────── */
 
-/**
- * 健康檢查：**真的去問一次資料庫**，不是回一個寫死的 200。
- * A health check that **actually asks the database**, rather than returning a hard-coded 200.
+/** 健康檢查：**真的去問一次資料庫**（`countProfiles()`），不是回一個寫死的 200。
+ * A health check that **actually asks the database** (`countProfiles()`), not a hard-coded 200.
  *
- * 它刻意跑 `countProfiles()` 而不是 `select 1`：前者同時證明「連得上」與「表建好了」，而後者只證明
- * 連得上 —— 一個忘了跑遷移的部署會很有精神地回答 `select 1`。
- * It deliberately runs `countProfiles()` rather than `select 1`: the former proves both "reachable" and
- * "the tables exist", while the latter only proves reachable — a deployment that forgot to run the
- * migration would answer `select 1` quite happily.
- *
- * 失敗時分兩種：**連不上**回 503（基礎設施的事，重試有意義），**語法或 schema 錯**回 500（程式或
- * 遷移的事，重試沒有意義）。兩者混成一個碼會讓前者看起來像後者的 bug。
- * Failures split in two: **unreachable** answers 503 (an infrastructure matter, retrying is
- * meaningful) and a **syntax or schema error** answers 500 (a code or migration matter, retrying is
- * not). Collapsing them into one code makes the first look like a bug in the second.
- */
+ * 失敗分兩碼：連不上回 503（重試有意義），語法或 schema 錯回 500（重試沒意義）。
+ * Failures split: unreachable → 503 (retry is meaningful), syntax/schema error → 500 (it is not). */
 export const handleHealth: CoreHandler = async (request, deps) => {
   if (request.method !== 'GET') {
     return { response: methodNotAllowed(['GET']), deviceId: null, runId: null };

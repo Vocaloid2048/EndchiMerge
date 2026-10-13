@@ -1,27 +1,6 @@
 /**
- * 方言驅動的儲存層：**邏輯只寫一次，語法交給 `Dialect`**。
+ * 方言驅動的儲存層：**邏輯只寫一次，語法交給 `Dialect`**（Postgres 與 MySQL 行為必須一致）。
  * The dialect-driven store: the **logic is written once, the syntax is delegated to `Dialect`**.
- *
- * 這支檔案取代了原本只服務 Postgres 的 `pgStore.ts`。改成這樣都是為了**共用程式碼**：Vercel 用
- * Neon（Postgres）、騰訊的免費關聯式選項用 MySQL，而資料層的行為必須在兩邊一模一樣。
- * This replaces `pgStore.ts`, which only served Postgres. The change is entirely about **code
- * sharing**: Vercel uses Neon (Postgres) and Tencent's free relational options use MySQL, and the data
- * layer has to behave identically on both.
- *
- * ## 什麼住在這裡、什麼住在 `Dialect` / What lives here vs in `Dialect`
- *
- * 住在這裡的是**行為**，也就是那些「搞錯了不會報錯、只會靜靜算錯」的東西：
- *   - 時長**跟著分數走**（只在分數真的刷新時才換），
- *   - 交易裡的順序：先寫 `scores`（靠它判冪等），**才**動 `profiles`；
- *   - 「已存在就不要再更新 profile」—— 否則 `updated_at` 會一直往前跑，看起來像剛刷新。
- * What lives here is **behaviour** — the parts that fail silently rather than loudly: the duration
- * **following the score** (replaced only when the score truly improves), the order inside the
- * transaction (write `scores` first, since it decides idempotency, and only then touch `profiles`),
- * and "an existing row is not updated again" (otherwise `updated_at` keeps moving forward and looks
- * freshly beaten).
- *
- * 住在 `Dialect` 的是**語法**：佔位符、時間型別、upsert、`RETURNING`、`NULLS LAST`。
- * What lives in `Dialect` is **syntax**: placeholders, time types, upserts, `RETURNING`, `NULLS LAST`.
  */
 
 import type { RequestRow } from './requests.js';
@@ -33,7 +12,6 @@ const asText = (value: unknown): string => (typeof value === 'string' ? value : 
 const asNullableText = (value: unknown): string | null =>
   typeof value === 'string' ? value : null;
 
-/** 一筆探針在指定分類下的取值（`rankOf` 用）。 */
 function probeValue(category: BoardCategory, probe: RankProbe): number {
   switch (category) {
     case 'score':
@@ -47,7 +25,9 @@ function probeValue(category: BoardCategory, probe: RankProbe): number {
 
 export class SqlStore implements Store {
   constructor(
-    /** 公開是為了讓呼叫端能 `close()`（測試與本機工具要關池子）。 */
+    /** 公開是為了讓呼叫端能 `close()`（測試與本機工具要關池子）。
+     * Public so callers can `close()` the pool (tests and local tooling).
+     */
     readonly driver: Driver,
     private readonly dialect: Dialect,
   ) {}
@@ -157,27 +137,18 @@ export class SqlStore implements Store {
     return this.dialect.readNumber((rows as Row[])[0]?.['n']);
   }
 
-  /**
-   * 寫入一局，並在通過檢查時更新該玩家的歷史最大值。
-   * Persist a run, updating the player's historical maxima when it passed the checks.
-   *
-   * @returns 是否**真的寫進去了**；同一 `run_id` 再送一次回 `false`（冪等）。
-   *   Whether it was actually written; the same `run_id` again returns `false` (idempotent).
-   */
+  /** 寫入一局，並在通過檢查時更新該玩家的歷史最大值；同一 `run_id` 再送一次回 `false`（冪等）。
+   * Persist a run, updating the player's historical maxima when it passed. Re-submitting returns `false`. */
   async saveScore(row: ScoreRow): Promise<boolean> {
     return this.driver.transaction(async (tx) => {
       const inserted = await this.insertScore(tx, row);
 
-      /*
-       * 同一局重複提交（網路重試）時**不能**再動 profile：分數早就算進去了，再算一次會讓
-       * `updated_at` 一直往前跑，看起來像剛刷新。
-       * A duplicate submission (a network retry) must **not** touch the profile again: the score is
-       * already counted, and doing it twice would keep pushing `updated_at` forward so it looks freshly
-       * beaten.
-       */
+      /* 重複提交（網路重試）**不能**再動 profile，否則 `updated_at` 一直往前跑，看起來像剛刷新。
+       * A duplicate submission must **not** touch the profile, or `updated_at` keeps looking fresh. */
       if (!inserted) return false;
 
-      /* 未通過檢查的提交留檔但不進榜（design.md §6.7）。 */
+      /* 未通過檢查的提交留檔但不進榜。
+       * A submission that failed the checks is recorded but kept off the board. */
       if (row.verified) await this.upsertProfile(tx, row);
 
       return true;
@@ -199,26 +170,16 @@ export class SqlStore implements Store {
       row.rejected,
       row.clientIp,
       /*
-       * `atMs` 一定要綁進去。`scores.created_at` 有三個用途 —— 審計時間、速率限制的視窗
-       * （`countSubmissionsSince`）、以及 `getScore` 讀回來的 `atMs` —— 而 `MemoryStore` 三處都用呼叫端
-       * 傳進來的值。漏掉這個參數不會有任何錯誤：資料庫會用自己的時鐘填預設值，於是兩個 store 實作靜靜
-       * 地不一致，而單元測試走的正是 `MemoryStore`，看不到這件事。
-       * `atMs` must be bound. `scores.created_at` serves three purposes — the audit time, the rate-limit
-       * window (`countSubmissionsSince`) and the `atMs` that `getScore` reads back — and `MemoryStore`
-       * uses the caller's value for all three. Dropping this parameter raises nothing: the database fills
-       * in its own clock, so the two store implementations drift apart silently, and the unit tests run
-       * against `MemoryStore` and never see it.
+       * `atMs` 一定要綁進去：`scores.created_at` 同時是審計時間、速率限制視窗與 `getScore` 讀回的
+       * `atMs`；漏掉不會報錯，只會讓兩個 store 實作靜靜地不一致（單元測試走的是 `MemoryStore`）。
+       * `atMs` must be bound: `created_at` is the audit time, the rate-limit window and `getScore`'s
+       * `atMs`; dropping it raises nothing and silently drifts the two stores apart.
        */
       this.dialect.ts(row.atMs),
     ]);
 
-    /*
-     * Postgres 用 `returning` 的行數判斷，MySQL 沒有 `returning` 只能看 `affectedRows`（見
-     * `Dialect.insertScoreSignal`）。兩種都必須是**原子**的 —— 這是重試不會重複計分的唯一依據。
-     * Postgres decides from the `returning` row count; MySQL has no `returning` and must use
-     * `affectedRows` (see `Dialect.insertScoreSignal`). Both must be **atomic** — it is the only basis
-     * for a retry not double-counting.
-     */
+    /* Postgres 用 `returning` 的行數判斷、MySQL 用 `affectedRows`（見 `Dialect.insertScoreSignal`），兩者都必須原子。
+     * Postgres counts `returning` rows, MySQL uses `affectedRows` (see `Dialect.insertScoreSignal`); both atomic. */
     return this.dialect.insertScoreSignal === 'rows' ? result.rows.length > 0 : result.affected > 0;
   }
 
@@ -236,7 +197,6 @@ export class SqlStore implements Store {
 
   /* ── 玩家與榜 ──────────────────────────────────────────────────────────── */
 
-  /** `profiles` 的固定欄位清單（含把時間讀成毫秒的那一段）。 */
   private profileColumns(): string {
     return `device_id, display_name, best_score, best_duration_ms, best_max_combo, best_merges,
             case when best_at is null then null else ${this.dialect.epochMs('best_at')} end as best_at_ms`;
@@ -289,32 +249,18 @@ export class SqlStore implements Store {
     return this.dialect.readNumber((rows as Row[])[0]?.['n']);
   }
 
-  /**
-   * 「排在這一筆之前」的條件 —— `boardOrder(category)` 的**鏡像**。
-   * The "comes before this one" condition — the **mirror** of `boardOrder(category)`.
-   *
-   * 展開成一段「前綴相等，然後那一鍵嚴格在前」的連鎖，而不是另外手寫一份看起來一樣的排序：兩份一旦
-   * 分歧，`rankOf` 算出的名次就會與 `topProfiles` 列出來的順序互相矛盾（症狀是「我自己是第 3 名，
-   * 但列上寫 #5」）。
-   * Expanded into a chain of "the prefix is equal, then this key is strictly ahead" rather than a
-   * second hand-written look-alike ordering: once the two diverge, the rank from `rankOf` contradicts
-   * the row order from `topProfiles` — the symptom being "I am 3rd, but my row says #5".
-   *
-   * 每一個 `bind()` 都是**一次出現綁一次**（見 `Binder`），所以在 MySQL 上參數會比 Postgres 多。
-   * Every `bind()` is one call per occurrence (see `Binder`), so MySQL ends up with more parameters
-   * than Postgres.
-   */
+  /** 「排在這一筆之前」的條件 —— `boardOrder(category)` 的**鏡像**；兩份一旦分歧，名次就與列序矛盾。
+   * The "comes before this one" condition, the **mirror** of `boardOrder(category)`; divergence breaks ranks. */
   private aheadOf(category: BoardCategory, b: Binder, probe: RankProbe): string {
     const keys: readonly {
       readonly column: string;
       readonly value: unknown;
-      /** 降冪（`>`）還是升冪（`<`）。 */
       readonly desc: boolean;
-      /** 時間鍵要走 `bindTime()`，Postgres 才不會拿字串去比 `timestamptz`。 */
+      /** 時間鍵要走 `bindTime()`，Postgres 才不會拿字串去比 `timestamptz`。
+       * Time keys go through `bindTime()` so Postgres does not compare a string to `timestamptz`. */
       readonly time?: boolean;
     }[] = [
       { column: BOARD_PRIMARY_COLUMN[category], value: probeValue(category, probe), desc: true },
-      /* 分數是第二個鍵，但分數分類的主鍵已經就是它，再比一次只是把同一件事寫兩遍。 */
       ...(category === 'score'
         ? []
         : [{ column: 'best_score', value: probe.score, desc: true }]),

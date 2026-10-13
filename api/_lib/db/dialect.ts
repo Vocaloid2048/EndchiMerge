@@ -1,165 +1,121 @@
 /**
  * SQL 方言：**各資料庫之間所有差異的唯一去處**。
  * The SQL dialect: the **single home for every difference between the databases**.
- *
- * ## 為什麼要有這一層 / Why this layer exists
- *
- * 同一個遊戲要在 Vercel（Neon ＝ Postgres）與騰訊（免費的關聯式選項都是 MySQL）上跑，而資料層的
- * **邏輯**不該有兩份。若把 SQL 直接寫進 store，兩邊就會變成兩支會各自漂移的檔案；漂移一次就是
- * 「Vercel 上正常、騰訊上分數算錯」這種最難查的 bug。
- * The same game runs on Vercel (Neon = Postgres) and Tencent (whose free relational options are all
- * MySQL), and the data layer's **logic** must not exist twice. Writing SQL straight into the store
- * would produce two files that drift; one drift and you get "fine on Vercel, wrong scores on
- * Tencent" — the hardest kind of bug to find.
- *
- * 所以分工是：
- *   - `sqlStore.ts` —— **邏輯**（要不要更新時長、交易的順序、冪等怎麼判），只寫一次；
- *   - `Dialect` —— **語法**（佔位符、時間、upsert、`RETURNING`、`NULLS LAST`），每個方言一份。
- * So the split is: `sqlStore.ts` holds the **logic** (whether to replace the duration, the order inside
- * a transaction, how idempotency is decided) and is written once; `Dialect` holds the **syntax**
- * (placeholders, time, upsert, `RETURNING`, `NULLS LAST`), one per dialect.
- *
- * ## 方言之間的差異，一覽 / The differences, at a glance
- *
- * | 項目 | Postgres | MySQL | SQLite |
- * | --- | --- | --- | --- |
- * | 佔位符 | `$1, $2` | `?` | `?` |
- * | 時間型別 | `timestamptz` | `datetime(3)`（UTC） | `integer`（UTC 毫秒） |
- * | 時間參數 | ISO 字串 ＋ `::timestamptz` | `Date` 物件 | 整數 |
- * | 讀時間 | `extract(epoch from …) * 1000` | `Date.getTime()` | 原樣 |
- * | 布林 | `true` / `false` | `1` / `0` | `1` / `0` |
- * | JSON | `jsonb` | `json` | `text` |
- * | 唯一鍵衝突 | `on conflict … do nothing` | `on duplicate key update` | `on conflict … do nothing` |
- * | 插入是否成功 | `returning` 的行數 | `affectedRows` | `returning` 的行數 |
- * | 空值排序 | `nulls last` | 沒有，要寫 `col is null, col` | `nulls last` |
- * | `count(*)` | 回 bigint（字串）→ 要 `::int` | 回數字 | 回數字 |
- * | 逐列最大值 | `greatest(a, b)` | `greatest(a, b)` | `max(a, b)` |
- *
- * 第三個方言（SQLite）只服務**本機開發** —— 它是「一個檔案」而不是「一個服務」，所以開發與測試不必
- * 先起一個資料庫，而這也是這個 seam 第一次真的被用來加一個方言（`sqlStore.ts` 一行都沒有動）。它
- * 自己的取捨與限制寫在 `sqlite.ts` 的檔頭。
- * The third dialect (SQLite) serves **local development only**: it is "a file" rather than "a service",
- * so development and tests need no database running first — and this is the first time the seam was
- * actually used to add a dialect (`sqlStore.ts` did not change by a single line). Its own trade-offs
- * and limits are documented at the top of `sqlite.ts`.
  */
 
 import type { Driver } from './types.js';
 
 export type DialectName = 'postgres' | 'mysql' | 'sqlite';
 
-/** 一個方言要回答的所有問題。 */
+/**
+ * 一個方言要回答的所有問題。
+ * Every question a dialect has to answer.
+ */
 export interface Dialect {
   readonly name: DialectName;
 
-  /* ── 參數 ──────────────────────────────────────────────────────────────── */
-
-  /** 第 `position` 個（1 起算）佔位符。 */
+  /**
+   * 第 `position` 個（1 起算）佔位符。
+   * The placeholder for argument `position` (1-based).
+   */
   ph(position: number): string;
-  /** 時間參數的值：毫秒 → 驅動看得懂的東西。 */
+  /**
+   * 時間參數的值：毫秒轉成驅動看得懂的形式。
+   * A time argument's value: milliseconds in the form the driver understands.
+   */
   ts(ms: number): unknown;
-  /** 時間參數的**佔位符**（Postgres 要 `::timestamptz` 才不會被當成字串比較）。 */
+  /**
+   * 時間參數的**佔位符**（Postgres 要 `::timestamptz` 才不會被當成字串比較）。
+   * The time argument's **placeholder** (Postgres needs `::timestamptz` to avoid a text comparison).
+   */
   tsPlaceholder(position: number): string;
-  /** JSON 參數的佔位符。 */
+  /**
+   * JSON 參數的佔位符。
+   * The JSON argument's placeholder.
+   */
   jsonPlaceholder(position: number): string;
 
-  /* ── 讀取 ──────────────────────────────────────────────────────────────── */
-
-  /** 把時間欄位讀成毫秒的 SELECT 表達式。 */
+  /**
+   * 把時間欄位讀成毫秒的 SELECT 表達式。
+   * A SELECT expression that reads a time column as milliseconds.
+   */
   epochMs(column: string): string;
-  /** 把驅動回來的時間值轉成毫秒；`null` 原樣回 `null`。 */
+  /**
+   * 把驅動回來的時間值轉成毫秒；`null`／`undefined` 原樣回 `null`。
+   * Converts a driver-returned time value to milliseconds; `null` / `undefined` stay `null`.
+   */
   readTime(value: unknown): number | null;
-  /** `count(…)` 轉成 JS 安全整數的表達式。 */
+  /**
+   * 把 `count(…)` 轉成 JS 安全整數的表達式。
+   * An expression turning `count(…)` into a JS-safe integer.
+   */
   countInt(expression: string): string;
-  /** 驅動回來的整數（Postgres 的 `count` 是字串、MySQL 的 `bigint` 也可能是字串）。 */
+  /**
+   * 驅動回來的整數（Postgres 的 `count` 與 MySQL 的 `bigint` 都可能是字串）。
+   * A driver-returned integer (Postgres `count` and MySQL `bigint` may both arrive as strings).
+   */
   readNumber(value: unknown): number;
-  /** 驅動回來的布林值。 */
+  /**
+   * 驅動回來的布林值。
+   * A driver-returned boolean.
+   */
   readBool(value: unknown): boolean;
-
-  /* ── 語句片段 ──────────────────────────────────────────────────────────── */
 
   /**
    * 榜的 `order by`（**不含** `order by` 這幾個字），依分類。
    * The board's `order by` (without the keywords themselves), per category.
    *
-   * 鍵必須與 `MemoryStore.compareProfiles` 完全一致，否則同分時 `rankOf` 與 `topProfiles` 會對不
-   * 起來 —— `tests/api.test.ts` 用同分的案例把兩邊釘在一起。
-   * The keys must match `MemoryStore.compareProfiles` exactly, or a tie would make `rankOf` and
-   * `topProfiles` disagree — `tests/api.test.ts` pins the two together with a tied case.
+   * 鍵必須與 `MemoryStore.compareProfiles` 完全一致，否則同分時 `rankOf` 與 `topProfiles` 會對不起來。
+   * The keys must match `MemoryStore.compareProfiles` exactly, or a tie makes `rankOf` and `topProfiles` disagree.
    */
   boardOrder(category: BoardCategory): string;
-
-  /* ── 三個寫入語句（形狀差異太大，各自寫一份）/ Three writes, written per dialect ── */
 
   insertRunToken(): string;
   /**
    * 插入一局。
    * Insert a run.
    *
-   * 兩邊都必須是**原子**的冪等：Postgres 是 `on conflict … do nothing returning`，MySQL 是
-   * `on duplicate key update run_id = run_id`（把主鍵更新成自己 ＝ 什麼都不做）。MySQL **不能**用
-   * `insert ignore`：它會把所有錯誤（外鍵、型別）都吞成警告，而不只是重複鍵。
-   * Both must be **atomically** idempotent: Postgres uses `on conflict … do nothing returning`, MySQL
-   * uses `on duplicate key update run_id = run_id` (assigning the key to itself is a no-op). MySQL
-   * must **not** use `insert ignore`, which swallows *every* error (foreign keys, types) as a warning
-   * rather than only duplicate keys.
+   * 兩邊都必須**原子**冪等；MySQL 用 `on duplicate key update run_id = run_id` 而非 `insert ignore`，後者會把所有錯誤吞成警告。
+   * Both must be **atomically** idempotent; MySQL uses `on duplicate key update run_id = run_id`, not `insert ignore`, which swallows every error as a warning.
    */
   insertScore(): string;
-  /** 這個 `insertScore` 用什麼判斷「真的插進去了」。 */
+  /**
+   * `insertScore` 用什麼判斷「真的插進去了」。
+   * What `insertScore` uses to decide it really inserted.
+   */
   readonly insertScoreSignal: 'rows' | 'affected';
   /**
    * 寫入或更新一位玩家的歷史最大值。
    * Write or refresh a player's historical maxima.
    *
-   * ⚠️ **MySQL 的欄位順序有意義**：`on duplicate key update` 是**由左至右**求值的，後面的賦值會看到
-   * 前面已經改過的值（Postgres 的 `excluded` 則永遠是「新的那一列」）。所以 MySQL 這邊 `best_score`
-   * 必須排在所有拿它比較的欄位**之後**，否則 `values(best_score) > best_score` 會變成「新 > 新」而
-   * 永遠是 false，時長就永遠不會跟著分數更新。
-   * ⚠️ **Column order matters in MySQL**: `on duplicate key update` evaluates **left to right**, and a
-   * later assignment sees values already updated by an earlier one (Postgres's `excluded` is always
-   * "the new row" regardless of order). So in MySQL `best_score` must come **after** every column that
-   * compares against it, or `values(best_score) > best_score` becomes "new > new" — always false — and
-   * the duration would never follow the score.
+   * ⚠️ MySQL 的 `on duplicate key update` **由左至右**求值，所以 `best_score` 必須排在 `best_duration_ms`／`best_at` **之後**。
+   * ⚠️ MySQL's `on duplicate key update` evaluates **left to right**, so `best_score` must come **after** `best_duration_ms` / `best_at`.
    */
   upsertProfile(): string;
 
-  /* ── 建表 ──────────────────────────────────────────────────────────────── */
-
-  /** 建表語句；`ensureSchema` 會逐條執行，所以每一條都必須**可重複執行**。 */
+  /**
+   * 建表語句；`ensureSchema` 會逐條執行，所以每一條都必須**可重複執行**。
+   * Schema statements; `ensureSchema` runs them one by one, so each must be **re-runnable**.
+   */
   schema(): readonly string[];
 }
-
-/* ── 共用小工具 / Shared helpers ──────────────────────────────────────────── */
 
 /**
  * 把值綁進語句，並給出對應的佔位符。
  * Bind values into a statement, handing back the matching placeholder.
  *
- * 這是**同一個 SQL 字串能同時餵 Postgres 與 MySQL 的關鍵**。兩種佔位符的差異不只是文字：
- * `$1` 可以被引用多次而只傳一份值，`?` 則是**位置性**的 —— 每一次出現都吃掉一個參數。所以
- * 「同一個值出現三次」在 Postgres 只要一個參數，在 MySQL 要三個。
- * This is **what lets one SQL string feed both Postgres and MySQL**. The two placeholders differ in
- * more than spelling: `$1` can be referenced many times with a single value, whereas `?` is
- * **positional** — every occurrence consumes a parameter. So "the same value three times" needs one
- * parameter on Postgres and three on MySQL.
- *
- * 修法很單純：**每一次出現都綁一次**。Postgres 那邊會多幾個沒有必要的參數，但語句是對的、而且是
- * 同一份文字 —— 比起為這個差異寫兩份 SQL（然後等著它們漂移），多幾個參數便宜太多了。
- * The fix is simply to **bind once per occurrence**. Postgres gets a few redundant parameters, but the
- * statement is correct and it is the same text — far cheaper than writing the SQL twice (and waiting
- * for the two copies to drift).
- *
- * 唯一不適用的是三個寫入語句（見 `Dialect.insertRunToken` 等）：它們的**形狀**本身就不一樣，所以
- * 各自寫在自己的方言裡。
- * The only things this does not cover are the three writes (see `Dialect.insertRunToken` and friends):
- * their **shape** differs, so each lives in its own dialect.
+ * `$1` 可重複引用，`?` 則依位置各吃一個參數 —— 所以**每一次出現都綁一次**，同一份 SQL 才能兩邊通用。
+ * `$1` can be referenced repeatedly while `?` consumes one argument per occurrence, so **bind once per occurrence** to keep one SQL string valid on both.
  */
 export class Binder {
   private readonly values: unknown[] = [];
 
   constructor(private readonly dialect: Dialect) {}
 
-  /** 綁一個值，回它在這個方言裡的佔位符。 */
+  /**
+   * 綁一個值，回它在這個方言裡的佔位符。
+   * Binds a value and returns its placeholder in this dialect.
+   */
   bind(value: unknown): string {
     this.values.push(value);
     return this.dialect.ph(this.values.length);
@@ -167,26 +123,29 @@ export class Binder {
 
   /**
    * 綁一個時間值（毫秒）。
-   * Bind a time value, in milliseconds.
+   * Binds a time value in milliseconds.
    *
-   * 走 `ts`／`tsPlaceholder` 而不是 `bind`：值的**型別**要換（Postgres 收 ISO 字串、MySQL 收
-   * `Date`），而 Postgres 那邊還要 `::timestamptz` 才會被當成時間而不是字串來比較。
-   * Goes through `ts` / `tsPlaceholder` rather than `bind` because the **type** must change (Postgres
-   * takes an ISO string, MySQL a `Date`) and Postgres needs `::timestamptz` to compare it as a time
-   * rather than as text.
+   * 走 `ts`／`tsPlaceholder` 而非 `bind`：值的型別要換，Postgres 還需要 `::timestamptz` 才會被當成時間比較。
+   * Goes through `ts` / `tsPlaceholder` rather than `bind`: the value's type changes and Postgres needs `::timestamptz` to compare it as a time.
    */
   bindTime(ms: number): string {
     this.values.push(this.dialect.ts(ms));
     return this.dialect.tsPlaceholder(this.values.length);
   }
 
-  /** 綁一個 JSON 值；Postgres 要 `::jsonb` 才不會把它當成一段文字。 */
+  /**
+   * 綁一個 JSON 值；Postgres 要 `::jsonb` 才不會把它當成一段文字。
+   * Binds a JSON value; Postgres needs `::jsonb` so it is not treated as text.
+   */
   bindJson(value: unknown): string {
     this.values.push(value);
     return this.dialect.jsonPlaceholder(this.values.length);
   }
 
-  /** 依綁定順序排好的參數，直接餵給驅動。 */
+  /**
+   * 依綁定順序排好的參數，直接餵給驅動。
+   * The arguments in binding order, ready to hand to the driver.
+   */
   get params(): readonly unknown[] {
     return this.values;
   }
@@ -196,28 +155,23 @@ export class Binder {
  * 榜的三個分類。
  * The board's three categories.
  *
- * 這是**榜在排什麼**的識別，不是顯示文字（顯示文字在客戶端的 `src/i18n`）。伺服器要靠它決定
- * `order by` 用哪一欄，所以它必須是一個伺服器也認識的型別；客戶端另外有一份等價的
- * `LeaderboardCategory`，兩邊刻意各自宣告 —— 伺服器不該 import 客戶端的模組。
- * This identifies **what the board is ranking**, not the label (labels live in the client's
- * `src/i18n`). The server needs it to pick the `order by` column, so it has to be a type the server
- * knows; the client has an equivalent `LeaderboardCategory`, and the two are declared separately on
- * purpose — the server must not import client modules.
+ * 這是**榜在排什麼**的識別，不是顯示文字（顯示文字在客戶端的 `src/i18n`）。
+ * This identifies **what the board ranks**, not the label (labels live in the client's `src/i18n`).
  */
 export type BoardCategory = 'score' | 'combo' | 'merges';
 
-/** 三個分類（順序即 UI 的顯示順序）。 */
+/**
+ * 三個分類（順序即 UI 的顯示順序）。
+ * The three categories (the order is the UI's display order).
+ */
 export const BOARD_CATEGORIES: readonly BoardCategory[] = ['score', 'combo', 'merges'];
 
 /**
  * 這個字串是不是一個分類。
  * Whether a string names a category.
  *
- * 查詢字串是**外部輸入**，所以「不認識的值」必須有明確的處置。這裡選**退回 `score`** 而不是回 400：
- * 榜是唯讀的，一個打錯的分類參數最壞情況只是給了分數榜，不需要讓整個請求失敗。
- * The query string is **outside input**, so an unknown value needs an explicit answer. Falling back to
- * `score` is chosen over a 400 because the board is read-only: a mistyped category at worst returns the
- * score board, which does not warrant failing the whole request.
+ * 不認識的值退回 `score` 而非回 400：榜是唯讀的，打錯分類參數不需要讓整個請求失敗。
+ * An unknown value falls back to `score` rather than a 400: the board is read-only, so a mistyped category need not fail the request.
  */
 export function isBoardCategory(value: unknown): value is BoardCategory {
   return typeof value === 'string' && (BOARD_CATEGORIES as readonly string[]).includes(value);
@@ -227,11 +181,8 @@ export function isBoardCategory(value: unknown): value is BoardCategory {
  * 每個分類排的是哪一欄。
  * Which column each category ranks on.
  *
- * 三個值都是 `profiles` 上的**歷史最大值**，而且彼此獨立 —— 同一列的組合數與分數可能來自不同的局
- * （見客戶端 `LeaderboardEntry`）。所以「組合數榜」不是把分數榜重新排一次，而是換一個主鍵。
- * All three are **historical maxima** on `profiles` and independent of one another: one row's combo
- * and score may come from different runs (see the client's `LeaderboardEntry`). A combo board is
- * therefore not a re-sort of the score board but a different primary key.
+ * 三個值都是 `profiles` 上的**歷史最大值**且彼此獨立，所以組合數榜不是分數榜重排，而是換主鍵。
+ * All three are **historical maxima** on `profiles` and independent, so the combo board changes the primary key rather than re-sorting the score board.
  */
 export const BOARD_PRIMARY_COLUMN: Readonly<Record<BoardCategory, string>> = {
   score: 'best_score',
@@ -241,13 +192,10 @@ export const BOARD_PRIMARY_COLUMN: Readonly<Record<BoardCategory, string>> = {
 
 /**
  * 組成榜的排序鍵，各方言只差「時間怎麼排空的」那一段。
- * Build the board's sort keys; the dialects differ only in how the time column sorts nulls.
+ * Builds the board's sort keys; dialects differ only in how the time column sorts nulls.
  *
- * 除了分類自己的那一欄，後面接的是**分數**（同等組合數時，分數高的排前面），再來是時間與 id 兩個
- * 決勝鍵。與客戶端 `compareBy` 同一個思路，理由見那裡的說明。
- * After the category's own column comes **score** (with an equal combo, the higher score leads), then
- * time and id as tie-breakers — the same shape as the client's `compareBy`, for the reasons given
- * there.
+ * 分類欄之後接**分數**（同組合數時高分在前），再以時間與 id 決勝。
+ * After the category column comes **score** (higher score first on an equal combo), then time and id as tie-breakers.
  */
 export function boardOrderKeys(category: BoardCategory, timeOrder: string): string {
   const primary = `${BOARD_PRIMARY_COLUMN[category]} desc`;
@@ -257,26 +205,14 @@ export function boardOrderKeys(category: BoardCategory, timeOrder: string): stri
 }
 
 /**
- * 榜的排序鍵（分數分類的**語意**版本，不含方言寫法）。
- * The board's sort keys — the **semantics** of the score category, free of dialect spelling.
- *
- * 保留它是因為它同時是給人看的說明與測試的基準：它不該被 `nulls last` 或 `is null` 汙染。
- * It earns its place as both human-readable documentation and a test baseline: it must not be
- * polluted by `nulls last` or `is null`.
+ * 榜的排序鍵（分數分類的**語意**版本，不含方言寫法，也不該被 `nulls last` 或 `is null` 汙染）。
+ * The board's sort keys — the score category's **semantics**, free of dialect spelling and of `nulls last` / `is null`.
  */
 export const BOARD_ORDER_KEYS = 'best_score desc, best_at asc, device_id asc';
 
 /**
- * 從連線字串猜方言（沒有明講 `DB_DIALECT` 時）。
- * Guess the dialect from the connection string (when `DB_DIALECT` is not set).
- *
- * 預設是 Postgres：這是**正式環境**的選擇，而猜錯的兩種後果不對稱 —— 猜成 Postgres 但其實是
- * SQLite，會在開發機上立刻看到一行「語法錯誤」；猜成 SQLite 而連的是資料庫服務，會拿到看起來像檔案
- * 權限問題的 `SQLITE_CANTOPEN`（而且可能是在線上才發現）。
- * The default is Postgres because that is the **production** choice, and the two ways of guessing wrong
- * are not symmetric: guessing Postgres for a SQLite file shows a syntax error on a developer's machine
- * immediately, while guessing SQLite for a database service gives a `SQLITE_CANTOPEN` that reads like a
- * file-permission problem — possibly discovered in production.
+ * 從連線字串猜方言（沒有明講 `DB_DIALECT` 時），認不出來就當 Postgres。
+ * Guesses the dialect from the connection string (when `DB_DIALECT` is unset), defaulting to Postgres.
  */
 export function dialectFromUrl(url: string): DialectName {
   const scheme = url.slice(0, url.indexOf(':')).toLowerCase();
@@ -284,11 +220,8 @@ export function dialectFromUrl(url: string): DialectName {
   if (scheme === 'mysql' || scheme === 'mysql2' || scheme === 'mariadb') return 'mysql';
 
   /*
-   * `sqlite:` 與 `sqlite3:` 都認（後者是 `better-sqlite3`／部分工具沿用的舊寫法）。這個 scheme 底下沒
-   * 有意義的 `//` 或 `:`，所以不必再解析下去 —— 路徑怎麼取由 `sqlite.ts` 的 `sqlitePathFromUrl` 負責。
-   * Both `sqlite:` and `sqlite3:` are accepted (the latter is the spelling `better-sqlite3` and some
-   * tools still use). Nothing under this scheme parses as `//` or `:`, so there is no reason to look
-   * further — extracting the path is `sqlitePathFromUrl`'s job in `sqlite.ts`.
+   * `sqlite:` 與 `sqlite3:` 都認；路徑怎麼取由 `sqlite.ts` 的 `sqlitePathFromUrl` 負責。
+   * Both `sqlite:` and `sqlite3:` are accepted; extracting the path is `sqlitePathFromUrl`'s job in `sqlite.ts`.
    */
   if (scheme === 'sqlite' || scheme === 'sqlite3') return 'sqlite';
 
@@ -297,20 +230,10 @@ export function dialectFromUrl(url: string): DialectName {
 
 /**
  * 一個連線字串指向哪裡 —— **去掉帳密**之後的那一小段，用來記進日誌。
- * Where a connection string points — the short form with the credentials **removed**, for the log.
+ * Where a connection string points — the short form with credentials **removed**, for the log.
  *
- * 它存在的理由是一次真實的踩坑：Vercel 的 Neon 整合**每個環境各開一個 branch**，於是「我跑過遷移了」
- * 與「正式環境還是空的」可以同時成立 —— 兩邊的連線字串指的是不同 branch。把目標印出來，日誌自己就會
- * 回答那個問題，不必回頭猜。
- * It exists because of a real trap: Vercel's Neon integration opens a **separate branch per
- * environment**, so "I ran the migration" and "production still has no tables" can both be true — the
- * two connection strings name different branches. Printing the target lets the log answer that question
- * instead of leaving it to guesswork.
- *
- * 只回**主機與資料庫名**（SQLite 回檔案路徑）；查詢參數一律丟掉，因為其中一條可能是密碼一類的東西，
- * 而這一支的輸出會進部署日誌。
- * Only the **host and the database name** come back (the file path for SQLite); query parameters are
- * dropped because one of them could be a password, and this function's output goes into a deploy log.
+ * 只回主機與資料庫名（SQLite 回檔案路徑）；查詢參數一律丟掉，因為其中可能有密碼。
+ * Only the host and database name come back (the file path for SQLite); query parameters are dropped because one may be a password.
  */
 export function describeConnectionTarget(url: string): string {
   const trimmed = url.trim();
@@ -322,7 +245,10 @@ export function describeConnectionTarget(url: string): string {
   const scheme = trimmed.slice(0, colon).toLowerCase();
   const rest = trimmed.slice(colon + 1);
 
-  /* SQLite 是一個檔案：沒有主機、沒有帳密，原樣回傳（查詢字串仍然丟掉）。 */
+  /*
+   * SQLite 是一個檔案：沒有主機、沒有帳密，原樣回傳（查詢字串仍然丟掉）。
+   * SQLite is a file: no host and no credentials, so it is returned as-is (the query string is still dropped).
+   */
   if (scheme === 'sqlite' || scheme === 'sqlite3') return `${scheme}:${rest.split('?')[0] ?? ''}`;
 
   const withoutQuery = rest.split('?')[0] ?? '';
@@ -332,9 +258,8 @@ export function describeConnectionTarget(url: string): string {
   const database = slash < 0 ? '' : withoutSlashes.slice(slash);
 
   /*
-   * 帳密在主機之前，而密碼本身可能含 `@`（沒編碼時），所以取**最後一個** `@` 當分隔。
-   * Credentials sit before the host, and a password may itself contain `@` when it is not escaped, so
-   * the **last** `@` is the separator.
+   * 帳密在主機之前，而密碼本身可能含 `@`（未編碼時），所以取**最後一個** `@` 當分隔。
+   * Credentials precede the host and a password may itself contain `@` when unescaped, so the **last** `@` is the separator.
    */
   const at = authority.lastIndexOf('@');
   const host = at < 0 ? authority : authority.slice(at + 1);
@@ -346,11 +271,8 @@ export function describeConnectionTarget(url: string): string {
  * 這個錯誤是不是「連不上」而不是「SQL 寫錯」。
  * Whether an error is "cannot connect" rather than "the SQL is wrong".
  *
- * 分開的理由是**處置方式完全不同**：連不上要重試（或回 503），SQL 寫錯要修程式而重試沒有意義。
- * 把兩者混成一個 500 會讓前者看起來像後者的 bug。
- * The distinction matters because the **response differs**: a connection failure should be retried
- * (or answered with a 503), while a bad SQL statement needs a code fix and retrying is pointless.
- * Collapsing both into a 500 makes the first look like a bug in the second.
+ * 兩者處置不同：連不上要重試或回 503，SQL 寫錯要修程式。
+ * The two need different handling: a connection failure is retried or answered with a 503, while bad SQL needs a code fix.
  */
 export function isConnectionError(error: unknown): boolean {
   if (error === null || typeof error !== 'object') return false;
@@ -359,9 +281,9 @@ export function isConnectionError(error: unknown): boolean {
   if (typeof code !== 'string') return false;
 
   /*
-   * Postgres 的連線類錯誤從 08 開頭（`08000` 連線例外、`08006` 連線失敗…），加上 `ECONNREFUSED`
-   * 這類 Node 層的錯誤碼；MySQL 用 `PROTOCOL_CONNECTION_LOST` / `ECONNREFUSED` / `ETIMEDOUT` /
-   * `ER_ACCESS_DENIED_ERROR`（憑證錯也連不上，同樣該走 503 而不是 500）。
+   * Postgres 連線類錯誤以 `08` 開頭，加上 Node 的 `ECONNREFUSED`／`ETIMEDOUT`／`ENOTFOUND`；MySQL 另有
+   * `PROTOCOL_CONNECTION_LOST`／`ER_ACCESS_DENIED_ERROR`／`ER_CON_COUNT_ERROR`。
+   * Postgres connection errors start with `08`, plus Node's `ECONNREFUSED` / `ETIMEDOUT` / `ENOTFOUND`; MySQL adds `PROTOCOL_CONNECTION_LOST` / `ER_ACCESS_DENIED_ERROR` / `ER_CON_COUNT_ERROR`.
    */
   return (
     code.startsWith('08') ||
@@ -374,5 +296,8 @@ export function isConnectionError(error: unknown): boolean {
   );
 }
 
-/** 方言要能建立自己的 driver（`db/index.ts` 用它把兩邊接起來）。 */
+/**
+ * 方言要能建立自己的 driver（`db/index.ts` 用它把兩邊接起來）。
+ * A dialect can build its own driver (`db/index.ts` wires the two together with it).
+ */
 export type DriverFactory = (url: string) => Driver;

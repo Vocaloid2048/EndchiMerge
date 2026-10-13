@@ -1,14 +1,6 @@
 /**
  * Postgres：驅動（`pg`）＋ 方言。
  * Postgres: the driver (`pg`) and the dialect.
- *
- * 這一支同時服務 **Neon**、**Supabase**、**本機容器**與**自架的 NAS** —— 對 `pg` 而言它們沒有差別，
- * 差別只在連線字串（與 SSL）。所以這裡不特別為 Neon 寫程式，只把連線字串的**建議**（池化、SSL）
- * 變成可讀的警告，見 `connectionNotes`。
- * This one file serves **Neon**, **Supabase**, a **local container** and a **self-hosted NAS** alike —
- * to `pg` they are identical, and only the connection string (and SSL) differ. So nothing here is
- * Neon-specific; instead the connection-string **advice** (pooling, SSL) is turned into readable
- * warnings in `connectionNotes`.
  */
 
 import { Pool, type PoolClient } from 'pg';
@@ -17,26 +9,22 @@ import { boardOrderKeys, type Dialect } from './dialect.js';
 import type { Driver, Row, SqlResult } from './types.js';
 
 /**
- * 每個實例最多幾條連線。開 2 而不是 1：一個請求可能同時要讀憑證與寫分數，只有一條會排隊；開太大
- * 則會讓併發的實例一起把資料庫的連線數吃光。
- * At most this many connections per instance. Two rather than one because a single request both reads
- * a token and writes a score, and one connection would serialise them; more than a few lets concurrent
- * instances exhaust the database's connection limit together.
+ * 每個實例最多幾條連線；2 條讓同時讀憑證與寫分數不互相排隊，又不會一起把資料庫的連線數吃光。
+ * At most this many connections per instance; two keeps a token read and a score write from queueing while not exhausting the database's connections.
  */
 const POOL_MAX = 2;
 
 /**
- * 需要 TLS 的託管供應商。命中時若連線字串沒明講 `sslmode`，就補一個「加密但不驗憑證鏈」的設定 ——
- * 這些家的憑證鏈在 Node 的根憑證庫裡不一定齊，而「連得上但被自己擋掉」比不加密更令人困惑。
- * Managed providers that need TLS. When one matches and the connection string does not spell out
- * `sslmode`, a "encrypt but do not verify the chain" setting is added: these providers' chains are not
- * always complete in Node's root store, and "connects but is blocked by itself" is more confusing than
- * no encryption at all.
+ * 需要 TLS 的託管供應商；命中且未明講 `sslmode` 時，補上「加密但不驗憑證鏈」的設定。
+ * Managed providers that need TLS; when one matches and `sslmode` is not spelled out, an "encrypt but do not verify the chain" setting is added.
  */
 const MANAGED_HOSTS = /(neon\.tech|supabase\.(co|com|in)|render\.com|amazonaws\.com|azure\.com|aliyuncs\.com|tencentcloud)/i;
 
 function sslFor(url: string): undefined | { rejectUnauthorized: boolean } {
-  /* 連線字串自己講了 `sslmode` 就別插手：那是使用者明確的選擇。 */
+  /*
+   * 連線字串自己講了 `sslmode` 就別插手：那是使用者明確的選擇。
+   * If the connection string spells out `sslmode`, do not interfere: that is an explicit choice.
+   */
   if (/[?&]sslmode=/i.test(url)) return undefined;
 
   return MANAGED_HOSTS.test(url) ? { rejectUnauthorized: false } : undefined;
@@ -45,32 +33,15 @@ function sslFor(url: string): undefined | { rejectUnauthorized: boolean } {
 /**
  * `pg` 當成 `verify-full` **別名**的那三個 SSL 模式。
  * The three SSL modes `pg` treats as **aliases for `verify-full`**.
- *
- * `pg` 8.x 目前就是這樣做的（憑證鏈**有**被驗），但 `pg` v9 會讓它們改用 libpq 語意 —— 屆時
- * `sslmode=require` 退化成「加密但不驗憑證鏈」。所以它們要**明確寫成** `verify-full`：行為與現在
- * 一模一樣，差別只在升級 `pg` 的那一天不會**默默地**降級。
- * `pg` 8.x does exactly that today (the chain **is** verified), but `pg` v9 gives these modes libpq
- * semantics — at which point `sslmode=require` degrades to "encrypted, chain unverified". So they are
- * **written out** as `verify-full`: identical behaviour today, minus the silent downgrade on the day
- * `pg` is upgraded.
- *
- * 這三個字串正好是 Neon 注入的 `DATABASE_URL` 會帶的（`?sslmode=require`），所以這條路是真的會走到的。
- * These are exactly what the `DATABASE_URL` Neon injects carries (`?sslmode=require`), so this path is
- * a real one.
  */
 const SSLMODE_ALIASES = /([?&]sslmode=)(prefer|require|verify-ca)(?=[&#]|$)/i;
 
 /**
  * 把 SSL 模式的**別名**寫成它今天真正的意思（`verify-full`）。
- * Spell the SSL mode **aliases** out as what they mean today (`verify-full`).
+ * Spells the SSL mode **aliases** out as what they mean today (`verify-full`).
  *
- * 兩件事不動。第一，`sslmode=verify-full`／`disable`／`allow` —— 它們不是別名，沒有語意變更要防。
- * 第二，帶著 `uselibpqcompat=true` 的連線字串：那是使用者讀過警告之後**明確**要 libpq 語意，替他改
- * 就是推翻他的選擇。
- * Two things are left alone. First, `sslmode=verify-full` / `disable` / `allow` — not aliases, so
- * there is no semantic change to guard against. Second, any string carrying `uselibpqcompat=true`:
- * that is the user **explicitly** asking for libpq semantics after reading the warning, and rewriting
- * it would overrule their choice.
+ * 不動 `verify-full`／`disable`／`allow`，也不動帶 `uselibpqcompat=true` 的字串（那是使用者的明確選擇）。
+ * Leaves `verify-full` / `disable` / `allow` alone, and any string carrying `uselibpqcompat=true` (an explicit choice).
  */
 export function normaliseSslMode(url: string): string {
   if (/[?&]uselibpqcompat=(true|1)/i.test(url)) return url;
@@ -79,13 +50,8 @@ export function normaliseSslMode(url: string): string {
 }
 
 /**
- * 對連線字串的建議。回傳的是**要記進日誌的字串**，不是錯誤 —— 這些都不該讓後端起不來。
- * Advice about the connection string. These are **strings for the log**, never errors: none of them
- * should stop the backend from starting.
- *
- * 兩條規則都有實際的代價：少了池化，併發一高就撞 `too many connections`；少了 TLS，密碼就是明文。
- * Both rules cost something real: without pooling, moderate concurrency hits `too many connections`;
- * without TLS, the password goes over the wire in the clear.
+ * 對連線字串的建議；回傳的是**要記進日誌的字串**，不是錯誤，都不該讓後端起不來。
+ * Advice about the connection string; these are **strings for the log**, never errors, and none should stop the backend from starting.
  */
 export function connectionNotes(url: string): string[] {
   const notes: string[] = [];
@@ -109,16 +75,16 @@ export function connectionNotes(url: string): string[] {
  * `pg` 的驅動。
  * The `pg` driver.
  *
- * 交易的做法是「另開一條專屬連線」：池子裡的連線會被其他請求共用，而 `begin`／`commit` 是**連線層級**
- * 的狀態，共用會讓別人的查詢意外落進你的交易裡。
- * Transactions use a dedicated connection: pool connections are shared with other requests, and
- * `begin` / `commit` are **connection-level** state, so sharing would drop someone else's query into
- * your transaction.
+ * 交易另開一條專屬連線：池子的連線會被共用，而 `begin`／`commit` 是連線層級的狀態。
+ * Transactions use a dedicated connection: pool connections are shared, and `begin` / `commit` are connection-level state.
  */
 class PostgresDriver implements Driver {
   constructor(
     private readonly pool: Pool,
-    /** 非 `null` 表示這個 driver 已經在某個交易裡（見 `Driver.transaction`）。 */
+    /**
+     * 非 `null` 表示這個 driver 已經在某個交易裡（見 `Driver.transaction`）。
+     * Non-`null` means this driver is already inside a transaction (see `Driver.transaction`).
+     */
     private readonly client: PoolClient | null = null,
   ) {}
 
@@ -130,7 +96,10 @@ class PostgresDriver implements Driver {
   }
 
   async transaction<T>(run: (tx: Driver) => Promise<T>): Promise<T> {
-    /* 已經在交易裡就不再開一層（介面上的理由見 `types.ts`）。 */
+    /*
+     * 已經在交易裡就不再開一層（介面上的理由見 `types.ts`）。
+     * Already inside a transaction, so do not nest another (see `types.ts` for why).
+     */
     if (this.client !== null) return run(this);
 
     const client = await this.pool.connect();
@@ -150,18 +119,18 @@ class PostgresDriver implements Driver {
   }
 
   async close(): Promise<void> {
-    /* 交易中的 driver 不擁有池子，關掉是池子的事。 */
+    /*
+     * 交易中的 driver 不擁有池子，關掉是池子的事。
+     * A transaction driver does not own the pool; closing it is the pool's job.
+     */
     if (this.client === null) await this.pool.end();
   }
 }
 
 export function createPostgresDriver(url: string): Driver {
   /*
-   * 正規化**先做**：`sslFor()` 只在**沒有** `sslmode` 時才插手，而正規化既不新增也不移除這個參數，
-   * 所以兩者先後不影響結果 —— 先做只是讓「送進 `pg` 的那一條字串」只有一個來源。
-   * Normalise **first**: `sslFor()` only steps in when `sslmode` is absent, and normalising neither
-   * adds nor removes it, so the order cannot change the result — doing it first simply leaves one
-   * single source for "the string that goes into `pg`".
+   * 正規化**先做**，讓「送進 `pg` 的那一條字串」只有一個來源（`sslFor()` 只在沒有 `sslmode` 時插手）。
+   * Normalise **first** so there is one single source for the string that goes into `pg` (`sslFor()` only steps in when `sslmode` is absent).
    */
   const connectionString = normaliseSslMode(url);
   const ssl = sslFor(connectionString);
@@ -170,25 +139,24 @@ export function createPostgresDriver(url: string): Driver {
     connectionString,
     max: POOL_MAX,
     /*
-     * 閒置的連線在 serverless 上沒有價值（實例本來就會被回收），而且資料庫端會比較快把連線釋放
-     * 出來給別的實例。`idleTimeoutMillis` 預設 10 秒在這裡太長。
-     * Idle connections are worth nothing on serverless (instances get reclaimed anyway) and the
-     * database frees them for other instances sooner. The 10s default is too long here.
+     * serverless 上閒置連線沒有價值（實例本來就會被回收），而且資料庫端會較快把連線讓給別的實例；預設 10 秒太長。
+     * Idle connections are worth nothing on serverless (instances get reclaimed anyway) and the database frees them sooner; the 10s default is too long.
      */
     idleTimeoutMillis: 5_000,
     connectionTimeoutMillis: 10_000,
     ...(ssl === undefined ? {} : { ssl }),
   });
 
-  /* 池子層級的錯誤不能讓整個 Node 行程掛掉：斷線是正常事件，記下來就好。 */
+  /*
+   * 池子層級的錯誤不能讓整個 Node 行程掛掉：斷線是正常事件，記下來就好。
+   * A pool-level error must not take the Node process down: a dropped connection is normal, so just log it.
+   */
   pool.on('error', (error) => {
     console.error('[api] idle client error', error);
   });
 
   return new PostgresDriver(pool);
 }
-
-/* ── 方言 ─────────────────────────────────────────────────────────────────── */
 
 export const postgresDialect: Dialect = {
   name: 'postgres',
@@ -202,7 +170,10 @@ export const postgresDialect: Dialect = {
   readTime: (value) => (value === null || value === undefined ? null : Number(value)),
   countInt: (expression) => `${expression}::int`,
   readNumber: (value) => Number(value ?? 0),
-  /* Postgres 真的回布林，但 `pg` 對某些欄位型別可能給字串，所以兩種都認。 */
+  /*
+   * Postgres 真的回布林，但 `pg` 對某些欄位型別可能給字串，所以兩種都認。
+   * Postgres really returns booleans, but `pg` may hand back a string for some column types, so both are accepted.
+   */
   readBool: (value) => value === true || value === 't' || value === 1 || value === '1',
 
   boardOrder: (category) => boardOrderKeys(category, 'best_at asc nulls last'),
@@ -212,15 +183,8 @@ export const postgresDialect: Dialect = {
      on conflict (run_id) do nothing`,
 
   /*
-   * ⚠️ `created_at` 是**綁進去的**，不是靠 DDL 的 `default now()`。這一欄是速率限制的依據
-   * （`countSubmissionsSince`）與審計時間，而 `MemoryStore` 用的是呼叫端傳進來的 `atMs` —— 靠
-   * 預設值的話兩個 store 的實作就會分歧，而那個分歧只有在真的連上資料庫時才看得出來（本機與單元測試
-   * 一律走 `MemoryStore`）。
-   * ⚠️ `created_at` is **bound**, not left to the DDL's `default now()`. That column is what the rate
-   * limit counts (`countSubmissionsSince`) and what the audit trail records, and `MemoryStore` uses the
-   * `atMs` the caller passed — relying on the default would make the two store implementations diverge,
-   * and that divergence only shows up against a real database (local runs and unit tests all go through
-   * `MemoryStore`).
+   * ⚠️ `created_at` 是**綁進去的**，不是靠 DDL 的 `default now()`：這一欄是速率限制與審計的依據，而 `MemoryStore` 用的是呼叫端傳入的 `atMs`。
+   * ⚠️ `created_at` is **bound**, not left to the DDL's `default now()`: the column backs the rate limit and audit trail, and `MemoryStore` uses the caller's `atMs`.
    */
   insertScore: () => `insert into scores (
        run_id, device_id, display_name, score, duration_ms, merges, drops, max_combo,
@@ -263,39 +227,8 @@ export const postgresDialect: Dialect = {
     `create index if not exists profiles_best_score_idx
        on profiles (best_score desc, best_at asc)`,
     /*
-     * ⚠️ `scores.device_id` **刻意不是**外鍵。它原本是（`references profiles … on delete cascade`），
-     * 那是錯的，而且錯得會擋掉兩個正常路徑：
-     *
-     *   1. **新裝置的第一次提交永遠失敗。** `sqlStore.saveScore` 先寫 `scores` 再寫 `profiles` ——
-     *      順序不能反，因為「這一局是不是新的」是由 `scores` 那一句的結果決定的（冪等）。所以寫入的
-     *      那一刻 `profiles` 裡還沒有這一列，外鍵當場拒絕。
-     *   2. **被退回的提交根本寫不進去。** `verified = false` 的局**故意**不建 profile（design.md §6.7：
-     *      留審計痕跡但不進榜），於是它永遠沒有父列。有外鍵就等於「拒絕留檔」，而那正是要留的東西。
-     *
-     * 反過來看，那個外鍵**買不到任何東西**：整個程式沒有任何地方刪除 profile，所以
-     * `on delete cascade` 是裝飾品，而它唯一可觀察的效果就是拒絕合法的寫入。
-     *
-     * 這三條加起來的結論是「這不是取捨，是矛盾」—— 所以拿掉它，並且讓三個方言一致（約束是最容易在
-     * 不同引擎上出現不同錯誤碼的東西，正是 `Dialect` 這一層想避免的）。
-     * ⚠️ `scores.device_id` is **deliberately not** a foreign key. It used to be
-     * (`references profiles … on delete cascade`) and that was wrong in a way that blocks two normal
-     * paths:
-     *
-     *   1. **A new device's first submission always fails.** `sqlStore.saveScore` writes `scores` before
-     *      `profiles`, and the order cannot be swapped because whether the run is new is decided by that
-     *      first statement's result (idempotency). At the moment of the insert there is therefore no
-     *      parent row, and the key rejects it.
-     *   2. **A rejected submission cannot be written at all.** A run with `verified = false`
-     *      **deliberately** creates no profile (design.md §6.7: keep an audit trail, keep it off the
-     *      board), so it can never have a parent. With the key in place that means "refuse to record
-     *      it", which is the one thing that must not happen.
-     *
-     * Looked at the other way, the key **buys nothing**: nothing in the codebase deletes a profile, so
-     * `on delete cascade` is decoration, and its only observable effect was rejecting legitimate writes.
-     *
-     * Together those add up to "this is not a trade-off, it is a contradiction", so the key is gone —
-     * and all three dialects agree (constraints are the thing most likely to fail with different error
-     * codes per engine, which is exactly what the `Dialect` layer exists to avoid).
+     * ⚠️ `scores.device_id` **刻意不是**外鍵：`saveScore` 先寫 `scores` 才寫 `profiles`，且被退回的局（`verified = false`）不建 profile，兩者都會被外鍵擋掉。
+     * ⚠️ `scores.device_id` is **deliberately not** a foreign key: `saveScore` writes `scores` before `profiles`, and a rejected run (`verified = false`) creates no profile — both would be rejected by it.
      */
     `create table if not exists scores (
        run_id       uuid primary key,
