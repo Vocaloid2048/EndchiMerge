@@ -298,6 +298,22 @@ export interface LeaderboardSource {
    */
   refresh?(): void;
   /**
+   * 這個分類正在抓新的榜嗎（選填）。
+   * Whether this category is being fetched right now (optional).
+   *
+   * 只有**伺服器版**需要它，而理由是 `snapshot()`：它一定是同步的，所以「快取還是空的」與「正在
+   * 抓第一次」在畫面上得到**同一個結果**（都是空的），但這兩件事不該長得一樣 —— 前者是「還沒有
+   * 紀錄」，後者是「載入中」。UI 靠這個成員分辨它們。
+   * Only the **server build** needs this, and the reason is `snapshot()`: being synchronous, "the
+   * cache is still empty" and "the first fetch is in flight" produce the **same** result on screen
+   * (nothing), and those two should not read alike — one means "no records yet" and the other
+   * means "loading". This is how the UI tells them apart.
+   *
+   * 本機版不提供：它沒有東西要等。
+   * The local build does not provide it: it has nothing to wait for.
+   */
+  isFetching?(category: LeaderboardCategory): boolean;
+  /**
    * 開一局（選填）。
    * Start a run (optional).
    *

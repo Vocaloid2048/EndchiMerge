@@ -54,6 +54,7 @@ export const yue: Messages = {
   'leaderboard.title': '排行榜',
   'leaderboard.subtitle': '全時段 · Top {limit}',
   'leaderboard.close': '關閉排行榜',
+  'leaderboard.loading': 'Load緊…',
   'leaderboard.emptyShare': '宜家仲未有記錄 —— 快啲玩返局先啦！',
   'leaderboard.emptyNoShare': '由於未開分享，所以你嘅分數唔會Upload上去。',
   'leaderboard.unnamed': '（未命名）',

@@ -214,6 +214,63 @@
   text-align: center;
 }
 
+/* ── 載入中 ──────────────────────────────────────────────────────────── */
+
+/*
+ * 「正在抓」與「還沒有紀錄」在畫面上都是空的，但兩件事不該長得一樣（見 `ui/leaderboard.ts`）。
+ * 內距與字級刻意與上面的 `.leaderboard__empty` 一致，所以抓完之後文字換掉時，卡片不會跳一下。
+ * "Fetching" and "no records yet" are both empty on screen and should not read alike (see
+ * `ui/leaderboard.ts`). The padding and type size deliberately match `.leaderboard__empty` above, so
+ * swapping this block for that text does not make the card jump.
+ */
+.leaderboard__loading {
+  display: grid;
+  justify-items: center;
+  gap: 28px;
+  padding: 60px 20px;
+  color: var(--color-fg-dim);
+  font-size: 24px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+/*
+ * 圓環：只有上緣是強調色、其餘是邊框色，轉起來就是「還在做」。
+ * 這是這個專案第一個 `@keyframes` —— 其他地方只用 `--transition-*`（合成動畫在畫布上做，不走 CSS）。
+ * The ring: only the top edge takes the accent colour and the rest the border colour, which reads as
+ * "still working" once it turns. This is the project's first `@keyframes`; elsewhere only
+ * `--transition-*` is used (merge animations happen on the canvas, not in CSS).
+ */
+.leaderboard__spinner {
+  width: 56px;
+  height: 56px;
+  border: 5px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: leaderboard-spin 900ms linear infinite;
+}
+
+@keyframes leaderboard-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/*
+ * 減動偏好下**放慢**而不是停住。專案其他地方的 `prefers-reduced-motion`（`tokens.css`）關掉的是
+ * 純裝飾的合成動畫，關掉不損失任何資訊；但一個靜止的圓環會被讀成「卡住了」，那是**錯的資訊**，
+ * 比動畫本身更糟。所以這裡只是慢下來。
+ * Under reduced motion the ring **slows down instead of stopping**. The project's other
+ * `prefers-reduced-motion` rule (`tokens.css`) disables purely decorative merge animations where
+ * nothing is lost by turning them off; a still ring, by contrast, reads as "stuck" — false
+ * information, which is worse than the animation. So this one only slows.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .leaderboard__spinner {
+    animation-duration: 3s;
+  }
+}
+
 /* ── 「你自己」摘要 ─────────────────────────────────────────────────── */
 
 .leaderboard__self {

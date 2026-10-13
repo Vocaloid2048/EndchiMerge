@@ -180,12 +180,66 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
     }
   }
 
+  /**
+   * 載入中的那一格：文字在上、圓環在下，整塊置中。
+   * The loading cell: the text on top, the ring underneath, the whole block centred.
+   *
+   * `role="status"` 讓讀屏唸出「載入中…」；圓環本身 `aria-hidden`，因為它只是那句話的裝飾 ——
+   * 唸出一個空元素只會多一個沒有內容的停頓。
+   * `role="status"` gets "loading" announced; the ring is `aria-hidden` because it only decorates
+   * that sentence — announcing an empty element adds a pause with nothing in it.
+   */
+  function renderLoading(): HTMLElement {
+    const block = el('li', 'leaderboard__loading');
+    block.setAttribute('role', 'status');
+
+    const label = el('span', 'leaderboard__loadingText');
+    i18nText(label, 'leaderboard.loading');
+
+    const ring = el('span', 'leaderboard__spinner');
+    ring.setAttribute('aria-hidden', 'true');
+
+    appendChildren(block, label, ring);
+
+    return block;
+  }
+
   function renderList(): void {
     const snapshot = source.snapshot(category);
 
     for (const [id, button] of tabButtons) {
       button.classList.toggle('leaderboard__tab--active', id === category);
       button.setAttribute('aria-selected', id === category ? 'true' : 'false');
+    }
+
+    /*
+     * 「正在抓」與「還沒有紀錄」在畫面上都是空的（`snapshot()` 是同步的，見該介面成員），但兩件
+     * 事不該長得一樣。三個條件都要成立才顯示載入中：
+     *
+     *   1. 這一個分類**沒有東西可顯示** —— 已經有快取就照舊顯示榜，不把舊榜換成轉圈。這與
+     *      `refresh()` 抓不到時「保留上一次的榜」是同一個立場：有東西看的時候，永遠比轉圈好。
+     *   2. **分享已開** —— 分享關掉時 `snapshot()` 一律回空的（那是刻意的，見伺服器版的說明），
+     *      所以等下去也不會有東西出現；那時直接講「未開啟分享，成績不會上榜」才是實話。
+     *   3. 這個分類真的**正在抓** —— 本機版沒有這個成員，`?.` 之後永遠是 `false`。
+     *
+     * "Fetching" and "no records yet" are both empty on screen (`snapshot()` is synchronous, see that
+     * interface member), and they should not read alike. All three conditions must hold:
+     *
+     *   1. Nothing to show **for this category** — with a cache the board is drawn as usual rather
+     *      than replaced by a spinner, the same stance as "keep the last board" when a refresh fails:
+     *      real rows always beat a turning ring.
+     *   2. **Sharing is on** — with it off, `snapshot()` always answers empty (deliberately, see the
+     *      server build), so waiting cannot produce anything; saying "sharing is off, scores do not
+     *      appear" right away is the truthful message.
+     *   3. This category is **actually being fetched** — the local build has no such member, so `?.`
+     *      yields `false` forever there.
+     */
+    const fetching = source.sharing && (source.isFetching?.(category) ?? false);
+
+    if (snapshot.entries.length === 0 && fetching) {
+      list.replaceChildren(renderLoading());
+      summary.hidden = true;
+      return;
     }
 
     if (snapshot.entries.length === 0) {

@@ -59,6 +59,7 @@ export const ja: Messages = {
   'leaderboard.title': 'ランキング',
   'leaderboard.subtitle': '全期間 · Top {limit}',
   'leaderboard.close': 'ランキングを閉じる',
+  'leaderboard.loading': '読み込み中…',
   'leaderboard.emptyShare': 'まだ記録がありません —— まず 1 回遊んでみましょう！',
   'leaderboard.emptyNoShare': '共有がオフのため、スコアは掲載されません。',
   'leaderboard.unnamed': '（名無し）',

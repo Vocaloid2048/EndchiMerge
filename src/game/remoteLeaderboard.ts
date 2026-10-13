@@ -621,6 +621,19 @@ export function createRemoteLeaderboard(
     refresh,
     sync,
 
+    /*
+     * 已經在抓了。`fetchCategory()` 在**任何 `await` 之前**就把這個分類寫進 `fetching`，所以
+     * `refresh()` 一回來就查得到 —— 開窗時「先 refresh 再 render」的順序因此拿得到正確答案，
+     * 不必等一個 microtask。（`snapshot()` 是同步的，見該介面成員的說明。）
+     * Already fetching. `fetchCategory()` adds the category to `fetching` **before any `await`**, so
+     * this is answerable the moment `refresh()` returns — which is what makes `open()`'s
+     * "refresh, then render" order correct without waiting a microtask. (`snapshot()` is
+     * synchronous; see that interface member.)
+     */
+    isFetching(category: LeaderboardCategory): boolean {
+      return fetching.has(category);
+    },
+
     snapshot(category: LeaderboardCategory, requested?: number): LeaderboardSnapshot {
       /*
        * 同意之前榜是空的 —— 與本機版同一條規則（見 `game/leaderboard.ts`）。不是「記了但不顯示」，

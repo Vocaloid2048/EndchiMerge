@@ -77,6 +77,7 @@ export const zhHant = {
   'leaderboard.title': '排行榜',
   'leaderboard.subtitle': '全時段 · Top {limit}',
   'leaderboard.close': '關閉排行榜',
+  'leaderboard.loading': '載入中…',
   'leaderboard.emptyShare': '還沒有紀錄 —— 先玩一局吧！',
   'leaderboard.emptyNoShare': '未開啟分享，成績不會上榜。',
   'leaderboard.unnamed': '（未命名）',

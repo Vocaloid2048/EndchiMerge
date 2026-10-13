@@ -71,6 +71,7 @@ export const en: Messages = {
   'leaderboard.title': 'Leaderboard',
   'leaderboard.subtitle': 'All-time · Top {limit}',
   'leaderboard.close': 'Close leaderboard',
+  'leaderboard.loading': 'Loading…',
   'leaderboard.emptyShare': 'No records yet — go play a run!',
   'leaderboard.emptyNoShare': 'Sharing is off, so scores do not appear.',
   'leaderboard.unnamed': '(unnamed)',

@@ -48,6 +48,7 @@ export const zhHans: Messages = {
   'leaderboard.title': '排行榜',
   'leaderboard.subtitle': '全时段 · Top {limit}',
   'leaderboard.close': '关闭排行榜',
+  'leaderboard.loading': '加载中…',
   'leaderboard.emptyShare': '还没有记录 —— 先玩一局吧！',
   'leaderboard.emptyNoShare': '未开启分享，成绩不会上榜。',
   'leaderboard.unnamed': '（未命名）',
