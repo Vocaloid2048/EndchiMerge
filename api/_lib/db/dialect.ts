@@ -296,6 +296,53 @@ export function dialectFromUrl(url: string): DialectName {
 }
 
 /**
+ * 一個連線字串指向哪裡 —— **去掉帳密**之後的那一小段，用來記進日誌。
+ * Where a connection string points — the short form with the credentials **removed**, for the log.
+ *
+ * 它存在的理由是一次真實的踩坑：Vercel 的 Neon 整合**每個環境各開一個 branch**，於是「我跑過遷移了」
+ * 與「正式環境還是空的」可以同時成立 —— 兩邊的連線字串指的是不同 branch。把目標印出來，日誌自己就會
+ * 回答那個問題，不必回頭猜。
+ * It exists because of a real trap: Vercel's Neon integration opens a **separate branch per
+ * environment**, so "I ran the migration" and "production still has no tables" can both be true — the
+ * two connection strings name different branches. Printing the target lets the log answer that question
+ * instead of leaving it to guesswork.
+ *
+ * 只回**主機與資料庫名**（SQLite 回檔案路徑）；查詢參數一律丟掉，因為其中一條可能是密碼一類的東西，
+ * 而這一支的輸出會進部署日誌。
+ * Only the **host and the database name** come back (the file path for SQLite); query parameters are
+ * dropped because one of them could be a password, and this function's output goes into a deploy log.
+ */
+export function describeConnectionTarget(url: string): string {
+  const trimmed = url.trim();
+  if (trimmed === '') return '(empty)';
+
+  const colon = trimmed.indexOf(':');
+  if (colon < 0) return '(unrecognised)';
+
+  const scheme = trimmed.slice(0, colon).toLowerCase();
+  const rest = trimmed.slice(colon + 1);
+
+  /* SQLite 是一個檔案：沒有主機、沒有帳密，原樣回傳（查詢字串仍然丟掉）。 */
+  if (scheme === 'sqlite' || scheme === 'sqlite3') return `${scheme}:${rest.split('?')[0] ?? ''}`;
+
+  const withoutQuery = rest.split('?')[0] ?? '';
+  const withoutSlashes = withoutQuery.replace(/^\/+/, '');
+  const slash = withoutSlashes.indexOf('/');
+  const authority = slash < 0 ? withoutSlashes : withoutSlashes.slice(0, slash);
+  const database = slash < 0 ? '' : withoutSlashes.slice(slash);
+
+  /*
+   * 帳密在主機之前，而密碼本身可能含 `@`（沒編碼時），所以取**最後一個** `@` 當分隔。
+   * Credentials sit before the host, and a password may itself contain `@` when it is not escaped, so
+   * the **last** `@` is the separator.
+   */
+  const at = authority.lastIndexOf('@');
+  const host = at < 0 ? authority : authority.slice(at + 1);
+
+  return `${scheme}://${host}${database}`;
+}
+
+/**
  * 這個錯誤是不是「連不上」而不是「SQL 寫錯」。
  * Whether an error is "cannot connect" rather than "the SQL is wrong".
  *

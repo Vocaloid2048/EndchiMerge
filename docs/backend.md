@@ -161,6 +161,20 @@ T2 的價值在**頒發時刻**：伺服器在開局時記下時間，於是提�
 `npm run dev` 會在**沒有設定時**替你填 `DATABASE_URL=sqlite:.mysql/endchi.db` 與一個公開的開發用
 `RUN_TOKEN_SECRET`（見 §6.5）—— 它只補沒有設的，所以 `.env` 永遠優先。
 
+### `sslmode`：別名會被寫成 `verify-full`
+
+`pg` 8.x 把 `sslmode=prefer`／`require`／`verify-ca` **一律當成 `verify-full`** —— 憑證鏈**有**被驗。
+但 `pg` v9（＋ `pg-connection-string` v3）會讓它們改用 libpq 語意，`require` 屆時退化成「加密但不驗
+憑證鏈」。換句話說：**升級 `pg` 會默默地放寬連線的安全等級**，而升級不會有任何編譯或測試錯誤提醒你 ——
+唯一會發現的方式是回頭讀連線字串。這也是每次冷啟動都在日誌裡印那段 `SECURITY WARNING` 的原因。
+
+所以 `db/postgres.ts` 在建立連線池**之前**把這三個別名明確寫成 `verify-full`
+（`normaliseSslMode()`）。行為與現在**完全相同**，差別只在升級那天不會無聲降級。Neon 注入的
+`DATABASE_URL` 帶的正是 `?sslmode=require`，所以這條路是真的會走到的。
+
+唯一不動的情況：連線字串帶了 `uselibpqcompat=true` —— 那是讀過那段警告之後**明確**要 libpq 語意，
+替它改就是推翻這個選擇。
+
 **產生秘密**：
 
 ```bash
@@ -399,19 +413,56 @@ import { handleScore } from './_lib/handlers';        // ❌ 部署後 500
 
 1. **建資料庫**：Vercel 專案 → Storage → Marketplace → **Neon** → 建一個免費資料庫。Vercel 會自動
    把 `DATABASE_URL`（帶 `-pooler`）注入環境變數。
-2. **建表**（兩種方式，選一個）：
+2. **建表**：**Vercel 上不必手動做。** `vercel.json` 的 `buildCommand` 是
+   `npm run build && npm run db:migrate`，所以每次部署都會對**該環境的** `DATABASE_URL` 跑一次
+   `ensureSchema`（語句全是 `create table if not exists`，可重複執行）。遷移失敗 ⇒ **建置失敗** ⇒
+   沒有表的版本不會開始收流量。
+   On Vercel this is not a manual step: the build runs the migration against that environment's own
+   `DATABASE_URL`.
+
+   ⚠️ **它只管建表。** `create table if not exists` 對「已經存在的表」什麼都不做，所以第一次真的要改
+   schema（加欄位、回填、加索引）時，它會**靜靜地不做事**。那時要在各 `dialect.schema()` 補上冪等的
+   `alter table … if not exists`（並在 `tests/dialect.test.ts` 守住「可重複執行」那一條），或引進遷移
+   工具。別因為建置會自動建表，就以為 schema 永遠跟得上 —— 目前**只有**「表不存在」這一種情況是自動的。
+   ⚠️ It only creates tables. `create table if not exists` does nothing to a table that already exists,
+   so the first real change (a column, a backfill, an index) is **silently skipped**. Add an idempotent
+   `alter table … if not exists` to each `dialect.schema()` (keeping the "repeatable" assertion in
+   `tests/dialect.test.ts`), or bring in a migration tool. "The build migrates" does not mean the schema
+   keeps itself current — only the "table does not exist" case is automatic.
+
+   手動跑只在三種情況需要：**本機開發**、**騰訊／EdgeOne**（不走 Vercel 的建置）、以及**不想等下一次
+   部署**。
+
    ```bash
-   npm run db:migrate                       # 讀 .env 的 DATABASE_URL，三個方言都支援
+   npm run db:migrate                       # 讀 .env 或環境變數的 DATABASE_URL，三個方言都支援
    psql "$DATABASE_URL" -f schema.sql       # 或直接用 Postgres 客戶端套 schema.sql
    ```
-   `db:migrate` 走的是 `db/` 那一層的 `ensureSchema`，所以它與程式**保證**一致，而 `schema.sql`
-   是人看的參考（兩者的一致性由測試守住）。
+
+   `db:migrate` 走的是 `db/` 那一層的 `ensureSchema`，所以它與程式**保證**一致；`schema.sql` 是人看的
+   參考（兩者的一致性由測試守住）。
+
+   它會把**目標**印出來：`applying the postgres schema to postgresql://ep-…-pooler.aws.neon.tech/neondb…`
+   —— **不含帳密**（見 `describeConnectionTarget`）。這一行的用途很具體：Neon 的 Vercel 整合**每個環境
+   各開一個 branch**，所以「我跑過遷移了」與「正式環境還是空的」可以同時成立；那一行讓部署日誌自己
+   回答「剛剛遷移的是哪個 branch」，不必用猜的。
+   It prints the **target**, credentials removed — because Neon's Vercel integration opens a separate
+   branch per environment, so "I ran the migration" and "production is still empty" can both be true.
 3. **加秘密**：Vercel → Project Settings → Environment Variables 填 `RUN_TOKEN_SECRET`（≥ 32 字元）。
    其餘選填見 `.env.example`。
-4. **部署**：推上 Git，Vercel 依 `vercel.json` 建置（`npm run build` → `dist`）。四個端點自動生效。
+   > ⚠️ `DATABASE_URL` 的 **Build** scope 也要打開。`.env.example` 與 Neon 整合預設都會給，但如果
+   > 它被限成 *Runtime only*，建置階段就讀不到，而那次部署會直接失敗（見第 2 步）。
+4. **部署**：推上 Git，Vercel 依 `vercel.json` 建置（`npm run build` → `dist`，**然後跑一次遷移**）。
+   四個端點自動生效。
+
+   > ⚠️ **前提：Vercel 專案的 Node.js Version 要是 22.x**（Project → Settings → General）。
+   > 建置階段會跑 Node 程式（`tsx`、`node:sqlite`、`--env-file-if-exists`），Node 20 會讓
+   > `npm run db:migrate` 以一個看不懂的錯誤結束 —— 而那個錯誤會讓**整個部署失敗**。
+   > The build runs Node code that needs 22.x; on Node 20 the migration fails with an opaque error,
+   > which fails the whole deploy.
 5. **確認**：打開 `/api/health` —— 它會真的問一次資料庫。回 `{ ok: true, database: "postgres", players: N }`
-   就是通了；`503` 是連不上（檢查 `DATABASE_URL` 與 Neon 的 IP allowlist），`500` 是表沒建好
-   （回頭跑第 2 步）。
+   就是通了。`503` 是連不上（檢查 `DATABASE_URL`、Neon 的 IP allowlist 與 branch），`500` 是**資料庫
+   拒絕了查詢**（Vercel 上現在不該是「表沒建好」——建置已經建過了；若真遇到，先看建置日誌裡那行
+   `applying the … schema to …`，確認它跑在哪一個 branch）。
 6. **前端若不在同一個網域**：把前端的網域填進 `ALLOWED_ORIGIN`，否則瀏覽器會擋下回應。
 
 **本機開發**（任何 Postgres 或 MySQL 皆可）：
@@ -608,7 +659,12 @@ TEST_DATABASE_URL='mysql://…'      npx vitest run tests/db.integration.test.ts
   更新，但下一次抓榜會被真值蓋掉）。
 - **客戶端送出的是「某一局」的成績，不是存檔合併後的 profile**：解鎖清單（`endchimerge:unlocks`）
   因此仍然只存在本機。要跨裝置合併就得有 `profile/sync`。
-- **還沒有在任何真的 Postgres／MySQL 上跑過**：整合測試現在一律會跑，但預設打的是記憶體 SQLite。
-  SQLite 與 Postgres 幾乎同形（`on conflict`、`returning`、`nulls last`、部分索引），所以它擋得住大
-  部分的語法錯誤，**但擋不住方言差異本身** —— MySQL 的 `FOUND_ROWS` 就是這樣才被抓到的。第一次部署
-  前請對真的 Neon／騰訊雲各跑一次（見 §7）。
+- **還沒有在任何真的 Postgres／MySQL 上跑過完整的流程**：整合測試現在一律會跑，但預設打的是記憶體
+  SQLite。SQLite 與 Postgres 幾乎同形（`on conflict`、`returning`、`nulls last`、部分索引），所以它擋
+  得住大部分的語法錯誤，**但擋不住方言差異本身** —— MySQL 的 `FOUND_ROWS` 就是這樣才被抓到的。
+  2026-10-13 正式環境上線時，**連線那一半已經確認了**（整條 `vercelHandler → runtime → handlers →
+  sqlStore → PostgresDriver → pg-pool` 都跑到，Neon 回的是一個 SQL 錯誤而不是連線失敗）；待辦的是
+  在真的 Neon 上跑完一次「開局 → 提交 → 讀榜」。
+- **遷移只有「建表」**：`npm run db:migrate` 現在是 Vercel 建置的一部分（見 §6 第 2 步），但
+  `create table if not exists` 改不動既有表。第一次需要加欄位／索引時要做決定：補冪等的
+  `alter table … if not exists`，或引進遷移工具。規矩寫在 §6。

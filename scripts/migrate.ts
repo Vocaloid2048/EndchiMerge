@@ -8,6 +8,14 @@
  *   DATABASE_URL='mysql://…' npm run db:migrate  # 直接指定
  *   npm run db:migrate -- --dialect mysql        # 覆寫方言（連線字串猜不出來時）
  *
+ * 它同時是 **Vercel 建置的一部分**（`vercel.json` 的 `buildCommand`）。這一件事讓「部署成功」與
+ * 「schema 就緒」變成同一句話：遷移失敗就**部署失敗**，不會有一個沒有表的版本開始收流量。手動指令
+ * 留給本機、其他平台，以及「不想等下一次部署」的時候。
+ * It is also **part of the Vercel build** (the `buildCommand` in `vercel.json`), which makes "the deploy
+ * succeeded" and "the schema is ready" the same statement: a failed migration **fails the deploy**
+ * instead of letting a schema-less version take traffic. The manual command stays for local use, other
+ * platforms, and "I do not want to wait for the next deploy".
+ *
  * **兩個方言共用同一份 schema 定義**（`api/_lib/db/postgres.ts` 與 `mysql.ts` 的 `schema()`），所以
  * 這支腳本不需要、也不會有一份自己的 SQL —— 少一份要同步維護的東西，就少一次「部署時才發現兩邊
  * 不一致」。
@@ -15,14 +23,27 @@
  * `mysql.ts`), so this script neither needs nor has SQL of its own — one fewer thing to keep in sync
  * and one fewer "found the two disagreeing at deploy time".
  *
- * 每個方言的建表語句都只用 `create table if not exists`，所以**可以重複執行**；這也是它可以安全地
- * 放進部署流程的原因。
+ * 每個方言的建表語句都只用 `create table if not exists`，所以**可以重複執行**；這也是它可以放進建置
+ * 流程的原因（每次部署都跑，包括預覽部署各自對自己的 Neon branch）。
  * Every dialect's DDL uses only `create table if not exists`, so it is **safe to run repeatedly** —
- * which is what makes it safe to put in a deploy pipeline.
+ * which is what lets it live in the build (every deploy runs it, preview deploys included, each against
+ * its own Neon branch).
+ *
+ * ⚠️ 它只管「建表」。真正的 schema 變更（加欄位、回填、加索引）`create table if not exists` 幫不上
+ * 忙，那時要在各 `dialect.schema()` 補上冪等的 `alter table … if not exists`，或引進遷移工具 ——
+ * 規矩寫在 `docs/backend.md` §6。
+ * ⚠️ It only creates tables. A real schema change (a new column, a backfill, an index) is beyond
+ * `create table if not exists`; add an idempotent `alter table … if not exists` to each
+ * `dialect.schema()`, or bring in a migration tool — the rule is in `docs/backend.md` §6.
  */
 
 import { connectionNotesFor, createDriver, dialectFor, ensureSchema } from '../api/_lib/db';
-import { dialectFromUrl, isConnectionError, type DialectName } from '../api/_lib/db/dialect';
+import {
+  describeConnectionTarget,
+  dialectFromUrl,
+  isConnectionError,
+  type DialectName,
+} from '../api/_lib/db/dialect';
 
 /** 從 `--flag value` 兩種寫法取值。 */
 function argValue(flag: string): string | undefined {
@@ -46,9 +67,10 @@ async function main(): Promise<void> {
   const url = (argValue('--url') ?? process.env['DATABASE_URL'] ?? '').trim();
 
   if (url === '') {
-    console.error(
-      'DATABASE_URL is not set. Put it in .env, or pass it: DATABASE_URL=… npm run db:migrate',
-    );
+    console.error('DATABASE_URL is not set, and there is nothing to migrate without it.');
+    console.error('  locally:   put it in .env, or pass it: DATABASE_URL=… npm run db:migrate');
+    console.error('  on Vercel: Project → Settings → Environment Variables. The value has to be');
+    console.error('             available at build time too, not only at runtime.');
     process.exitCode = 1;
     return;
   }
@@ -67,7 +89,15 @@ async function main(): Promise<void> {
     console.warn(`warning: ${note}`);
   }
 
-  console.log(`applying the ${name} schema…`);
+  /*
+   * 把**目標**印出來。這一行有一個很具體的用途：讓部署日誌自己回答「剛剛遷移的是哪一個資料庫」。
+   * Vercel 的 Neon 整合每個環境各開一個 branch，所以「跑過了」與「正式環境還是空的」可以同時成立 ——
+   * 而這一行的存在就是為了讓那件事不必用猜的。
+   * Print the **target**. This line has one concrete job: letting a deploy log answer "which database did
+   * that migration just touch". Vercel's Neon integration opens a branch per environment, so "it ran"
+   * and "production is still empty" can both be true — and this line exists so that is not a guess.
+   */
+  console.log(`applying the ${name} schema to ${describeConnectionTarget(url)}…`);
 
   const driver = createDriver(name, url);
 

@@ -32,13 +32,14 @@ import {
   Binder,
   BOARD_CATEGORIES,
   BOARD_ORDER_KEYS,
+  describeConnectionTarget,
   dialectFromUrl,
   isBoardCategory,
   isConnectionError,
   type Dialect,
 } from '../api/_lib/db/dialect';
 import { mysqlDialect, MYSQL_CLIENT_FLAGS } from '../api/_lib/db/mysql';
-import { postgresDialect } from '../api/_lib/db/postgres';
+import { normaliseSslMode, postgresDialect } from '../api/_lib/db/postgres';
 import { sqliteDialect, sqlitePathFromUrl } from '../api/_lib/db/sqlite';
 
 const DIALECTS: readonly Dialect[] = [postgresDialect, mysqlDialect, sqliteDialect];
@@ -791,6 +792,162 @@ describe('dialectFromUrl — 猜方言 / guessing the flavour', () => {
   /* 池化參數不該影響判斷（Neon 的 `-pooler` 主機名帶著查詢字串）。 */
   it('ignores query parameters', () => {
     expect(dialectFromUrl('postgresql://u:p@ep-x-pooler.aws.neon.tech/db?sslmode=require')).toBe('postgres');
+  });
+});
+
+/* ── 把連線目標寫進日誌 / Naming the target for the log ───────────────────── */
+
+describe('describeConnectionTarget — 日誌裡要看得到目標 / the target a log should show', () => {
+  /*
+   * 這一支是為了一次真實的踩坑而存在的：Vercel 的 Neon 整合**每個環境各開一個 branch**，所以
+   * 「我跑過遷移了」與「正式環境還是空的」可以同時成立。它的輸出會進部署日誌，因此它要同時做到兩件
+   * 相反的事 —— **主機名完整保留**（`-pooler`、branch 都在裡面），而**帳密一個字元都不留**。
+   * This exists because of a real trap: Vercel's Neon integration opens a **branch per environment**, so
+   * "I ran the migration" and "production is still empty" can both be true. Its output goes into a
+   * deploy log, so it has to do two opposite things at once — keep the host **verbatim** (the `-pooler`
+   * suffix and the branch live in it) and keep the credentials **out entirely**.
+   */
+  it('keeps the host and the database, drops the query string', () => {
+    expect(
+      describeConnectionTarget('postgresql://user:pass@ep-x-pooler.aws.neon.tech/neondb?sslmode=require'),
+    ).toBe('postgresql://ep-x-pooler.aws.neon.tech/neondb');
+  });
+
+  it('keeps a port and a credential-free url as they are', () => {
+    expect(describeConnectionTarget('mysql://root:s3cr3t@10.0.0.5:3306/endchi')).toBe(
+      'mysql://10.0.0.5:3306/endchi',
+    );
+    expect(describeConnectionTarget('postgres://host/db')).toBe('postgres://host/db');
+  });
+
+  /*
+   * 密碼本身可能含 `@`（沒有百分比編碼時，這在真人手寫的連線字串裡很常見）。取**最後一個** `@` 才
+   * 不會把密碼的前半截留在輸出裡。
+   * A password may itself contain `@` when it is not percent-encoded, which is common in hand-written
+   * connection strings. Taking the **last** `@` is what keeps the first half of the password out.
+   */
+  it('drops a password that contains an @ of its own', () => {
+    expect(describeConnectionTarget('postgres://player:p@ss@ep-real.aws.neon.tech/neondb')).toBe(
+      'postgres://ep-real.aws.neon.tech/neondb',
+    );
+  });
+
+  /*
+   * 最重要的一條斷言不是「長什麼樣」，而是**不含什麼**：部署日誌會被人貼進聊天室與 issue。
+   * 使用者名稱、密碼、以及藏在查詢字串裡的 `password=` 都不該有任何一個字元出現。
+   * The assertion that matters is not what it looks like but **what it does not contain**: deploy logs
+   * get pasted into chat windows and issues. Neither the user name, the password, nor a `password=`
+   * hiding in the query string may appear at all.
+   */
+  it('never leaks a credential', () => {
+    const secrets = ['neondb_owner', 'npg_hunter2', 'admin', 'p@ss', 'secretpassword'];
+    const rendered = [
+      describeConnectionTarget(
+        'postgresql://neondb_owner:npg_hunter2@ep-x-pooler.aws.neon.tech/neondb?sslmode=require&password=secretpassword',
+      ),
+      describeConnectionTarget('mysql://admin:p@ss@db.internal:3306/endchi'),
+      describeConnectionTarget('sqlite:.mysql/endchi.db'),
+    ].join('\n');
+
+    for (const secret of secrets) expect(rendered).not.toContain(secret);
+  });
+
+  /* SQLite 是一個檔案：沒有主機也沒有帳密，原樣回傳（`sqlite:///` 與 `sqlite:` 兩種寫法都留著）。 */
+  it('returns a sqlite file path as it is', () => {
+    expect(describeConnectionTarget('sqlite:.mysql/endchi.db')).toBe('sqlite:.mysql/endchi.db');
+    expect(describeConnectionTarget('sqlite::memory:')).toBe('sqlite::memory:');
+    expect(describeConnectionTarget('sqlite:///tmp/x.db?mode=rwc')).toBe('sqlite:///tmp/x.db');
+  });
+
+  /* 它是**全函式**：`migrate.ts` 在日誌行裡直接呼叫它，所以連空字串都要有個說法而不是拋錯。 */
+  it('always answers, even for an empty or odd string', () => {
+    expect(describeConnectionTarget('')).toBe('(empty)');
+    expect(describeConnectionTarget('   ')).toBe('(empty)');
+    expect(describeConnectionTarget('endchi.db')).toBe('(unrecognised)');
+  });
+});
+
+/* ── Postgres 的 SSL 模式 / Spelling the Postgres SSL mode out ─────────────── */
+
+describe('normaliseSslMode — 別名要寫明白 / aliases written out', () => {
+  /*
+   * 這一支防的不是一個 bug，而是**一次未來的升級**：`pg` 8.x 把 `prefer`／`require`／`verify-ca` 一律
+   * 當成 `verify-full`（憑證鏈**有**被驗），`pg` v9 會改成 libpq 語意，於是 `sslmode=require` 變成
+   * 「加密但不驗憑證鏈」。升級不會有任何編譯或測試錯誤提醒你 —— 唯一會發現的方式是回頭讀連線字串。
+   *
+   * 所以把別名寫成 `verify-full`：**與現在的行為完全相同**，只是那一天不會無聲降級。這條斷言同時是
+   * 「與 pg 8 等價」的書面記錄：正常化之後留下來的，正是 pg 8 本來就會用的那一個模式。
+   * What this guards against is not a bug but **a future upgrade**: `pg` 8.x treats `prefer` / `require` /
+   * `verify-ca` as `verify-full` (the chain **is** verified) while `pg` v9 switches them to libpq
+   * semantics, where `sslmode=require` means "encrypted, chain unverified". No compiler and no test will
+   * warn you about that upgrade — reading the connection string again is the only way to notice.
+   *
+   * So the aliases are written out as `verify-full`: **identical behaviour today**, no silent downgrade
+   * later. The assertion doubles as the written record of that equivalence — what survives normalisation
+   * is exactly the mode `pg` 8 would have used anyway.
+   */
+  it('writes the three aliases out as verify-full', () => {
+    for (const alias of ['prefer', 'require', 'verify-ca']) {
+      expect(normaliseSslMode(`postgresql://u:p@host/db?sslmode=${alias}`)).toBe(
+        'postgresql://u:p@host/db?sslmode=verify-full',
+      );
+    }
+  });
+
+  /* Neon 注入的正是這一個字串，所以這不是假想的路徑。其餘參數與順序原封不動。 */
+  it('handles the Neon-shaped string without disturbing anything else', () => {
+    expect(
+      normaliseSslMode(
+        'postgresql://neondb_owner:npg_x@ep-cool-name-123-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require',
+      ),
+    ).toBe(
+      'postgresql://neondb_owner:npg_x@ep-cool-name-123-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=verify-full&channel_binding=require',
+    );
+  });
+
+  /* 大小寫不影響判斷，而**鍵名原樣保留** —— 只換值，不去改寫使用者給的字串。 */
+  it('is case-insensitive about the value and keeps the key as it was', () => {
+    expect(normaliseSslMode('postgres://h/d?SSLMODE=REQUIRE')).toBe('postgres://h/d?SSLMODE=verify-full');
+  });
+
+  /*
+   * `uselibpqcompat=true` 是使用者讀過警告之後**明確**要 libpq 語意。替他改就是推翻他的選擇 ——
+   * 這一條比「消除警告」重要。
+   * `uselibpqcompat=true` is the user **explicitly** asking for libpq semantics after reading the
+   * warning. Rewriting it would overrule their choice, and that matters more than silencing a warning.
+   */
+  it('leaves an explicit libpq-compat string alone', () => {
+    const explicit = 'postgres://u:p@host/db?uselibpqcompat=true&sslmode=require';
+    expect(normaliseSslMode(explicit)).toBe(explicit);
+
+    expect(normaliseSslMode('postgres://u:p@host/db?sslmode=require&uselibpqcompat=true')).toBe(
+      'postgres://u:p@host/db?sslmode=require&uselibpqcompat=true',
+    );
+  });
+
+  /*
+   * 不是別名的值不動：`verify-full` 本來就是目標，`disable`／`allow` 沒有語意變更要防（警告裡也沒提
+   * 它們），而沒有 `sslmode` 的連線字串走的是 `sslFor()` 那一條路。
+   * Values that are not aliases stay put: `verify-full` is already the target, `disable` / `allow` have
+   * no semantic change to guard against (the warning does not mention them either), and a string with
+   * no `sslmode` at all goes down `sslFor()`'s path instead.
+   */
+  it('does not touch anything that is not an alias', () => {
+    for (const value of ['verify-full', 'disable', 'allow']) {
+      const url = `postgres://u:p@host/db?sslmode=${value}`;
+      expect(normaliseSslMode(url)).toBe(url);
+    }
+
+    const plain = 'postgresql://user:pass@host:5432/db';
+    expect(normaliseSslMode(plain)).toBe(plain);
+  });
+
+  /* 只換那一個值：密碼、埠、路徑、其他參數都要位元組不變。 */
+  it('changes one value and nothing else', () => {
+    const before = 'postgresql://u%40ser:p%40ss%2Fword@host:6543/my_db?application_name=endchi&sslmode=require&connect_timeout=10';
+    expect(normaliseSslMode(before)).toBe(
+      'postgresql://u%40ser:p%40ss%2Fword@host:6543/my_db?application_name=endchi&sslmode=verify-full&connect_timeout=10',
+    );
   });
 });
 

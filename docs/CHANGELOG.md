@@ -7,6 +7,123 @@
 
 ---
 
+## 未發佈 — 把 `sslmode` 的別名寫成 `verify-full`：升級 `pg` v9 不會無聲放寬 TLS（2026-10-13）
+
+部署日誌裡每次冷啟動都有一段 `SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are
+treated as aliases for 'verify-full'…`。它不是錯誤、沒有阻擋任何事，但它預告了一件事：
+
+| | 現在（`pg` 8.x） | `pg` v9（＋ `pg-connection-string` v3） |
+| --- | --- | --- |
+| `sslmode=require` | 當成 `verify-full` ⇒ **驗憑證鏈** | libpq 語意 ⇒ 加密但**不驗**憑證鏈 |
+
+而 `postgres.ts` 的 `sslFor()` 是**刻意**在連線字串已帶 `sslmode` 時不插手的（那是使用者的明確選擇），
+所以 Neon 注入的 `?sslmode=require` 會原封不動交給 `pg` —— 意思是**升級 `pg` 會默默地放寬 Neon 連線的
+憑證驗證**，而升級不會有任何編譯或測試錯誤提醒你，唯一的線索是回頭讀連線字串。
+
+### 改動
+
+新增 `normaliseSslMode(url)`（`db/postgres.ts`），在建立連線池**之前**把那三個別名寫成 `verify-full`：
+
+- **行為與現在完全相同**（`pg` 8 本來就是這樣做的），差別只在升級那天不會無聲降級。
+- 帶 `uselibpqcompat=true` 的連線字串**不動** —— 那是使用者讀過警告之後明確要 libpq 語意，替它改就是
+  推翻這個選擇。
+- `verify-full`／`disable`／`allow`，以及完全沒有 `sslmode` 的連線字串，也都不動（後者走 `sslFor()`）。
+
+### 驗證
+
+- 用 `pg` 真的發起一次連線：`sslmode=require` → **1 個警告**（與正式日誌同一段文字）；
+  `sslmode=verify-full` → **0 個**。（兩種模式各跑一個行程，因為 `pg-connection-string` 每個行程只警告
+  一次。第一次用 `new Pool()` 量到 0 是量錯了位置 —— 警告發生在**連線**當下，不是建池當下。）
+- **走我們自己的驅動**：`createPostgresDriver('…?sslmode=require')` 再查一次 → **0 個警告**。
+- `tests/dialect.test.ts` ＋6 條（三個別名、Neon 形狀字串的其餘部分不變、大小寫、`uselibpqcompat`
+  例外、非別名不動、只換一個值）。
+- typecheck ✅、vitest **706 通過 / 0 略過**（34 檔）✅。
+
+### 為什麼**沒有**做「`/api/health` 分辨 `schema_missing`」
+
+原本規劃的 B 項刻意不做：`/api/health` 是**未認證的公開端點**，把「schema 沒建好，去跑
+`npm run db:migrate`」寫進回應等於向所有人廣播內部的維運處置。原有的 500 `database_error` 已經足夠，
+而真正的診斷資訊（Postgres 的完整錯誤、`42P01`）本來就寫在**伺服器日誌**裡。加上前一節的 C 讓 Vercel
+上不會再出現「沒有表的版本」，B 的邊際價值也隨之消失。
+
+---
+
+## 未發佈 — 遷移搬進建置：部署成功就等於 schema 就緒（2026-10-13）
+
+上線後第二輪。模組載入修好之後四個端點仍然 500 —— `relation "profiles" does not exist`、
+`relation "requests" does not exist`。兩張不同的表都不存在，也就是 `docs/backend.md` §6 的第 2 步從來
+沒對**這個**資料庫跑過，四張表（`profiles`／`scores`／`run_tokens`／`requests`）一張都沒有。
+
+這一節記的是**為什麼不選「啟動時自動建表」**，以及改成什麼。
+
+### 為什麼不在啟動時 `create table if not exists`
+
+在 serverless 上「container 啟動」不是一個事件：module 頂層的程式碼是**每個實例一次**，而且實例可以
+並存很多個，所以「啟動時跑一次」實際上是「每次冷啟動 × 併發實例數」。由此而來四個問題：
+
+1. **競態。** `create table if not exists` **不是**原子操作（`IF NOT EXISTS` 只做語句層檢查），併發時
+   Postgres 會直接拋 `42P07`（`duplicate_table`）。那個「保護」會在流量高峰製造 500 —— 把一次性的維運
+   遺漏換成長期、隨機、只在高峰出現的故障，比原本的問題更難查。
+2. **成本。** 每個冷啟動多 11 條 DDL 與 schema 層的鎖，而冷啟動本來就是 serverless 延遲的主要來源。
+3. **假的保證。** `ensureSchema` 只有 `create table if not exists`，對已存在的表什麼都不做。第一次真的
+   要改 schema 時它會靜靜地不做事，而自動化看起來還在。
+4. **權限。** 在請求路徑跑 DDL ⇒ 執行期的資料庫角色必須持有 DDL 權限，而慣例是只有遷移角色才有。
+
+### 改成什麼
+
+`vercel.json` 的 `buildCommand`：
+
+```json
+"buildCommand": "npm run build && npm run db:migrate"
+```
+
+- **每次部署跑一次**（不是每個實例），沒有併發競態，也不佔任何請求延遲。
+- 遷移失敗 ⇒ **建置失敗** ⇒ 沒有表的版本不會開始收流量。
+- 用的是**該環境自己的** `DATABASE_URL`，所以 Neon 的每個 branch 各自完備（包括預覽部署）。
+- **零新程式碼**：`ensureSchema` 用的全是 `create table if not exists`，本來就可重複執行 ——
+  `scripts/migrate.ts` 的註解一早就是這樣寫的，這次只是讓它真的進入部署流程。
+
+### 順帶：讓部署日誌說得出「遷移的是哪個 branch」
+
+Neon 的 Vercel 整合**每個環境各開一個 branch**，所以「我跑過遷移了」與「正式環境還是空的」可以同時
+成立 —— 這次就是這個坑。新增的 `describeConnectionTarget(url)`（`db/dialect.ts`）把目標印出來，
+**只留主機與資料庫名**（SQLite 留檔案路徑）：
+
+```
+applying the postgres schema to postgresql://ep-…-pooler.aws.neon.tech/neondb…
+ok: 11 statements applied, schema is up to date
+```
+
+查詢參數與帳密一律不進輸出（密碼本身含 `@` 時取**最後一個** `@` 當分隔），因為這一行會進部署日誌、而
+部署日誌會被人貼進聊天室與 issue。`DATABASE_URL` 缺失時的訊息也改成同時講本機與 Vercel 兩種情況。
+
+### 文件
+
+- `docs/backend.md` §6 第 2 步改成「**Vercel 上不必手動**」，並寫明它**只管建表**的界線（`alter table`
+  要自己補）、`DATABASE_URL` 的 Build scope，以及**建置需要 Node 22.x** 這個前提（建置階段會跑
+  `tsx`、`node:sqlite`、`--env-file-if-exists`，Node 20 會以一個看不懂的錯誤讓整個部署失敗）。
+- `docs/backend.md` §8 補上「遷移只有建表」這一條決定，並把「還沒在真的 Postgres 上跑過」更新成
+  「連線那一半已在正式環境確認，開局 → 提交 → 讀榜整條待驗」。
+
+### 測試與驗證
+
+- `tests/dialect.test.ts` 新增 6 條，其中最重要的是「**不得洩漏帳密**」——斷言的不是輸出長什麼樣，
+  而是它**不含**使用者名稱、密碼與藏在查詢字串裡的 `password=`。
+- **實際把新的 `buildCommand` 跑過一次**（以 SQLite 當目標）：`npm run build` → `npm run db:migrate`
+  → `applying the sqlite schema to sqlite:.mysql/build-smoke.db…` → `ok: 11 statements applied`，
+  鏈的結束碼 0；打開那個檔案確認 4 張表 ＋ 7 個索引都在。
+- **失敗路徑也跑過**：沒有 `DATABASE_URL` 時 `db:migrate` 以結束碼 1 結束 ⇒ 那個 `&&` 會讓建置失敗
+  ⇒ 部署失敗。
+- typecheck ✅、vitest **700 通過 / 0 略過**（34 檔）✅、build ✅。
+
+### 尚未驗證
+
+遷移還沒在真的 Neon 上跑過（只有 Production 的連線字串能跑），所以「部署後 schema 就緒」是在本機以
+SQLite 驗的。下一步是推上去、看**建置日誌**那行 `applying the postgres schema to …`，再打開
+`/api/health`。
+
+---
+
 ## 未發佈 — 上線後第一個請求就 500：`api/**` 的相對 import 要帶 `.js`（2026-10-13）
 
 四個端點在部署後全部 500，而**本機完全看不出來** —— `npm run dev`、`npx vitest run`、`npm run build`

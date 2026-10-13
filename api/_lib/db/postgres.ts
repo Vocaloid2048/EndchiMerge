@@ -43,6 +43,42 @@ function sslFor(url: string): undefined | { rejectUnauthorized: boolean } {
 }
 
 /**
+ * `pg` 當成 `verify-full` **別名**的那三個 SSL 模式。
+ * The three SSL modes `pg` treats as **aliases for `verify-full`**.
+ *
+ * `pg` 8.x 目前就是這樣做的（憑證鏈**有**被驗），但 `pg` v9 會讓它們改用 libpq 語意 —— 屆時
+ * `sslmode=require` 退化成「加密但不驗憑證鏈」。所以它們要**明確寫成** `verify-full`：行為與現在
+ * 一模一樣，差別只在升級 `pg` 的那一天不會**默默地**降級。
+ * `pg` 8.x does exactly that today (the chain **is** verified), but `pg` v9 gives these modes libpq
+ * semantics — at which point `sslmode=require` degrades to "encrypted, chain unverified". So they are
+ * **written out** as `verify-full`: identical behaviour today, minus the silent downgrade on the day
+ * `pg` is upgraded.
+ *
+ * 這三個字串正好是 Neon 注入的 `DATABASE_URL` 會帶的（`?sslmode=require`），所以這條路是真的會走到的。
+ * These are exactly what the `DATABASE_URL` Neon injects carries (`?sslmode=require`), so this path is
+ * a real one.
+ */
+const SSLMODE_ALIASES = /([?&]sslmode=)(prefer|require|verify-ca)(?=[&#]|$)/i;
+
+/**
+ * 把 SSL 模式的**別名**寫成它今天真正的意思（`verify-full`）。
+ * Spell the SSL mode **aliases** out as what they mean today (`verify-full`).
+ *
+ * 兩件事不動。第一，`sslmode=verify-full`／`disable`／`allow` —— 它們不是別名，沒有語意變更要防。
+ * 第二，帶著 `uselibpqcompat=true` 的連線字串：那是使用者讀過警告之後**明確**要 libpq 語意，替他改
+ * 就是推翻他的選擇。
+ * Two things are left alone. First, `sslmode=verify-full` / `disable` / `allow` — not aliases, so
+ * there is no semantic change to guard against. Second, any string carrying `uselibpqcompat=true`:
+ * that is the user **explicitly** asking for libpq semantics after reading the warning, and rewriting
+ * it would overrule their choice.
+ */
+export function normaliseSslMode(url: string): string {
+  if (/[?&]uselibpqcompat=(true|1)/i.test(url)) return url;
+
+  return url.replace(SSLMODE_ALIASES, '$1verify-full');
+}
+
+/**
  * 對連線字串的建議。回傳的是**要記進日誌的字串**，不是錯誤 —— 這些都不該讓後端起不來。
  * Advice about the connection string. These are **strings for the log**, never errors: none of them
  * should stop the backend from starting.
@@ -120,10 +156,18 @@ class PostgresDriver implements Driver {
 }
 
 export function createPostgresDriver(url: string): Driver {
-  const ssl = sslFor(url);
+  /*
+   * 正規化**先做**：`sslFor()` 只在**沒有** `sslmode` 時才插手，而正規化既不新增也不移除這個參數，
+   * 所以兩者先後不影響結果 —— 先做只是讓「送進 `pg` 的那一條字串」只有一個來源。
+   * Normalise **first**: `sslFor()` only steps in when `sslmode` is absent, and normalising neither
+   * adds nor removes it, so the order cannot change the result — doing it first simply leaves one
+   * single source for "the string that goes into `pg`".
+   */
+  const connectionString = normaliseSslMode(url);
+  const ssl = sslFor(connectionString);
 
   const pool = new Pool({
-    connectionString: url,
+    connectionString,
     max: POOL_MAX,
     /*
      * 閒置的連線在 serverless 上沒有價值（實例本來就會被回收），而且資料庫端會比較快把連線釋放
