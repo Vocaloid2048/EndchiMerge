@@ -16,13 +16,13 @@
 ![Vitest](https://img.shields.io/badge/Vitest-6E9F18?style=flat&logo=vitest&logoColor=white)
 
 
-| <span style="color:#FF99CC">📢 覺得有趣的話，歡迎分享給你的朋友！</span><br> | [按我試玩](https://endchi.voc2048.com) |
+| <span style="color:#FF99CC">📢 覺得有趣的話，歡迎分享給你的朋友！</span><br> | [按我試玩](https://endchi.voc2048.com) [騰訊雲](https://cn-endchi.voc2048.com) |
 |-|-|
 | <span style="color:#05C189">📧 提出建議或回報問題</span><br>| [歡迎 Issue 告訴我們](https://github.com/Vocaloid2048/EndchiMerge/issues) |
 
 ## <span style="color:#C3D630"> 🚧 請留意！
 ### 本專案為非官方粉絲作品
-- 《方團團大作戰》是基於《明日方舟：終末地》的「合成！山團團」網頁活動玩法的非官方粉絲延伸版本。
+- 《方團團大作戰》是基於《明日方舟：終末地》的「融合！山團團！」網頁活動玩法的非官方粉絲延伸版本。
 - 靈感及玩法參考至上述玩法
 - 本專案**完全免費**，亦不會以內購、廣告等任何形式營利
 

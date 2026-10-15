@@ -13,7 +13,7 @@
 ![Vitest](https://img.shields.io/badge/Vitest-6E9F18?style=flat&logo=vitest&logoColor=white)
 
 
-| <span style="color:#FF99CC">📢 Think it's fun? Share it with a friend!</span><br> | [Click to play](https://endchi.voc2048.com) |
+| <span style="color:#FF99CC">📢 Think it's fun? Share it with a friend!</span><br> | [Click to play](https://endchi.voc2048.com) [EdgeOne for CN](https://endchi.voc2048.com) |
 |-|-|
 | <span style="color:#05C189">📧 Suggestions or bug reports</span><br>| [Tell us in an issue](https://github.com/Vocaloid2048/EndchiMerge/issues) |
 
