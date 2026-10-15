@@ -5,6 +5,7 @@
  */
 
 import { coerceBody, fail, normaliseHeaders, type ApiRequest, type ApiResponse, type Handler } from '../http.js';
+import { setEnvSource } from '../runtime.js';
 
 export type FetchHandler = (request: Request) => Promise<Response>;
 
@@ -69,6 +70,11 @@ export function createFetchHandler(handler: Handler): FetchHandler {
  */
 export interface EdgeOneContext {
   readonly request: Request;
+  /**
+   * 環境變數（Makers 的 `cloud-functions` 也一樣）；V8 沒有 `process.env`，所以設定從這裡注入。
+   * Environment variables (same for Makers `cloud-functions`); V8 has no `process.env`, so config arrives here.
+   */
+  readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
 /**
@@ -96,7 +102,15 @@ export function createEdgeOneHandlers(handler: Handler): {
   onRequestOptions: (context: EdgeOneContext) => Promise<Response>;
 } {
   const run = createFetchHandler(handler);
-  const route = (context: EdgeOneContext): Promise<Response> => run(context.request);
+  const route = (context: EdgeOneContext): Promise<Response> => {
+    /*
+     * 把 `context.env` 注入設定來源：邊緣執行時沒有 `process.env`，且 KV 綁定的全域變數也只在執行時才出現。
+     * Inject `context.env` as the config source: edge runtimes lack `process.env`, and the KV-bound
+     * global only appears at runtime.
+     */
+    if (context.env !== undefined) setEnvSource(context.env);
+    return run(context.request);
+  };
 
   return { onRequestGet: route, onRequestPost: route, onRequestOptions: route };
 }

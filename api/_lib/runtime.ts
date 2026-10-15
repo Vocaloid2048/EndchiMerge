@@ -2,45 +2,70 @@
  * 執行期外殼：載入設定、呼叫核心處理器（未預期例外收斂成 500）、寫接收紀錄（4xx/5xx 也寫）、補上 CORS。
  * The runtime shell: loads the config, calls the core handler (collapsing unexpected exceptions
  * into a 500), writes the receive log (also for 4xx/5xx) and adds CORS.
+ *
+ * 儲存層按 `STORAGE_BACKEND` 選：sql 走 SQL（Postgres/MySQL/SQLite），kv 走 EdgeOne KV。兩者都用
+ * 動態 import，使邊緣套件圖**完全不會**引入 `mysql2`／`pg`／`node:sqlite`（那些是 Node 專用，V8 跑不了）。
+ * The store is chosen by `STORAGE_BACKEND`: sql uses SQL (Postgres/MySQL/SQLite), kv uses EdgeOne KV.
+ * Both are dynamic imports so the edge bundle never pulls in `mysql2` / `pg` / `node:sqlite` (Node-only,
+ * which the V8 runtime cannot run).
  */
 
-import { connectionNotesFor, createStore } from './db/index.js';
 import type { Driver } from './db/types.js';
-import { loadConfig, type Config } from './env.js';
+import { readConfig, type Config } from './env.js';
 import type { CoreHandler, Deps } from './handlers.js';
 import { fail, type ApiRequest, type ApiResponse, type Handler } from './http.js';
+import type { Store } from './store.js';
 
 /**
- * 模組層級的相依快取：同一實例的多個請求共用一個連線池，避免每請求一池耗盡資料庫的連線數。
- * A module-scope dependency cache: requests on one instance share a single pool, since a pool per
- * request exhausts the database's connection limit quickly.
+ * 模組層級的相依快取：同一實例的多個請求共用一組相依，避免每請求重建（含冷啟動的 KV 解析）。
+ * A module-scope dependency cache: requests on one instance share one set of dependencies, so they are
+ * not rebuilt per request (including the cold-start KV resolution).
  */
 let deps: Deps | null = null;
-
-/**
- * 目前這個實例的驅動；`closeDependencies` 與測試要用。
- * The current instance's driver; used by `closeDependencies` and tests.
- */
 let activeDriver: Driver | null = null;
 
-function dependencies(): Deps {
-  if (deps === null) {
-    const config = loadConfig();
+/**
+ * 設定的來源；邊緣執行時由轉接頭把 `context.env` 注入這裡（V8 沒有 `process.env`）。
+ * The config source; under an edge runtime the adapter injects `context.env` here (V8 has no `process.env`).
+ */
+let envSource: Readonly<Record<string, string | undefined>> | null = null;
 
-    /*
-     * 連線字串的建議只印一次（相依只建一次）；這些不是錯誤，只是把「之後會出事」變成現在可見。
-     * Connection-string advice, printed once (the dependency is built once); these are not errors,
-     * they just make "this will hurt later" visible now.
-     */
-    for (const note of connectionNotesFor(config.dbDialect, config.databaseUrl)) {
-      console.warn(`[api] ${note}`);
-    }
+/** 邊緣轉接頭呼叫：把 `context.env` 設成設定來源。
+ * Called by the edge adapter: makes `context.env` the config source. */
+export function setEnvSource(env: Readonly<Record<string, string | undefined>>): void {
+  envSource = env;
+}
 
-    const { store, driver } = createStore(config);
+function currentEnv(): Readonly<Record<string, string | undefined>> {
+  if (envSource !== null) return envSource;
+  return process.env as Readonly<Record<string, string | undefined>>;
+}
+
+async function buildDependencies(): Promise<Deps> {
+  const result = readConfig(currentEnv());
+  if (!result.ok) {
+    throw new Error(`missing or invalid environment variables: ${result.missing.join(', ')} (see .env.example)`);
+  }
+  const config: Config = result.config;
+
+  if (config.storageBackend === 'kv') {
+    const { createKvStore } = await import('./store/kvStoreFactory.js');
+    const { store, driver } = createKvStore(config);
     activeDriver = driver;
-    deps = { config, store, now: () => Date.now() };
+    return { config, store, now: () => Date.now() };
   }
 
+  const { createStore, connectionNotesFor } = await import('./db/index.js');
+  for (const note of connectionNotesFor(config.dbDialect, config.databaseUrl)) {
+    console.warn(`[api] ${note}`);
+  }
+  const { store, driver } = createStore(config);
+  activeDriver = driver;
+  return { config, store, now: () => Date.now() };
+}
+
+async function dependencies(): Promise<Deps> {
+  if (deps === null) deps = await buildDependencies();
   return deps;
 }
 
@@ -57,11 +82,13 @@ export async function closeDependencies(): Promise<void> {
 }
 
 /**
- * 同步版本：只換相依，不管連線池（測試用）。
- * The synchronous variant: swaps dependencies only, leaving the pool alone (for tests).
+ * 同步版本：直接換相依，不管連線池（測試用）；也可傳 `null` 清掉快取，讓下一個請求重建。
+ * The synchronous variant: swaps dependencies only, leaving the pool alone (for tests); `null` clears
+ * the cache so the next request rebuilds.
  */
 export function setDependencies(next: Deps | null): void {
   deps = next;
+  activeDriver = null;
 }
 
 /**
@@ -105,8 +132,8 @@ function preflight(request: ApiRequest, config: Config): ApiResponse | null {
 }
 
 /**
- * 把接收紀錄寫進資料庫；失敗不得影響回應。
- * Writes the receive log to the database; a failure must never affect the response.
+ * 把接收紀錄寫進儲存層；失敗不得影響回應。
+ * Writes the receive log to the store; a failure must never affect the response.
  *
  * ⚠️ 私隱：只寫端點維運需要的五個欄位 —— IP 與標頭屬個人資料，**不得**加回來（見 `RequestRow`）。
  * ⚠️ Privacy: only the five fields operations needs — IPs and headers are personal data and must **not** be added back.
@@ -114,7 +141,7 @@ function preflight(request: ApiRequest, config: Config): ApiResponse | null {
 async function logRequest(
   request: ApiRequest,
   response: ApiResponse,
-  context: { config: Config; store: Deps['store'] },
+  context: { config: Config; store: Store },
   handled: { deviceId: string | null; runId: string | null },
 ): Promise<void> {
   try {
@@ -141,7 +168,7 @@ async function logRequest(
  */
 export function endpoint(core: CoreHandler): Handler {
   return async (request: ApiRequest): Promise<ApiResponse> => {
-    const current = dependencies();
+    const current = await dependencies();
 
     const early = preflight(request, current.config);
     if (early !== null) return early;

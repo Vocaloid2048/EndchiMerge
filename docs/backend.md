@@ -8,7 +8,7 @@
 
 ## 1. 現況
 
-後端是**四個端點**，跑在 Vercel Functions 上，資料庫是**任何 Postgres、MySQL 或（本機）SQLite**。
+後端是**四個端點**，平台無關：預設跑在 Vercel Functions 上（資料庫是 **Postgres / MySQL / 本機 SQLite**），也可以跑在 EdgeOne Makers 的 `cloud-functions`（V8 邊緣執行時，用 **EdgeOne KV**，無 TCP、不能連 SQL）。
 
 | Method | Path                | 用途                                                       |
 | ------ | ------------------- | -------------------------------------------------------- |
@@ -19,6 +19,8 @@
 
 **資料庫支援 Postgres、MySQL 與 SQLite 三種方言**，共用同一份業務邏輯 —— 見 §5。前兩者是**部署**選項
 （Vercel 走 Neon、騰訊走 MySQL），SQLite 只服務**本機開發**，因為它是一個檔案而不是一個服務（見 §5.1.1）。
+
+**第四種儲存層是 EdgeOne KV**：走 `STORAGE_BACKEND=kv`（EdgeOne Makers 的 `cloud-functions`）。它不經 SQL 方言，而是扁平 key→value 的掃描實作（見 §5.3）；綁定的命名空間變數名是 `ENDCHI_KV`。
 
 **架構不變**（`design.md` §6.1）：local-first。遊玩中只寫本地，破紀錄時非同步推送；開局載入時拉
 伺服器 profile 合併。
@@ -51,18 +53,21 @@ api/
       index.ts        方言 → 驅動 → 儲存層的組裝點、ensureSchema
     sqlStore.ts       方言驅動的儲存層（邏輯只寫一次）
     store.ts          Store 介面 ＋ MemoryStore（測試用）
-    tokens.ts         簽章、驗章、run_id 產生
+    store/
+      kvStore.ts      KV 實作的 Store（EdgeOne Makers 的 cloud-functions，無 TCP）
+      kvStoreFactory.ts  STORAGE_BACKEND=kv 的組裝點（給一份 no-op driver）
+    tokens.ts         簽章、驗章、run_id 產生（Web Crypto，Node 與 V8 通用）
     limits.ts         上界（從遊戲配置推導）＋ 合理性檢查
     env.ts            環境變數 → Config（純函式，啟動時驗完）
-node-functions/       EdgeOne Pages Node Functions 的入口（薄薄一層，接上 api/_lib）
+cloud-functions/    EdgeOne Makers 的入口（薄薄一層，接上 api/_lib；V8 邊緣執行時）
   api/
     score.js         端點：createEdgeOneHandlers(endpoint(handleScore))
     health.js        端點：createEdgeOneHandlers(endpoint(handleHealth))
     leaderboard.js   端點：createEdgeOneHandlers(endpoint(handleLeaderboard))
     run/start.js     端點：createEdgeOneHandlers(endpoint(handleRunStart))
 schema.sql            人看的 Postgres 版 schema（與程式的一致性由測試守住，見 §7）
-vercel.json           Vercel 建置設定與函式逾時
-edgeone.json          EdgeOne Pages 建置設定（buildCommand 含 db:migrate）
+vercel.json           Vercel 建置設定與函式逾時（buildCommand 含 db:migrate）
+edgeone.json          EdgeOne Makers 建置設定（buildCommand 只跑 npm run build，無 db:migrate）
 .env.example          環境變數的鍵名與說明（**只放鍵名，不放值**）
 scripts/migrate.ts    npm run db:migrate —— 建表（任何方言）
 scripts/dev.ts        npm run dev —— 前端 ＋ 後端 ＋ SQLite，見 §6.5
@@ -286,18 +291,19 @@ Vercel 自家的東西。
 |           | 執行環境                      | 資料庫                                   |
 | --------- | ------------------------- | ------------------------------------- |
 | **Vercel** | Node 函式（`req`/`res`）      | Neon ＝ **Postgres**                   |
-| **EdgeOne** | Web 標準（`Request`/`Response`） | 腾讯云 **MySQL**（免費版／TDSQL-C）           |
+| **EdgeOne** | Web 標準（`Request`/`Response`） | **EdgeOne KV**（Makers `cloud-functions`，V8 無 TCP） |
 | **自架**     | Node ＋ Docker             | 兩者皆可（`DATABASE_URL` 決定）               |
 | **本機開發**   | Node ＋ Vite（同一個行程）        | **SQLite**（一個檔案）                      |
 
-所以切成**兩個接縫**，各自只有一個檔案要知道差異：
+所以切成**三個接縫**，各自只有一個檔案要知道差異：
 
 | 接縫 | 位置 | 換掉它要動什麼 |
 | --- | --- | --- |
 | **平台** | `adapters/` | 一個檔案（`vercel.ts` / `fetch.ts`） |
 | **方言** | `db/` | 一個檔案（`postgres.ts` / `mysql.ts` / `sqlite.ts`） |
+| **儲存層** | `store/` | `kvStore.ts`（KV）或 `db/`（SQL），由 `STORAGE_BACKEND` 選 |
 
-中間的一切 —— `handlers.ts` 的反作弊、`sqlStore.ts` 的榜的邏輯 —— **一行
+中間的一切 —— `handlers.ts` 的反作弊、`sqlStore.ts` 與 `kvStore.ts` 的榜的邏輯 —— **一行
 都不用重複**。這不是「順便」：重複的邏輯會漂移，而漂移的症狀是「Vercel 上正常、騰訊上分數算錯」，
 那是最難查的一種 bug。
 
@@ -371,9 +377,9 @@ Postgres 只要一個參數、在 MySQL／SQLite 要三個 —— 修法是**每
 同源** —— 兩邊各寫一份排序遲早會漂移，而漂移的症狀（「我明明是第 3 名，榜上第 5」）只有玩家看得到。
 `rankOf` 的 SQL 謂詞就是那串鍵的**前綴相等鏈**。
 
-### 5.2 平台：EdgeOne 要接哪一個
+### 5.2 平台：EdgeOne 走 Makers `cloud-functions`（V8 ＋ KV）
 
-EdgeOne Pages 有**兩種**函式，差別決定了能不能連資料庫：
+EdgeOne 有**兩種**函式，差別決定了能不能連 SQL：
 
 | | Edge Functions | **Node Functions** |
 | --- | --- | --- |
@@ -383,10 +389,17 @@ EdgeOne Pages 有**兩種**函式，差別決定了能不能連資料庫：
 | 能連資料庫 | **不能**（無 TCP socket） | **可以**（EdgeOne 官方 MySQL 模板用 `mysql2`） |
 | 呼叫形狀 | `export onRequestGet = async (ctx) => Response` | 同左（`ctx.request` 是標準 `Request`） |
 
-**所以 EdgeOne 那邊要用 Node Functions**：它跑完整的 Node.js，`mysql2` 與 `pg` 都能用，我們的
-`db/` 那一層可以整包照搬。Edge Functions（V8）沒有 TCP，接了也沒用。
+**本專案的 EdgeOne 路徑選 Makers 的 `cloud-functions`（V8 邊緣執行時）＋ EdgeOne KV**：它是
+拋棄式檔案系統、沒有 TCP，所以不能用 SQL（`mysql2`／`pg`／`node:sqlite` 在 V8 都跑不了）。代價是
+榜與各種計數都靠掃描 KV 前綴（O(N)，見 §5.3），FYP 規模可接受。若以後要 SQL，改走 Node Functions
+（`DB_DIALECT=mysql`＋`DATABASE_URL`），同一組 `_lib` 程式碼不必改。
 
-接上去只要一個檔案（例如 `node-functions/api/score.js`）：
+> ⚠️ **V8 的限制**：`runtime.ts` 用**動態 import** 選儲存層，所以 `cloud-functions` 的套件圖**完全不會**
+> 引入 `mysql2`／`pg`／`node:sqlite`；而且 `tokens.ts` 已經從 `node:crypto` 遷到 Web Crypto
+>（`crypto.subtle`），`process.env` 也改由轉接頭注入 `context.env`（見 `adapters/fetch.ts` 的
+> `setEnvSource`）。少了任何一條，部署後就是 500。
+
+接上去只要一個檔案（例如 `cloud-functions/api/score.js`）：
 
 ```js
 import { handleScore } from '../../api/_lib/handlers.js';
@@ -400,8 +413,25 @@ export const { onRequestGet, onRequestPost, onRequestOptions } =
 三個具名匯出指向**同一個**處理器是刻意的：方法判斷只有一處（在處理器裡），三個平台入口不會各自
 漂移 —— 用錯方法會拿到 405，而不是「路由不存在」。
 
-**EdgeOne/邊緣環境要記得**：`ALLOWED_ORIGIN` 要填前端的網域（預設只接受同源）；`DB_DIALECT=mysql`；
-`DATABASE_URL` 指向腾讯云 MySQL。
+**EdgeOne/邊緣環境要記得**：`ALLOWED_ORIGIN` 要填前端的網域（預設只接受同源）；`STORAGE_BACKEND=kv`；
+在控制台把 KV 命名空間綁到變數名 **`ENDCHI_KV`**（見 `kvStore.ts` 的 `KV_BINDING`）。
+
+## 5.3 KV 儲存層：掃描實作
+
+`KvStore`（`store/kvStore.ts`）實作同一個 `Store` 介面，但 KV 是扁平 key→value、沒有 SQL 的查詢／
+排序能力，所以「榜」與各種計數都掃描前綴下的所有列（O(N)），再在記憶體裡排序／過濾。四個前綴：
+
+| 前綴 | 存什麼 |
+| --- | --- |
+| `run:` | `run_tokens`（憑證） |
+| `score:` | `scores`（一局一列，冪等鍵） |
+| `profile:` | `profiles`（榜，一裝置一列） |
+| `req:` | `requests`（接收日誌，不進榜掃描） |
+
+與 `MemoryStore`／`SqlStore` 共用 `store.ts` 的 `compareProfiles`／`resolveUserTag`／
+`applyProfileUpdate`，所以**撞號重抽、歷史最大值、榜序**三條規則三個實作逐字相同（見
+`tests/kvStore.test.ts` 與 `tests/api.test.ts` 的合約斷言）。`kv` 模式沒有連線池可關，`kvStoreFactory.ts`
+給 `closeDependencies` 一份 no-op driver。
 
 ## 6. 部署到 Vercel
 
@@ -601,22 +631,20 @@ npm run dev:web    # 只有 Vite（純 UI 改動，打不到 API）
 
 ---
 
-## 6.7 部署到 EdgeOne Pages
+## 6.7 部署到 EdgeOne（Makers `cloud-functions` ＋ KV）
 
-> 平台選擇見 §5.2：EdgeOne 用 **Node Functions**（`node-functions/`），因為要連 MySQL（`mysql2`）。
+> 平台選擇見 §5.2：EdgeOne 走 **Makers `cloud-functions`**（`cloud-functions/`），用 **EdgeOne KV**，不連 SQL。
 
-1. **建資料庫**：騰訊雲開 **MySQL（免費版／TDSQL-C）**，拿到連線字串 `mysql://user:password@host:3306/db`。
-2. **建表**：`edgeone.json` 的 `buildCommand` 是 `npm run build && npm run db:migrate`，所以每次部署都會對**該環境的** `DATABASE_URL` 跑一次 `ensureSchema`（語句全是 `create table if not exists` 加冪等 drop，可重複執行）。遷移失敗 ⇒ **建置失敗** ⇒ 沒有表的版本不會上線。
-   - ⚠️ `DATABASE_URL` 的 **Build** 作用域要打開：EdgeOne 的建置階段要讀得到，否則部署直接失敗。
+1. **建 KV 命名空間**：EdgeOne 控制台開一個 KV，把命名空間綁到變數名 **`ENDCHI_KV`**（要與 `kvStore.ts` 的 `KV_BINDING` 完全一致，否則執行期拋「`ENDCHI_KV` is not bound」）。KV 沒有建表這一步——key→value 直接寫。
+2. **建置設定**：`edgeone.json` 的 `buildCommand` 是 `npm run build`（**不含** `db:migrate`，因為 KV 不需要遷移）；`installCommand` 設成 `rm -f package-lock.json && npm install` 以避開 EdgeOne 建置容器已知的 rollup 原生二進制缺失問題（npm 選用性依賴 bug #4828）。`nodeVersion` 用 `22.11.0`。
 3. **加環境變數**（EdgeOne 控制台 → 專案設定 → 環境變數）：
-   - `DATABASE_URL=mysql://…`（騰訊雲 MySQL）
-   - `DB_DIALECT=mysql`
+   - `STORAGE_BACKEND=kv`
    - `RUN_TOKEN_SECRET`（≥ 32 字元，見 `.env.example`）
    - `ALLOWED_ORIGIN=前端網域`（前端不在同一網域時必填；同一網域留空）
-4. **部署**：用 `edgeone` CLI（`edgeone pages deploy`，詳見部署技能）。前端 `vite build` → `dist/`，四個端點取自 `node-functions/api/**`，前後端同網域時前端用同源 `/api/…`。
-5. **確認**：打開 `/api/health` 應回 `{ ok: true, database: "mysql", players: N }`；`503` 是連不上（檢查 `DATABASE_URL` 與騰訊雲安全組／外網權限），`500` 是查詢被拒（先看建置日誌那行 `applying the … schema to …`）。
+4. **部署**：用 `edgeone` CLI（`edgeone pages deploy`，詳見部署技能）。前端 `vite build` → `dist/`，四個端點取自 `cloud-functions/api/**`，前後端同網域時前端用同源 `/api/…`。V8 會動態 import `kvStoreFactory`，所以套件圖不含任何 SQL 驅動。
+5. **確認**：打開 `/api/health` 應回 `{ ok: true, database: "kv", players: N }`；`500` 多半是 `ENDCHI_KV` 沒綁或 `RUN_TOKEN_SECRET` 太短，`503` 在 KV 模式下不該出現（KV 不是 TCP 連線）。
 
-> ⚠️ **前提：EdgeOne 專案的 Node 版本要是 22.x**（建置會跑 Node 程式 `tsx`、驅動 `mysql2`）。Node 過舊會讓 `npm run db:migrate` 以看不懂的錯誤結束，整個部署失敗。
+> ⚠️ **掃描成本**：榜與計數是 O(N) 前綴掃描（見 §5.3）。FYP 規模（玩家數千）沒問題；若以後量變大，再為每個分類維護一份排序索引，而不是現在就上 SQL 遷移。
 
 ---
 
@@ -627,6 +655,8 @@ npm run dev:web    # 只有 Vite（純 UI 改動，打不到 API）
 | 檔案 | 測什麼 | 需要外部服務 |
 | --- | --- | --- |
 | `tests/api.test.ts` | 處理器：開局 → 提交 → 上榜、冪等、速率、憑證、合理性、健康檢查、每個分頁的排序與自身名次 | ✗ |
+| `tests/kvStore.test.ts` | KV 儲存層：以記憶體版 `ENDCHI_KV` 取代，驗掃描實作的冪等、歷史最大值、撞號重抽、榜序、名次、速率、憑證 | ✗ |
+| `tests/edgeone-functions.test.ts` | Makers `cloud-functions` 入口：四個具名匯出 ＋ 透過邊緣轉接頭（注入 `context.env`＋`ENDCHI_KV`）真的走一次 KV | ✗ |
 | `tests/dialect.test.ts` | 方言：佔位符、**每個分類各自的榜序**、upsert 順序、連線旗標、建表可重複執行、外鍵與 `created_at` 的兩條硬規則、錯誤分類 | ✗ |
 | `tests/sqlStore.test.ts` | 儲存層邏輯：**佔位符數 ＝ 參數數**、冪等的兩條路、交易與回滾、列轉換、`rankOf` 比的是哪一欄 | ✗ |
 | `tests/db.integration.test.ts` | 真的 SQL：建表、憑證、最大值、同分名次、JSON 欄位、交易原子性、高分低連擊的 COMBO 榜、SQLite 驅動的三個 pragma／交易保證 | ✗（記憶體 SQLite） |
@@ -669,8 +699,10 @@ TEST_DATABASE_URL='mysql://…'      npx vitest run tests/db.integration.test.ts
 
 ## 8. 待辦與接縫
 
-- **EdgeOne 部署**：轉接層（`adapters/fetch.ts` 的 `createEdgeOneHandlers`）已經做好並有測試，但
-  `node-functions/` 目錄、`edgeone` 設定與部署流程還沒建立。要上的時候見 §5.2。
+- **EdgeOne 部署（Makers `cloud-functions` ＋ KV）**：已完成 —— `cloud-functions/` 四個入口、
+  `store/kvStore.ts`＋`kvStoreFactory.ts`、`edgeone.json`（`buildCommand` 不含 `db:migrate`、
+  `installCommand` 重建 lock 修 rollup 原生二進制問題）、以及 `tests/kvStore.test.ts`／
+  `tests/edgeone-functions.test.ts` 都就位。要上的時候見 §5.2 與 §6.7。
 - **前後端不同網域時的 CORS**：客戶端的 `VITE_API_BASE_URL`（`baseUrl`）與伺服器的 `ALLOWED_ORIGIN`
   兩個都要設，否則請求會被擋掉（本機同源，所以開發時看不到這個問題）。
 - **分析事件**：`design.md` §6.8 的 `events` 表與上報還沒做（schema 也還沒建）。

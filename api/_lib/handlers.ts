@@ -122,7 +122,7 @@ export const handleRunStart: CoreHandler = async (request, deps) => {
 
   const runId = newRunId();
   const expiresAtMs = now + deps.config.runTokenTtlMs;
-  const token = signRunToken(deps.config.runTokenSecret, {
+  const token = await signRunToken(deps.config.runTokenSecret, {
     runId,
     deviceId,
     issuedAtMs: now,
@@ -132,7 +132,7 @@ export const handleRunStart: CoreHandler = async (request, deps) => {
   await deps.store.putRunToken({
     runId,
     deviceId,
-    tokenHash: tokenFingerprint(token),
+    tokenHash: await tokenFingerprint(token),
     issuedAtMs: now,
     expiresAtMs,
     usedAtMs: null,
@@ -223,11 +223,11 @@ export const handleScore: CoreHandler = async (request, deps) => {
 
   /* 憑證驗兩件事：簽章（是不是我們發的）與資料庫裡的**指紋**（是不是同一張）；只驗其一都可被繞過。
    * Two checks: the signature and the stored fingerprint; either one alone can be bypassed. */
-  if (!verifyRunToken(deps.config.runTokenSecret, token, payload)) {
+  if (!(await verifyRunToken(deps.config.runTokenSecret, token, payload))) {
     return { response: fail(401, 'bad_token', 'the token does not match this run'), deviceId, runId };
   }
 
-  if (tokenFingerprint(token) !== tokenRow.tokenHash) {
+  if ((await tokenFingerprint(token)) !== tokenRow.tokenHash) {
     return { response: fail(401, 'bad_token', 'the token does not match this run'), deviceId, runId };
   }
 
@@ -416,7 +416,12 @@ export const handleHealth: CoreHandler = async (request, deps) => {
     const players = await deps.store.countProfiles();
 
     return {
-      response: ok({ ok: true, database: deps.config.dbDialect, players, at: deps.now() }),
+      response: ok({
+        ok: true,
+        database: deps.config.storageBackend === 'kv' ? 'kv' : deps.config.dbDialect,
+        players,
+        at: deps.now(),
+      }),
       deviceId: null,
       runId: null,
     };

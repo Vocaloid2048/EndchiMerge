@@ -45,6 +45,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
     databaseUrl: 'postgresql://user:pass@host/db',
     dbDialect: 'postgres',
+    storageBackend: 'sql',
     runTokenSecret: SECRET,
     allowedOrigins: [],
     submissionsPerHour: 20,
@@ -161,7 +162,7 @@ function board(deps: Deps, query = ''): Promise<ApiResponse> {
 
 describe('readConfig — 環境變數 / environment variables', () => {
   it('names what is missing rather than starting without it', () => {
-    expect(readConfig({})).toEqual({ ok: false, missing: ['DATABASE_URL', 'RUN_TOKEN_SECRET'] });
+    expect(readConfig({})).toEqual({ ok: false, missing: ['RUN_TOKEN_SECRET', 'DATABASE_URL'] });
     expect(readConfig({ DATABASE_URL: 'postgres://x' })).toEqual({
       ok: false,
       missing: ['RUN_TOKEN_SECRET'],
@@ -294,21 +295,21 @@ describe('checkClaimedDuration — 單邊檢查 / the one-sided check', () => {
 describe('run tokens — T2', () => {
   const payload = { runId: 'run-1', deviceId: DEVICE, issuedAtMs: 1, expiresAtMs: 2 };
 
-  it('round-trips and rejects anything that was edited', () => {
-    const token = signRunToken(SECRET, payload);
+  it('round-trips and rejects anything that was edited', async () => {
+    const token = await signRunToken(SECRET, payload);
 
-    expect(verifyRunToken(SECRET, token, payload)).toBe(true);
-    expect(verifyRunToken(SECRET, token, { ...payload, deviceId: 'other-00000000' })).toBe(false);
-    expect(verifyRunToken(SECRET, token, { ...payload, expiresAtMs: 99 })).toBe(false);
-    expect(verifyRunToken('another-secret-'.padEnd(48, 'x'), token, payload)).toBe(false);
-    expect(verifyRunToken(SECRET, `${token}x`, payload)).toBe(false);
+    expect(await verifyRunToken(SECRET, token, payload)).toBe(true);
+    expect(await verifyRunToken(SECRET, token, { ...payload, deviceId: 'other-00000000' })).toBe(false);
+    expect(await verifyRunToken(SECRET, token, { ...payload, expiresAtMs: 99 })).toBe(false);
+    expect(await verifyRunToken('another-secret-'.padEnd(48, 'x'), token, payload)).toBe(false);
+    expect(await verifyRunToken(SECRET, `${token}x`, payload)).toBe(false);
   });
 
-  it('fingerprints are stable and do not contain the token', () => {
-    const token = signRunToken(SECRET, payload);
+  it('fingerprints are stable and do not contain the token', async () => {
+    const token = await signRunToken(SECRET, payload);
 
-    expect(tokenFingerprint(token)).toBe(tokenFingerprint(token));
-    expect(tokenFingerprint(token)).not.toContain(token);
+    expect(await tokenFingerprint(token)).toBe(await tokenFingerprint(token));
+    expect(await tokenFingerprint(token)).not.toContain(token);
   });
 
   it('accepts the ids the client already has and rejects junk', () => {

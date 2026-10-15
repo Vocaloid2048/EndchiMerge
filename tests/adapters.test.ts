@@ -260,6 +260,7 @@ describe('vercelEndpoint — 外殼 ＋ 轉接頭 / the shell plus the adapter',
     return {
       databaseUrl: 'postgresql://user:pass@host/db',
       dbDialect: 'postgres',
+      storageBackend: 'sql',
       runTokenSecret: SECRET,
       allowedOrigins: [],
       submissionsPerHour: 20,

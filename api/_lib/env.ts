@@ -1,10 +1,15 @@
 /**
- * 後端設定：從環境變數讀出並在啟動時驗完；`DATABASE_URL` 與 `RUN_TOKEN_SECRET` 硬性必填，其餘預設值皆取保守側。
- * Backend configuration, read from the environment and validated up front; `DATABASE_URL` and
- * `RUN_TOKEN_SECRET` are hard requirements, and every other default is the conservative side.
+ * 後端設定：從環境變數讀出並在啟動時驗完；`RUN_TOKEN_SECRET` 硬性必填，其餘預設值皆取保守側。
+ * Backend configuration, read from the environment and validated up front; `RUN_TOKEN_SECRET` is a
+ * hard requirement, and every other default is the conservative side.
+ *
+ * `STORAGE_BACKEND` 決定用哪一種儲存層：`sql`（Postgres/MySQL/SQLite，需 `DATABASE_URL`）或 `kv`
+ * （EdgeOne KV，無 TCP；用於 Makers 的 `cloud-functions`）。kv 模式不強制 `DATABASE_URL`。
+ * `STORAGE_BACKEND` picks the storage layer: `sql` (Postgres/MySQL/SQLite, needs `DATABASE_URL`) or
+ * `kv` (EdgeOne KV, no TCP; for Makers `cloud-functions`). The kv mode does not require `DATABASE_URL`.
  */
 
-import { dialectFromUrl, type DialectName } from './db/dialect.js';
+export type StorageBackend = 'sql' | 'kv';
 
 export interface Config {
   readonly databaseUrl: string;
@@ -14,6 +19,7 @@ export interface Config {
    * when unset; a wrong guess produces a confusing error, so `DB_DIALECT` always overrides.
    */
   readonly dbDialect: DialectName;
+  readonly storageBackend: StorageBackend;
   readonly runTokenSecret: string;
   /** 允許的跨來源來源；空陣列 ＝ 不發 CORS 標頭（只接受同源）。
    * Allowed cross-origin origins; an empty array means no CORS headers (same-origin only). */
@@ -47,6 +53,8 @@ const DEFAULT_RUNS_PER_HOUR = 120;
  * A too-short secret is no secret; 32 bytes is the recommended floor for HMAC-SHA256. */
 const MIN_SECRET_LENGTH = 32;
 
+type DialectName = 'postgres' | 'mysql' | 'sqlite';
+
 /** 讀一個整數環境變數；壞值一律用預設，不讓一個錯字讓後端起不來。
  * Reads an integer environment variable; a bad value falls back to the default, so one typo cannot stop the backend. */
 function readCount(raw: string | undefined, fallback: number, min: number): number {
@@ -70,7 +78,10 @@ function readDialect(raw: string | undefined, url: string): DialectName {
   if (value === 'postgres' || value === 'postgresql' || value === 'pg') return 'postgres';
   if (value === 'sqlite' || value === 'sqlite3') return 'sqlite';
 
-  return dialectFromUrl(url);
+  const scheme = url.slice(0, url.indexOf(':')).toLowerCase();
+  if (scheme === 'mysql' || scheme === 'mysql2' || scheme === 'mariadb') return 'mysql';
+  if (scheme === 'sqlite' || scheme === 'sqlite3') return 'sqlite';
+  return 'postgres';
 }
 
 /**
@@ -81,11 +92,18 @@ function readDialect(raw: string | undefined, url: string): DialectName {
 export function readConfig(env: Readonly<Record<string, string | undefined>>): ConfigResult {
   const missing: string[] = [];
 
-  const databaseUrl = (env['DATABASE_URL'] ?? '').trim();
-  if (databaseUrl === '') missing.push('DATABASE_URL');
+  const storageBackendRaw = (env['STORAGE_BACKEND'] ?? 'sql').trim().toLowerCase();
+  const storageBackend: StorageBackend = storageBackendRaw === 'kv' ? 'kv' : 'sql';
 
   const runTokenSecret = (env['RUN_TOKEN_SECRET'] ?? '').trim();
   if (runTokenSecret.length < MIN_SECRET_LENGTH) missing.push('RUN_TOKEN_SECRET');
+
+  /*
+   * kv 模式走 EdgeOne KV（無 TCP）：`DATABASE_URL` 不需要；sql 模式才需要。
+   * The kv mode uses EdgeOne KV (no TCP): `DATABASE_URL` is not needed; only the sql mode needs it.
+   */
+  const databaseUrl = (env['DATABASE_URL'] ?? '').trim();
+  if (storageBackend === 'sql' && databaseUrl === '') missing.push('DATABASE_URL');
 
   if (missing.length > 0) return { ok: false, missing };
 
@@ -99,13 +117,10 @@ export function readConfig(env: Readonly<Record<string, string | undefined>>): C
     config: {
       databaseUrl,
       dbDialect: readDialect(env['DB_DIALECT'], databaseUrl),
+      storageBackend,
       runTokenSecret,
       allowedOrigins,
-      submissionsPerHour: readCount(
-        env['SUBMISSIONS_PER_HOUR'],
-        DEFAULT_SUBMISSIONS_PER_HOUR,
-        1,
-      ),
+      submissionsPerHour: readCount(env['SUBMISSIONS_PER_HOUR'], DEFAULT_SUBMISSIONS_PER_HOUR, 1),
       runTokenTtlMs: MAX_RUN_MS + RUN_TOKEN_SLACK_MS,
       runsPerHour: readCount(env['RUNS_PER_HOUR'], DEFAULT_RUNS_PER_HOUR, 1),
     },
@@ -113,9 +128,9 @@ export function readConfig(env: Readonly<Record<string, string | undefined>>): C
 }
 
 /**
- * 讀真正的 `process.env`，缺東西就丟錯；訊息只含鍵名、不含值（這種字串容易被貼進 issue 或 log）。
- * Reads the real `process.env` and throws when something is missing; the message carries key names
- * only, never values (it is exactly the string that gets pasted into issues or logs).
+ * 讀真正的環境變數；缺東西就丟錯（在邊緣執行時下由 `setEnvSource` 把 `context.env` 注入這裡）。
+ * Reads the real environment; throws when something is missing (under an edge runtime, `setEnvSource`
+ * injects `context.env` here).
  */
 export function loadConfig(): Config {
   const result = readConfig(process.env);

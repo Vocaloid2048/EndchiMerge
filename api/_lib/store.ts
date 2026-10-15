@@ -161,7 +161,7 @@ function valueFor(profile: ProfileRow, category: BoardCategory): number {
  * Board order: the category descending, ties going to the earlier achievement (stable and not
  * gameable); mirrors `Dialect.boardOrder()` and must agree key for key.
  */
-function compareProfiles(category: BoardCategory, a: ProfileRow, b: ProfileRow): number {
+export function compareProfiles(category: BoardCategory, a: ProfileRow, b: ProfileRow): number {
   const primary = valueFor(b, category) - valueFor(a, category);
   if (primary !== 0) return primary;
 
@@ -181,6 +181,53 @@ function compareProfiles(category: BoardCategory, a: ProfileRow, b: ProfileRow):
    * The id breaks remaining ties: without it, the order depends on insertion.
    */
   return a.deviceId.localeCompare(b.deviceId);
+}
+
+/**
+ * 這個裝置在**這個名字**下該用哪個號：沿用既有的（所以改名不動號），否則用送進來的那個；只有與**別的裝置**
+ * 撞到「同名字＋同號」才重抽 —— 這一條就是「榜上不會有兩列一模一樣」的保證。
+ * Which tag this device carries under **this name**: keep the existing one (so a rename does not change
+ * it), else take the offered one; a re-roll happens only when **another device** already holds the same
+ * name-and-tag pair — that is what keeps two board rows from ever reading alike.
+ *
+ * `isTaken` 對 KV 是「掃描全表」的 async 檢查，對記憶體是 Map 查詢；兩邊共用同一條規則。
+ * `isTaken` is an async scan for KV but a Map lookup for the in-memory store; both share one rule.
+ */
+export async function resolveUserTag(opts: {
+  readonly displayName: string;
+  readonly current: string;
+  readonly offered: string;
+  readonly deviceId: string;
+  readonly isTaken: (tag: string) => boolean | Promise<boolean>;
+}): Promise<string> {
+  /* 沿用既有的 → 用送來的 → 連送來的都是空的就當場鑄一個（例如從 `scores` 讀回來的一列）。
+   * Keep the existing one → take the offered one → mint one when even that is empty (a row read back from `scores`, say). */
+  let tag = opts.current !== '' ? opts.current : opts.offered !== '' ? opts.offered : newUserTag();
+  if (opts.displayName === '') return tag;
+
+  for (let attempt = 0; attempt < TAG_ATTEMPTS && (await opts.isTaken(tag)); attempt += 1) {
+    tag = newUserTag();
+  }
+
+  return tag;
+}
+
+/**
+ * 把一筆通過檢查的提交合併進玩家歷史最大值；與客戶端同一條規則：分數真的刷新時才換時長與達成時間。
+ * Merges a verified submission into a player's historical maxima; the client's same rule — the duration
+ * and achievement time change only when the score actually improves.
+ */
+export function applyProfileUpdate(existing: ProfileRow | null, score: ScoreRow, userTag: string): ProfileRow {
+  return {
+    deviceId: score.deviceId,
+    displayName: score.displayName === '' ? (existing?.displayName ?? '') : score.displayName,
+    userTag,
+    bestScore: Math.max(existing?.bestScore ?? 0, score.score),
+    bestDurationMs: score.score > (existing?.bestScore ?? 0) ? score.durationMs : (existing?.bestDurationMs ?? 0),
+    bestMaxCombo: Math.max(existing?.bestMaxCombo ?? 0, score.maxCombo),
+    bestMerges: Math.max(existing?.bestMerges ?? 0, score.merges),
+    bestAtMs: score.score > (existing?.bestScore ?? 0) ? score.atMs : (existing?.bestAtMs ?? null),
+  };
 }
 
 /**
@@ -239,49 +286,19 @@ export class MemoryStore implements Store {
      */
     if (!row.verified) return true;
 
-    const previous = this.profiles.get(row.deviceId);
-    const displayName = row.displayName === '' ? (previous?.displayName ?? '') : row.displayName;
-    const userTag = this.resolveUserTag(displayName, previous?.userTag ?? '', row.userTag, row.deviceId);
-    const updated: ProfileRow = {
+    const previous = this.profiles.get(row.deviceId) ?? null;
+    const userTag = await resolveUserTag({
+      displayName: row.displayName,
+      current: previous?.userTag ?? '',
+      offered: row.userTag,
       deviceId: row.deviceId,
-      displayName,
-      userTag,
-      bestScore: Math.max(previous?.bestScore ?? 0, row.score),
-      /*
-       * 時長只在分數真的刷新時才跟著換（與客戶端同一條規則），否則最高分旁會掛別的一局的時間。
-       * The duration is replaced only when the score actually improves (the client's rule too);
-       * otherwise a best score would sit next to a different run's time.
-       */
-      bestDurationMs:
-        row.score > (previous?.bestScore ?? 0) ? row.durationMs : (previous?.bestDurationMs ?? 0),
-      bestMaxCombo: Math.max(previous?.bestMaxCombo ?? 0, row.maxCombo),
-      bestMerges: Math.max(previous?.bestMerges ?? 0, row.merges),
-      bestAtMs: row.score > (previous?.bestScore ?? 0) ? row.atMs : (previous?.bestAtMs ?? null),
-    };
+      isTaken: (tag) => this.isUserTagTaken(row.displayName, tag, row.deviceId),
+    });
+    const updated = applyProfileUpdate(previous, row, userTag);
 
     this.profiles.set(row.deviceId, updated);
 
     return true;
-  }
-
-  /**
-   * 這個裝置在**這個名字**下該用哪個號：沿用既有的（所以改名不動號），否則用送進來的那個；只有與**別的裝置**
-   * 撞到「同名字＋同號」才重抽 —— 這一條就是「榜上不會有兩列一模一樣」的保證。
-   * Which tag this device carries under **this name**: keep the existing one (so a rename does not change
-   * it), else take the offered one; a re-roll happens only when **another device** already holds the same
-   * name-and-tag pair — that is what keeps two board rows from ever reading alike.
-   */
-  private resolveUserTag(displayName: string, current: string, offered: string, deviceId: string): string {
-    /* 沿用既有的 → 用送來的 → 連送來的都是空的就當場鑄一個（例如從 `scores` 讀回來的一列）。
-     * Keep the existing one → take the offered one → mint one when even that is empty (a row read back from `scores`, say). */
-    let tag = current !== '' ? current : offered !== '' ? offered : newUserTag();
-    if (displayName === '') return tag;
-
-    for (let attempt = 0; attempt < TAG_ATTEMPTS && this.isUserTagTaken(displayName, tag, deviceId); attempt += 1) {
-      tag = newUserTag();
-    }
-
-    return tag;
   }
 
   /** 這個「名字＋號」是不是已經被**別的**裝置佔用。 */
