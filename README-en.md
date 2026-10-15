@@ -13,13 +13,13 @@
 ![Vitest](https://img.shields.io/badge/Vitest-6E9F18?style=flat&logo=vitest&logoColor=white)
 
 
-| <span style="color:#FF99CC">📢 Think it's fun? Share it with a friend!</span><br> | [Click to play](https://endchi.voc2048.com) [EdgeOne for CN](https://endchi.voc2048.com) |
+| <span style="color:#FF99CC">📢 Think it's fun? Share it with a friend!</span><br> | [Click to play](https://endchi.voc2048.com) [EdgeOne for CN](https://cn-endchi.voc2048.com) |
 |-|-|
 | <span style="color:#05C189">📧 Suggestions or bug reports</span><br>| [Tell us in an issue](https://github.com/Vocaloid2048/EndchiMerge/issues) |
 
 ## <span style="color:#C3D630"> 🚧 Please note
 ### This is an unofficial fan project
-- EndchiMerge is an unofficial fan-made spin-off built on the gameplay of the “Merge! 山團團” web event from *Arknights: Endfield*.
+- EndchiMerge is an unofficial fan-made spin-off built on the gameplay of the "OrbiPom! MERGE!" web event from *Arknights: Endfield*.
 - The inspiration and the gameplay are drawn from that event.
 - This project is **completely free** and will never be monetised in any form, including in-app purchases or ads.
 
@@ -32,9 +32,9 @@
 ![Figma Endchi](docs/figma-endchi.png)
 
 ### Copyright
-Please note: this project is not affiliated with Hypergryph or Gryphline. *EndchiMerge* is simply a web game made by a fan; the assets used in it were created by 夜芷冰 and community contributors, and all character names and related artwork remain the property of their respective rights holders. The copyright of this project's source code belongs to 夜芷冰.
+Please note: this project is not affiliated with Hypergryph or Gryphline. *EndchiMerge* is simply a web game made by a fan; the assets used in it were created by 夜芷冰 (Vocaloid2048) and community contributors, and all character names and related artwork remain the property of their respective rights holders. The copyright of this project's source code belongs to 夜芷冰.
 
-This project is completely free, with no in-app purchases and no ads, and is not monetised in any form. Without 夜芷冰's consent, the “方團團” assets may not be used for commercial profit or for any purpose that damages the reputation of any party (for assets contributed by other community members, please obtain their consent first).
+This project is completely free, with no in-app purchases and no ads, and is not monetised in any form. Without 夜芷冰's consent, the “方團團” (Endchi) assets may not be used for commercial profit or for any purpose that damages the reputation of any party (for assets contributed by other community members, please obtain their consent first).
 
 ## <span style="color:#569CD6">🎮 How to play</span>
 Click the dumpling hanging above or press Space to drop it! When two identical dumplings touch, they merge into the next level — the goal is to unlock higher levels and rack up a higher score.
