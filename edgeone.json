@@ -1,0 +1,6 @@
+{
+  "buildCommand": "npm run build && npm run db:migrate",
+  "installCommand": "npm install",
+  "outputDirectory": "dist",
+  "nodeVersion": "22"
+}

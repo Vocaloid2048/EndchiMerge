@@ -37,3 +37,6 @@ Thumbs.db
 /agent-readme.md
 /design.md
 /.workbuddy
+
+# EdgeOne CLI 登入 token（帳號級權限，永不進 repo）/ EdgeOne CLI login token (account-scoped, never enter the repo)
+.edgeone/

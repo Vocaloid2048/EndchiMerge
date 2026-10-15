@@ -54,8 +54,15 @@ api/
     tokens.ts         簽章、驗章、run_id 產生
     limits.ts         上界（從遊戲配置推導）＋ 合理性檢查
     env.ts            環境變數 → Config（純函式，啟動時驗完）
+node-functions/       EdgeOne Pages Node Functions 的入口（薄薄一層，接上 api/_lib）
+  api/
+    score.js         端點：createEdgeOneHandlers(endpoint(handleScore))
+    health.js        端點：createEdgeOneHandlers(endpoint(handleHealth))
+    leaderboard.js   端點：createEdgeOneHandlers(endpoint(handleLeaderboard))
+    run/start.js     端點：createEdgeOneHandlers(endpoint(handleRunStart))
 schema.sql            人看的 Postgres 版 schema（與程式的一致性由測試守住，見 §7）
-vercel.json           建置設定與函式逾時
+vercel.json           Vercel 建置設定與函式逾時
+edgeone.json          EdgeOne Pages 建置設定（buildCommand 含 db:migrate）
 .env.example          環境變數的鍵名與說明（**只放鍵名，不放值**）
 scripts/migrate.ts    npm run db:migrate —— 建表（任何方言）
 scripts/dev.ts        npm run dev —— 前端 ＋ 後端 ＋ SQLite，見 §6.5
@@ -591,6 +598,25 @@ npm run dev:web    # 只有 Vite（純 UI 改動，打不到 API）
 代價，也是 T2 的本質。
 
 ⚠️ **上載失敗不影響遊戲。** 本機紀錄照樣每幀更新，下一局照樣玩；差別只是那筆成績這輩子不會上榜。
+
+---
+
+## 6.7 部署到 EdgeOne Pages
+
+> 平台選擇見 §5.2：EdgeOne 用 **Node Functions**（`node-functions/`），因為要連 MySQL（`mysql2`）。
+
+1. **建資料庫**：騰訊雲開 **MySQL（免費版／TDSQL-C）**，拿到連線字串 `mysql://user:password@host:3306/db`。
+2. **建表**：`edgeone.json` 的 `buildCommand` 是 `npm run build && npm run db:migrate`，所以每次部署都會對**該環境的** `DATABASE_URL` 跑一次 `ensureSchema`（語句全是 `create table if not exists` 加冪等 drop，可重複執行）。遷移失敗 ⇒ **建置失敗** ⇒ 沒有表的版本不會上線。
+   - ⚠️ `DATABASE_URL` 的 **Build** 作用域要打開：EdgeOne 的建置階段要讀得到，否則部署直接失敗。
+3. **加環境變數**（EdgeOne 控制台 → 專案設定 → 環境變數）：
+   - `DATABASE_URL=mysql://…`（騰訊雲 MySQL）
+   - `DB_DIALECT=mysql`
+   - `RUN_TOKEN_SECRET`（≥ 32 字元，見 `.env.example`）
+   - `ALLOWED_ORIGIN=前端網域`（前端不在同一網域時必填；同一網域留空）
+4. **部署**：用 `edgeone` CLI（`edgeone pages deploy`，詳見部署技能）。前端 `vite build` → `dist/`，四個端點取自 `node-functions/api/**`，前後端同網域時前端用同源 `/api/…`。
+5. **確認**：打開 `/api/health` 應回 `{ ok: true, database: "mysql", players: N }`；`503` 是連不上（檢查 `DATABASE_URL` 與騰訊雲安全組／外網權限），`500` 是查詢被拒（先看建置日誌那行 `applying the … schema to …`）。
+
+> ⚠️ **前提：EdgeOne 專案的 Node 版本要是 22.x**（建置會跑 Node 程式 `tsx`、驅動 `mysql2`）。Node 過舊會讓 `npm run db:migrate` 以看不懂的錯誤結束，整個部署失敗。
 
 ---
 
