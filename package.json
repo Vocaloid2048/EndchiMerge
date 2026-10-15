@@ -15,6 +15,7 @@
     "db:migrate": "node --env-file-if-exists=.env --import tsx scripts/migrate.ts",
     "sign": "node scripts/sign-assets.mjs public/assets/character",
     "sign:check": "node scripts/sign-assets.mjs --check public/assets/character",
+    "sprite": "python scripts/build-character-image.py",
     "prepare": "node scripts/install-git-hooks.mjs"
   },
   "devDependencies": {
