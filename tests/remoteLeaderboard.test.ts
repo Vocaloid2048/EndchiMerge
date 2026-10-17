@@ -698,3 +698,42 @@ function makeHarnessWith(storage: FakeStorage): Harness {
     fetches: (): Call[] => calls.filter((call) => call.url.startsWith('/api/leaderboard')),
   };
 }
+
+describe('createRemoteLeaderboard — 自己的最高分 / the own best', () => {
+  it('resolves the server-side best of this device', async () => {
+    const { board } = makeHarness();
+
+    await expect(board.fetchOwnBest?.()).resolves.toBe(OK_BOARD.self.score);
+  });
+
+  it('resolves null when the server has no row for this device', async () => {
+    const { board } = makeHarness({
+      reply: (call) =>
+        call.url.startsWith('/api/leaderboard')
+          ? { body: { ...OK_BOARD, self: null } }
+          : undefined,
+    });
+
+    await expect(board.fetchOwnBest?.()).resolves.toBeNull();
+  });
+
+  it('resolves null when fetch is unavailable', async () => {
+    const global_ = globalThis as { fetch?: typeof fetch };
+    const original = global_.fetch;
+    global_.fetch = undefined;
+
+    try {
+      const board = createRemoteLeaderboard({
+        storage: new FakeStorage(),
+        keys: KEYS,
+        salt: TEST_SALT,
+        playerId: 'me',
+        now: (): number => TIME,
+      });
+
+      await expect(board.fetchOwnBest?.()).resolves.toBeNull();
+    } finally {
+      global_.fetch = original;
+    }
+  });
+});

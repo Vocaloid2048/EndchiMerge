@@ -351,6 +351,31 @@ async function bootstrap(): Promise<void> {
    */
   const syncRun = (): boolean => leaderboardSource.sync();
 
+  /**
+   * 先下載屬於自己的最高分作基準（使用者定案）：開站、開新一局時從伺服器拿回自己的最佳，
+   * 與本機 `highScore` 取較大者 —— 伺服器值高才寫入（`recordScore()` 單調，正好做 max）。
+   * 拿不到（離線、未上傳過、本機版）就什麼都不做，本機值照用。
+   * Download one's own best as the baseline (the user's decision): on page open and on a new run
+   * the server's best is fetched and merged with the local `highScore` by taking the larger — only
+   * a higher server value is written (`recordScore()` is monotonic, which is exactly a max).
+   * Nothing happens when it cannot be fetched (offline, never uploaded, the local build): the
+   * local value stands.
+   */
+  const applyOwnBest = (): void => {
+    void leaderboardSource.fetchOwnBest?.().then((serverBest) => {
+      if (serverBest === null || serverBest <= progress.highScore) return;
+
+      progress.recordScore(serverBest);
+      /*
+       * 基準跟著抬：否則「追平伺服器最佳」會被誤判成 `isNewBest`（見結算的 `current.score > runStartBest`）。
+       * The baseline moves up with it: otherwise merely catching up to the server's best reads as
+       * `isNewBest` (see the game-over check `current.score > runStartBest`).
+       */
+      runStartBest = progress.highScore;
+      updateHud();
+    });
+  };
+
   /*
    * 即時上載（使用者定案「成績刷新即同步」）：成績每刷新一次就排一次短延遲的推播，遊戲進行中榜
    * 就會動。用 throttle + 尾部而非純 debounce：第一次刷新立即推（leading），之後至少每隔
@@ -410,6 +435,9 @@ async function bootstrap(): Promise<void> {
    */
   syncRun();
 
+  /* 開站先下載自己的最高分（見 `applyOwnBest`）。Fetch one's own best on open (see `applyOwnBest`). */
+  applyOwnBest();
+
   /**
    * 重設進行中的一局：結算覆蓋層的「再玩一次」與工具列的重新開始共用這一條路。
    * Reset the run in progress: the overlay's "play again" and the toolbar's restart share this path.
@@ -430,6 +458,8 @@ async function bootstrap(): Promise<void> {
     shownGameOver = false;
     gameOver?.hide();
     runStartBest = progress.highScore;
+    /* 開新一局也先下載自己的最高分（見 `applyOwnBest`）。Same fetch on a new run (see `applyOwnBest`). */
+    applyOwnBest();
     updateHud();
     updateSkills();
   };

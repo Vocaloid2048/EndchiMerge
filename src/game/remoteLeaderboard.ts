@@ -337,6 +337,22 @@ export function createRemoteLeaderboard(
     for (const category of LEADERBOARD_CATEGORIES) void fetchCategory(category);
   }
 
+  /**
+   * 抓一次分數榜並回傳玩家自己在伺服器上的最高分；拿不到回 `null`。
+   * Fetches the score board once and resolves the player's own best on the server; `null` when unavailable.
+   *
+   * 直接複用 `fetchCategory('score')` —— 它的回應本來就帶 `self`，抓完讀快取即可。已在抓、
+   * 離線或沒上傳過時拿不到 `self`，回 `null`（呼叫端保留本機值）。
+   * Reuses `fetchCategory('score')` — its response already carries `self`, so read the cache after.
+   * A fetch already in flight, an offline moment or never having uploaded all leave `self` absent,
+   * resolving `null` (the caller keeps the local value).
+   */
+  async function fetchOwnBest(): Promise<number | null> {
+    await fetchCategory('score');
+
+    return boards.get('score')?.self?.score ?? null;
+  }
+
   /* ── 開局與提交 / starting a run and submitting it ──────────────────────── */
 
   function beginRun(): void {
@@ -560,6 +576,7 @@ export function createRemoteLeaderboard(
     },
 
     beginRun,
+    fetchOwnBest,
     refresh,
     sync,
 

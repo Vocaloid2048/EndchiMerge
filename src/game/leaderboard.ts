@@ -329,6 +329,17 @@ export interface LeaderboardSource {
    * every ordinary run).
    */
   beginRun?(): void;
+  /**
+   * 去伺服器拿玩家自己的最高分（選填）。
+   * Fetch the player's own best score from the server (optional).
+   *
+   * 只有**伺服器版**提供：開站、開新一局時先把伺服器上的最佳下載回來當基準（`main.ts` 拿它與
+   * 本機 `highScore` 取較大者），跨裝置才不會各說各話。拿不到（離線、未上傳過）回 `null`。
+   * Only the **server build** provides it: on page open and on a new run the server's best is
+   * downloaded first as the baseline (`main.ts` takes the larger of it and the local `highScore`),
+   * so devices cannot disagree. Resolves `null` when it cannot be fetched (offline, never uploaded).
+   */
+  fetchOwnBest?(): Promise<number | null>;
 }
 
 /**
