@@ -127,7 +127,7 @@ describe('技能註冊表 / skill registry', () => {
       def({ id: 'reshuffle' }),
       def({ id: 'fate_swap', cost: 0, unlock: { kind: 'cumulativeSpent', threshold: 6 }, targeting: 'user_pick', pickCount: 2 }),
       def({ id: 'shrink_all', cost: 0, unlock: { kind: 'cumulativeUses', threshold: 8 } }),
-      def({ id: 'square_core', cost: 0, unlock: { kind: 'cumulativeUses', threshold: 12 } }),
+      def({ id: 'square_core', cost: 0, unlock: { kind: 'cumulativeSpent', threshold: 12 } }),
       def({ id: 'not_implemented_yet' }),
     ]);
 

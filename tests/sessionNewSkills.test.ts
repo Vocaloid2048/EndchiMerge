@@ -475,3 +475,48 @@ describe('以次數解鎖 / cumulative uses', () => {
     expect(card()?.unlocked).toBe(false);
   });
 });
+
+describe('以累計消耗解鎖 / cumulative spend', () => {
+  it('gates square_core on 12 SP spent, not on the number of casts', () => {
+    const session = new GameSession({
+      config: buildConfig(CHAIN, [
+        skill({ id: 'scramble', cost: 2 }),
+        skill({ id: 'square_core', cost: 0, unlock: { kind: 'cumulativeSpent', threshold: 12 } }),
+      ]),
+      rng: createRng(23),
+      virtualWidth: CANVAS,
+    });
+
+    const card = (): (typeof session.skillCards)[number] | undefined =>
+      session.skillCards.find((entry) => entry.id === 'square_core');
+
+    expect(card()?.unlockKind).toBe('cumulativeSpent');
+    expect(card()?.unlockThreshold).toBe(12);
+    expect(card()?.unlocked).toBe(false);
+
+    /*
+     * 技力上限是 `SP_MAX_CEILING`（10），所以「存 12 點」只能靠邊花邊補：每次投放補滿，
+     * 再花 2 點。六次施放 ＝ 12 點，但只有六次「施放」——用次數計的技能早就解鎖了。
+     * The cap is `SP_MAX_CEILING` (10), so 12 points can only be saved by refilling between
+     * casts. Six casts add up to 12 points while the cast count is only six — a use-count gate
+     * would already have fired.
+     */
+    for (let i = 0; i < 5; i += 1) {
+      dropAt(session, 80 + i * 60);
+      expect(session.activateSkill('scramble')).toBe(true);
+    }
+
+    expect(card()?.cumulativeSpent).toBe(10);
+    expect(card()?.unlocked).toBe(false);
+
+    dropAt(session, 80);
+    expect(session.activateSkill('scramble')).toBe(true);
+    expect(card()?.cumulativeSpent).toBe(12);
+    expect(card()?.unlocked).toBe(true);
+
+    expect(session.activateSkill('square_core')).toBe(true);
+    expect(session.squareMergeEnabled).toBe(true);
+    expect(card()?.cumulativeSpent).toBe(0);
+    expect(card()?.unlocked).toBe(false);
+  });
+});

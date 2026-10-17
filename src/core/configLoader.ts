@@ -69,7 +69,7 @@ const DEFAULT_SKILLS: readonly SkillDef[] = [
   { id: 'reshuffle', name: '天翻地覆', cost: 3, targeting: 'immediate', pickCount: 0, unlock: { kind: 'sp' }, params: { count: 30 } },
   { id: 'fate_swap', name: '命運互換', cost: 0, targeting: 'user_pick', pickCount: 2, unlock: { kind: 'cumulativeSpent', threshold: 6 }, params: { disturbance: 6 } },
   { id: 'shrink_all', name: '縮地成寸', cost: 0, targeting: 'immediate', pickCount: 0, unlock: { kind: 'cumulativeUses', threshold: 8 }, params: { radius: 37.5 } },
-  { id: 'square_core', name: '以方代圓', cost: 0, targeting: 'immediate', pickCount: 0, unlock: { kind: 'cumulativeUses', threshold: 12 }, params: {} },
+  { id: 'square_core', name: '以方代圓', cost: 0, targeting: 'immediate', pickCount: 0, unlock: { kind: 'cumulativeSpent', threshold: 12 }, params: { sizeFactor: 1 } },
 ];
 
 const DEFAULT_CONTAINER: ContainerConfig = {
