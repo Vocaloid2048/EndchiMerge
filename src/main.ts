@@ -116,6 +116,10 @@ async function bootstrap(): Promise<void> {
   const music = createMusicToggle({
     button: layout.chrome.music,
     src: `${import.meta.env.BASE_URL}assets/music/take-a-walk.mp3`,
+    /* 上次靜音過就安靜開場；按鈕一按，選擇寫回偏好，下次照辦。 */
+    /* Quiet when the last visit ended muted; a press writes the choice back, and the next visit follows it. */
+    muted: preferences.musicMuted,
+    onMutedChange: (muted): void => preferences.setMusicMuted(muted),
   });
 
   /*
@@ -304,10 +308,19 @@ async function bootstrap(): Promise<void> {
    * rule switch on this short-circuits entirely ("nothing recorded while it is on") — the gate belongs
    * on this one write path, since the local record is the thing that gets uploaded.
    */
-  const recordRun = (): void => {
-    if (preferences.rulesEnabled) return;
+  const recordRun = (): boolean => {
+    if (preferences.rulesEnabled) return false;
 
-    leaderboardSource.record({
+    /*
+     * 開過無盡模式的那一局永遠不記 —— 即使玩家後來關掉了也一樣（`rankEligible` 是這一局的
+     * 單向旗標）。關掉總開關會順手關掉無盡模式，所以光看偏好是看不見這件事的。
+     * A run that ever had endless mode on is never recorded, even after switching it back off
+     * (`rankEligible` is this run's one-way flag). Closing the master gate also closes endless,
+     * so the preferences alone would not show it.
+     */
+    if (!session.rankEligible) return false;
+
+    return leaderboardSource.record({
       score: session.score,
       maxCombo: session.maxCombo,
       merges: session.mergedCount,
@@ -330,12 +343,56 @@ async function bootstrap(): Promise<void> {
 
   /**
    * 上載：把本機紀錄推上排行榜；未同意分享、或沒有未上載的更新時什麼都不做。
-   * 呼叫時機：該局結束、重新開始、關分頁／切到背景，以及下次回來時。
+   * 呼叫時機：該局結束、重新開始、關分頁／切到背景、下次回來，以及遊戲中成績刷新時（見
+   * `scheduleLiveSync`，帶 debounce）。
    * Upload: push the local record onto the board; does nothing without consent or with nothing
-   * pending. Call sites: the run's end, a restart, page close/backgrounding, and the next visit.
+   * pending. Call sites: the run's end, a restart, page close/backgrounding, the next visit, and
+   * live on each improvement (see `scheduleLiveSync`, debounced).
    */
   const syncRun = (): void => {
     leaderboardSource.sync();
+  };
+
+  /*
+   * 即時上載（使用者定案「成績刷新即同步」）：成績每刷新一次就排一次短延遲的推播，遊戲進行中榜
+   * 就會動。用 throttle + 尾部而非純 debounce：第一次刷新立即推（leading），之後至少每隔
+   * `LIVE_SYNC_INTERVAL_MS` 推一次（連續刷新也不會空窗），最後停止刷新時再補一次尾部。兩個立即
+   * 觸發點（一局結束、重新開始）仍直接走 `syncRun()`，不被這條延遲。
+   * Live upload (the user's decision: "sync as the score improves"): each improvement schedules a
+   * short-delayed push so the board moves during play. A throttle-with-trailing, not a plain
+   * debounce: the first improvement pushes at once (leading), then at most once per
+   * `LIVE_SYNC_INTERVAL_MS` even in a streak, and a final trailing push once improvements stop. The
+   * two immediate triggers (run end, restart) still call `syncRun()` directly, undelayed.
+   */
+  const LIVE_SYNC_INTERVAL_MS = 2000;
+  let liveSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  let liveSyncLastFired = 0;
+
+  const scheduleLiveSync = (): void => {
+    const now = Date.now();
+    const since = now - liveSyncLastFired;
+
+    /* 距上次推播已夠久 → 立刻推（leading），並清掉可能還掛著的尾部計時器。 */
+    if (since >= LIVE_SYNC_INTERVAL_MS) {
+      if (liveSyncTimer !== null) {
+        clearTimeout(liveSyncTimer);
+        liveSyncTimer = null;
+      }
+
+      liveSyncLastFired = now;
+      syncRun();
+
+      return;
+    }
+
+    /* 還沒到間隔、且已排了尾部計時器 → 什麼都不做。 */
+    if (liveSyncTimer !== null) return;
+
+    liveSyncTimer = setTimeout((): void => {
+      liveSyncTimer = null;
+      liveSyncLastFired = Date.now();
+      syncRun();
+    }, LIVE_SYNC_INTERVAL_MS - since);
   };
 
   /*
@@ -537,12 +594,14 @@ async function bootstrap(): Promise<void> {
 
       /*
        * 本機紀錄邊玩邊更新（使用者定案）：只升不降，沒有刷新時立刻返回，所以每幀呼叫是便宜
-       * 的。因為它一直是最新的，關分頁、當機、斷電都不會掉成績，上載也不必趕在某一刻。
+       * 的。因為它一直是最新的，關分頁、當機、斷電都不會掉本機成績；而刷新時會再排一次即時
+       * 上載（`scheduleLiveSync`），所以榜在遊戲中也會動。
        * The local record tracks the run live (the user's decision): monotonic, and it returns
        * immediately when nothing improved, so calling it every frame is cheap. Because it is
-       * always current, a closed tab or a crash costs nothing and no upload has to win a race.
+       * always current, a closed tab or a crash costs nothing in the local record; and an
+       * improvement also schedules a live upload (`scheduleLiveSync`), so the board moves in play.
        */
-      recordRun();
+      if (recordRun()) scheduleLiveSync();
 
       updateHud();
       updateSkills();
