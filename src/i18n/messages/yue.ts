@@ -141,7 +141,7 @@ export const yue: Messages = {
   'settings.rules.master': '准許更改遊戲規則',
   'settings.rules.masterNote': '開咗先可以改下面啲規則；開住嗰陣嘅成績唔會記錄喺排行榜度。',
   'settings.rules.endless': '無盡模式',
-  'settings.rules.endlessNote': '掂到警戒線都唔會彈 5 秒警告同結束，可以一直玩落去。',
+  'settings.rules.endlessNote': '掂到警戒線都唔會彈 5 秒警告同結束；投放禁令照舊，堆滿咗就只可以靠技能騰返啲位。',
   'settings.rules.more': '（遲啲再加）',
   'settings.language.heading': '語言',
   'settings.language.subtitle': '介面顯示語言',
@@ -161,7 +161,7 @@ export const yue: Messages = {
   'help.play.body3':
     '玩家可以善用唔同效果嘅技能嚟提高分數；當中有COMBO、投方團團就會儲到技力，技力可以兌換指定嘅技能。',
   'help.play.body4':
-    '如果堆疊太高、過咗警戒線，就要喺 5 秒內盡快清走個堆疊，超時就會Game Over。',
+    '方團團唔可以放去警戒線以上：落點越線嘅話嗰粒係唔會跌落去嘅。如果堆疊真係過咗警戒線，就要喺 5 秒內盡快清走個堆疊，超時就會Game Over。',
   'help.origin.heading': '點解有呢隻Mini Game嘅？',
   'help.origin.body1':
     '《方團團大作戰》base on《明日方舟：終末地》嘅「融合！山團團！」網頁活動玩法嘅非官方粉絲延伸版本。',

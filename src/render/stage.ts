@@ -4,7 +4,10 @@
  *
  * 繪製順序本身就是「裝在容器內」效果的來源（見 `render/container.ts`）：
  * 內部填充 → 溢位警戒區 → 輔助線 → 方團團 → U 形線框 → 選取標示 → 紅線 → 倒數 → 預覽。
+ * 被拒絕的投放是唯一例外：輔助線改畫在方團團之上（滿槽時它才會被拒，而那時堆疊會蓋住它）。
  * The draw order is the whole effect (see `render/container.ts`): interior fill → overflow zone → guide → dumplings → U outline → selection marker → line → countdown → preview.
+ * A refused drop is the one exception: its guide moves above the dumplings (a full trough is
+ * when it gets refused, and when the pile would hide it).
  */
 
 import type { Rect } from '../core/types';
@@ -24,7 +27,15 @@ export const AIM_GUIDE_STYLE = {
   dash: [10, 15] as const,
   /** 顏色。 */
   color: 'rgba(61, 61, 61, 0.69)',
+  /** 落點越線、投放被拒時的顏色（與溢位紅線同一個紅）。 */
+  blockedColor: 'rgba(226, 100, 95, 0.95)',
 } as const;
+
+/**
+ * 投放被拒時預覽的不透明度：看得到那一顆，但讀得出「它不會掉下去」。
+ * The refused preview's opacity: the dumpling is still visible, yet it reads as "this will not drop".
+ */
+const BLOCKED_PREVIEW_ALPHA = 0.35;
 
 /**
  * 除錯輔助線的樣式；只在 `StageFrame.debug` 存在時使用，調參入口。
@@ -132,6 +143,12 @@ export interface RenderAim {
    */
   y: number;
   radius: number;
+  /**
+   * 落點會越過警戒線，這一顆投不下去：輔助線轉紅、預覽轉半透明。
+   * The landing would cross the warning line and the drop is refused: the guide turns red and
+   * the ghost fades.
+   */
+  blocked?: boolean;
 }
 
 /**
@@ -554,6 +571,18 @@ export function drawStage(
 ): void {
   const { geometry, bodies, aim, overflow } = frame;
 
+  /*
+   * 輔助線的顏色與層級一起決定：被拒絕的投放（`blocked`）轉紅，而且畫在顆粒**之上** ——
+   * 滿槽正是它被拒絕的時候，而那時整條線本來就會被堆疊蓋住。
+   * The guide's colour and layer are decided together: a refused drop (`blocked`) turns red and
+   * is drawn **above** the bodies — a full trough is exactly when it is refused, and exactly
+   * when the pile would hide it.
+   */
+  const guideColor =
+    frame.guideColor ??
+    (aim?.blocked === true ? AIM_GUIDE_STYLE.blockedColor : AIM_GUIDE_STYLE.color);
+  const guideOnTop = aim?.blocked === true;
+
   /* 1. 槽的內部填充。必須先畫，否則方團團會看起來在外面。 */
   drawContainerBack(ctx, geometry);
 
@@ -563,8 +592,8 @@ export function drawStage(
   }
 
   /* 輔助線在 sprite 之下，才不會蓋住方團團。 */
-  if (aim !== null) {
-    drawAimGuide(ctx, aim, geometry, frame.guideColor ?? AIM_GUIDE_STYLE.color);
+  if (aim !== null && !guideOnTop) {
+    drawAimGuide(ctx, aim, geometry, guideColor);
   }
 
   /* 3. 全部方團團（依物理角度翻滾、依彈跳動畫縮放）。
@@ -614,15 +643,21 @@ export function drawStage(
   /*
    * 6. 投放預覽畫在最上層（它還沒進到槽裡），同樣套用遊戲區裁切；
    * 且為不透明 —— 預覽是「這一顆確定會掉下去」的承諾，半透明讀起來像「可能會掉」。
+   * 唯一的例外是落點越線（`blocked`）：那時它**確實**不會掉，所以轉半透明、輔助線也轉紅。
    * The drop preview, on top because it has not entered the trough yet, with the same clip;
    * fully opaque — the preview promises "this one will drop", and translucency reads as "maybe".
+   * The one exception is a landing past the line (`blocked`): it genuinely will not drop, so it
+   * fades and the guide turns red.
    *
    * 冷卻期間的隱藏由 `aim === null` 負責，不靠調 alpha —— 那是狀態而非風格。
    * Hiding during the cooldown is `aim === null`'s job, not an alpha trick — that is state, not styling.
    */
   if (aim !== null) {
+    if (guideOnTop) drawAimGuide(ctx, aim, geometry, guideColor);
+
     ctx.save();
     clipToPlayField(ctx, geometry, frame.clipTop ?? 0);
+    if (aim.blocked === true) ctx.globalAlpha = BLOCKED_PREVIEW_ALPHA;
     drawBody(ctx, { ...aim, angle: 0 }, sprites);
     ctx.restore();
   }

@@ -774,17 +774,22 @@ export class GameSession implements SkillBoard {
    * 這一局已結束（溢位逾時）時直接忽略，讓輸入層不必自己判斷遊戲狀態。
    *
    * **投放冷卻**：兩次投放至少相隔 `dropCooldownMs`，間隔內的呼叫直接回傳、不消耗佇列。
+   * **落點越線**：預測這一顆會停在警戒線之上時同樣不投（見 `canDropAt`）。兩個模式都一樣 ——
+   * 無盡模式只是不結算，堆疊照樣不准疊出線外。
    * 這裡是唯一的閘門 —— 滑鼠、空白鍵、觸控都走同一條路，所以不可能出現「某個輸入管道
    * 繞過冷卻」的情況。
    * **Drop cooldown**: two drops must be `dropCooldownMs` apart; calls inside the gap return
-   * without consuming the queue. This is the only gate — mouse, space bar and touch all come
-   * through here, so no input path can bypass it.
+   * without consuming the queue. **Past the line**: a drop predicted to come to rest above the
+   * warning line is refused too (see `canDropAt`) — in both modes; endless merely skips the
+   * settlement, the pile still may not rise above the line. This is the only gate — mouse,
+   * space bar and touch all come through here, so no input path can bypass it.
    *
    * @returns 這次呼叫是否真的投下了一顆。
    */
   drop(): boolean {
     if (this.over) return false;
     if (!this.canDrop) return false;
+    if (!this.canDropAt(this.aimX)) return false;
 
     /*
      * 先 `take()` 再查定義：等級只讀一次，就不存在「peek 與 take 之間被換掉」的
@@ -859,6 +864,51 @@ export class GameSession implements SkillBoard {
   }
 
   /**
+   * 這一顆從 `x` 放下時，上緣會停在哪個 Y（虛擬單位）。
+   * Where a drop at `x` would come to rest: the Y of its top edge, in virtual units.
+   *
+   * 預測只做一次垂直掃描：橫向有重疊的顆粒，其頂緣就是一層落面，取最高的一層；腳下什麼都
+   * 沒有就落在地板上。斜靠、滾動、搖晃都不模擬 —— 這是一道閘門，不是物理預演。
+   * The prediction is one vertical sweep: every body overlapping the column offers its top edge
+   * as a surface and the highest wins, with the floor as the fallback. Sliding, rolling and
+   * shaking are not simulated — this is a gate, not a physics rehearsal.
+   */
+  private landingTopY(x: number, radius: number): number {
+    let surface = this.cavity.y + this.cavity.height;
+
+    for (const entry of this.entries) {
+      /*
+       * 只停在**已入堆**的顆粒上：半空中的一顆不是落面。少了這一條，同一欄連投兩顆時，
+       * 第二顆會被第一顆（還在投放高度附近）擋住 —— 那是「連投」，不是「疊到頂」。
+       * Only **piled** bodies are surfaces; one still in the air is not. Without this, a
+       * second drop down the same column would be refused by the first one still hanging near
+       * the drop height — that is a rapid double drop, not a pile at the top.
+       */
+      if (!entry.entered) continue;
+      if (Math.abs(entry.body.position.x - x) >= entry.radius + radius) continue;
+
+      const top = entry.body.position.y - entry.radius;
+      if (top < surface) surface = top;
+    }
+
+    return surface - radius * 2;
+  }
+
+  /**
+   * 在 `x` 投放放得下嗎：落點上緣不得高於溢位警戒線。
+   * Whether a drop at `x` fits: the landing top edge must not sit above the overflow line.
+   *
+   * 兩個模式共用同一條規則；無盡模式差的只是越線之後不會結算成敗。
+   * Both modes share this rule; endless differs only in that a breach never settles into a loss.
+   */
+  canDropAt(x: number): boolean {
+    const level = this.pendingLevel();
+    const centreX = this.clampAimX(x, level.radius);
+
+    return this.landingTopY(centreX, level.radius) >= this.overflowLineY;
+  }
+
+  /**
    * 現在可以投放嗎（＝這一局還在進行、沒有技能在作用、且已過投放冷卻）。
    * Whether a drop is accepted right now: the run is live, no skill is acting, and the cooldown
    * has elapsed.
@@ -868,6 +918,10 @@ export class GameSession implements SkillBoard {
    * **Dropping is blocked while a skill acts** (the user's decision): during a float or a shake,
    * and while a target selection is pending. The rule lives in **this one place**, so no input
    * path — mouse, keyboard or touch — can bypass it.
+   *
+   * 落點越線那道閘門**不在這裡**：它隨瞄準位置改變，而這一支沒有座標（見 `canDropAt`）。
+   * The landing gate is **not** here: it depends on the aim, and this getter takes no coordinate
+   * (see `canDropAt`).
    *
    * 輸入層靠它決定要不要把點擊當成投放，HUD 也可以拿它顯示冷卻狀態。
    * The input layer uses this to decide whether a click counts as a drop, and the HUD can use
@@ -3176,12 +3230,20 @@ export class GameSession implements SkillBoard {
     if (!this.canDrop) return null;
 
     const level = this.pendingLevel();
+    const x = this.clampAimX(this.aimX, level.radius);
 
     return {
       levelId: level.id,
-      x: this.clampAimX(this.aimX, level.radius),
+      x,
       y: this.spawnYValue,
       radius: level.radius,
+      /*
+       * 落點越線：預覽照畫，但標成「投不下去」。藏掉預覽會讓玩家以為是冷卻或當機 ——
+       * 紅線與半透明的預覽才說得出「是這裡不行」。
+       * Past the line: the preview stays, marked as "cannot drop". Hiding it would read as a
+       * cooldown or a bug, while the red guide and translucent ghost say "not here".
+       */
+      blocked: !this.canDropAt(x),
     };
   }
 

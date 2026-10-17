@@ -132,7 +132,7 @@ export const zhHans: Messages = {
   'settings.rules.master': '允许更改游戏规则',
   'settings.rules.masterNote': '开启后才可调整以下规则；开启期间的成绩不会记录在排行榜上。',
   'settings.rules.endless': '无尽模式',
-  'settings.rules.endlessNote': '碰到警戒线也不会触发 5 秒警告与结束，可以一直玩下去。',
+  'settings.rules.endlessNote': '碰到警戒线也不会触发 5 秒警告与结束；投放禁令不变，堆满了就只能靠技能腾出空间。',
   'settings.rules.more': '（未来再补充）',
   'settings.language.heading': '语言',
   'settings.language.subtitle': '界面显示语言',
@@ -152,7 +152,7 @@ export const zhHans: Messages = {
   'help.play.body3':
     '玩家可以善用不同效果的技能来提高分数；其中透过连击、投下方团团获得技力，技力可以兑换指定的技能。',
   'help.play.body4':
-    '倘若堆叠太高超过警戒线，则需要在 5 秒内尽快清除堆叠，超时后则判定为本局结束。',
+    '方团团不能放到警戒线以上：落点越线的那一颗不会落下。倘若堆叠仍然越过警戒线，则需要在 5 秒内尽快清除堆叠，超时后则判定为本局结束。',
   'help.origin.heading': '制作缘由',
   'help.origin.body1':
     '《方团团大作战》是基于《明日方舟：终末地》的「融合！山团团！」网页活动玩法的非官方粉丝延伸版本。',

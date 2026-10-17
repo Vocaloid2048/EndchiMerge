@@ -148,7 +148,7 @@ export const en: Messages = {
     'Turn this on to adjust the rules below. While it is on, scores are not recorded on the leaderboard.',
   'settings.rules.endless': 'Endless mode',
   'settings.rules.endlessNote':
-    'Touching the warning line no longer triggers the 5-second warning or ends the run — play for as long as you like.',
+    'Touching the warning line no longer triggers the 5-second warning or ends the run; the drop rule still applies, so once it is full only skills can make room.',
   'settings.rules.more': '(more to come)',
   'settings.language.heading': 'Language',
   'settings.language.subtitle': 'Interface language',
@@ -168,7 +168,7 @@ export const en: Messages = {
   'help.play.body3':
     'Each skill does something different, and they are worth learning if you want a higher score. You bank SP from combos and from dropping dumplings, and SP is what you spend to cast them.',
   'help.play.body4':
-    'If the pile grows too tall and crosses the warning line, you have 5 seconds to clear it back down. Run out of time and the run ends.',
+    'A dumpling cannot be placed above the warning line: if it would land there, it does not drop at all. If the pile still crosses the line, you have 5 seconds to clear it back down — run out of time and the run ends.',
   'help.origin.heading': 'Why it exists',
   'help.origin.body1':
     'EndchiMerge is an unofficial fan spin-off built on the gameplay of the “OrbiPom! MERGE!” web event from Arknights: Endfield.',

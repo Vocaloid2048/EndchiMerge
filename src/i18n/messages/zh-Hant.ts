@@ -162,7 +162,7 @@ export const zhHant = {
   'settings.rules.masterNote':
     '開啟後才可調整以下規則；開啟期間的成績不會記錄在排行榜上。',
   'settings.rules.endless': '無盡模式',
-  'settings.rules.endlessNote': '碰到警戒線也不會觸發 5 秒警告與結束，可以一直玩下去。',
+  'settings.rules.endlessNote': '碰到警戒線也不會觸發 5 秒警告與結束；投放禁令不變，堆滿了就只能靠技能騰出空間。',
   'settings.rules.more': '（未來再補充）',
   'settings.language.heading': '語言',
   'settings.language.subtitle': '介面顯示語言',
@@ -187,7 +187,7 @@ export const zhHant = {
   'help.play.body3':
     '玩家可以善用不同效果的技能來提高分數；當中透過連擊、投下方團團獲得技力，技力可以兌換指定的技能。',
   'help.play.body4':
-    '倘若堆疊太高超過警戒線，則需要在 5 秒內盡快清除堆疊，超時後則會判定為本局結束。',
+    '方團團不能放到警戒線以上：落點越線的那一顆不會落下。倘若堆疊仍然越過警戒線，則需要在 5 秒內盡快清除堆疊，超時後則會判定為本局結束。',
   'help.origin.heading': '製作緣由',
   'help.origin.body1':
     '《方團團大作戰》是基於《明日方舟：終末地》的「融合！山團團！」網頁活動玩法的非官方粉絲延伸版本。',

@@ -518,12 +518,10 @@ describe('GameSession — D22 在整合層 / D22 at the integration level', () =
       virtualWidth: 500,
     });
 
-    session.setAim(250);
-    session.drop();
-    runFrames(session, 90);
-    session.setAim(250);
-    session.drop();
-    runFrames(session, 90);
+    /* 投放越不了線了（見 `canDropAt`），用洗牌把堆疊灑過線。 */
+    /* A drop can no longer breach (see `canDropAt`), so the pile is rained over the line. */
+    session.reshuffle(30);
+    runFrames(session, 200);
 
     expect(session.isOver).toBe(true);
     expect(session.aimPreview).toBeNull();
@@ -1055,6 +1053,21 @@ describe('GameSession — 溢位與結束 / overflow and game over', () => {
     });
   }
 
+  /**
+   * 把堆疊弄到警戒線上方（`count` 預設 30 顆）。
+   * Put the pile over the warning line (`count` defaults to 30 bodies).
+   *
+   * 投放禁令（`canDropAt`）之後，**投放已經不可能越線** —— 越線只剩技能做得到，所以這裡用洗牌：
+   * 它先清空、再從上方灑下，繞過閘門。這也正是玩家在滿槽時按洗牌會遇到的局面。
+   * After the landing gate a **drop** can no longer breach, so only a skill can — hence
+   * `reshuffle`: it clears the board and rains bodies from above, bypassing the gate. That is
+   * exactly what a player who reshuffles a full trough runs into.
+   */
+  function breachOverTheLine(session: GameSession, count = 30, frames = 200): void {
+    session.reshuffle(count);
+    runFrames(session, frames);
+  }
+
   it('does not start the countdown for a dumpling that is still in flight', () => {
     /* 投放點在溢位線上方（40 > 30），剛生成的一顆不算越線。
      * The drop point is above the overflow line (40 > 30), so a fresh dumpling does not count. */
@@ -1074,7 +1087,9 @@ describe('GameSession — 溢位與結束 / overflow and game over', () => {
   it('does not count a lone dumpling as overflow, however long it sits', () => {
     const session = makeOverflowRoom({ topOffset: 980, overflowAboveRim: 0 }, { overflowGraceMs: 0 });
 
-    session.drop();
+    /* 一顆：它越了線，但沒碰到任何東西，所以不算入堆。 */
+    /* One body: it is over the line but touches nothing, so it is not "piled". */
+    breachOverTheLine(session, 1, 240);
 
     for (let frame = 0; frame < 240; frame += 1) {
       session.step(1000 / 60);
@@ -1091,15 +1106,7 @@ describe('GameSession — 溢位與結束 / overflow and game over', () => {
     expect(session.playArea.height).toBeLessThan(60);
     expect(session.overflowLineY).toBe(session.containerGeometry.frame.y);
 
-    session.setAim(250);
-    session.drop();
-    runFrames(session, 90);
-
-    expect(session.isOver).toBe(false);
-
-    session.setAim(250);
-    session.drop();
-    runFrames(session, 90);
+    breachOverTheLine(session);
 
     expect(session.isOver).toBe(true);
   });
@@ -1124,12 +1131,7 @@ describe('GameSession — 溢位與結束 / overflow and game over', () => {
   it('clears a running countdown when endless mode is switched on', () => {
     const session = makeOverflowRoom({ topOffset: 980, overflowAboveRim: 0 }, { overflowGraceMs: 5000 });
 
-    session.setAim(250);
-    session.drop();
-    runFrames(session, 90);
-    session.setAim(250);
-    session.drop();
-    runFrames(session, 90);
+    breachOverTheLine(session);
 
     expect(session.overflowSettled).toBe(true);
     expect(session.overflowSecondsLeft).toBeGreaterThan(0);
@@ -1157,14 +1159,10 @@ describe('GameSession — 溢位與結束 / overflow and game over', () => {
   it('ignores drops after the run is over', () => {
     const session = makeOverflowRoom({ topOffset: 980, overflowAboveRim: 0 }, { overflowGraceMs: 0 });
 
-    session.setAim(250);
-    session.drop();
-    runFrames(session, 90);
-    session.setAim(250);
-    session.drop();
-    runFrames(session, 90);
+    breachOverTheLine(session);
 
     const before = session.dropCount;
+    session.setAim(250);
     session.drop();
 
     expect(session.isOver).toBe(true);
@@ -1193,12 +1191,7 @@ describe('GameSession — 溢位與結束 / overflow and game over', () => {
       { overflowGraceMs: 5000 },
     );
 
-    session.setAim(250);
-    session.drop();
-    runFrames(session, 90);
-    session.setAim(250);
-    session.drop();
-    runFrames(session, 90);
+    breachOverTheLine(session);
 
     const seconds = session.overflowSecondsLeft;
     expect(seconds).toBeGreaterThanOrEqual(1);
@@ -1214,7 +1207,7 @@ describe('GameSession — 溢位與結束 / overflow and game over', () => {
       { overflowGraceMs: 5000 },
     );
 
-    session.drop();
+    breachOverTheLine(session, 1, 0);
     runFrames(session, 240);
 
     expect(session.overflowSettled).toBe(false);
