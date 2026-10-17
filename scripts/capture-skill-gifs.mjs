@@ -20,6 +20,11 @@
  * Two prerequisites: a fake rAF/performance.now so only `__pump()` advances time, and the dev-only
  * `window.__endchi` handle (see `main.ts`) so the script can read every body's real position
  * instead of guessing where to click.
+ *
+ * 兩段之間的約定：`canvas` 模式的幀是**透明** PNG，背景由合成器按 `background.webp` 補回；
+ * 只有 `mode: 'page'`（連勢不墜要看連擊卡）才是已經含背景的整頁截圖。
+ * Contract between the stages: `canvas` frames are **transparent** PNGs and the compositor puts the
+ * backdrop back from `background.webp`; only `mode: 'page'` (the combo card) is a page screenshot.
  */
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
@@ -35,6 +40,11 @@ if (EXE === undefined) {
 }
 /** 每 5 個 60fps 物理幀抓一張 ＝ 12fps 的 GIF。 / One shot every five physics frames = 12 fps. */
 const CAPTURE_EVERY = 5;
+/** 佈置階段每 9 塊抓一張（＝ 每 45 幀）：看得見盤面怎麼堆起來，又不至於佔滿格數。 */
+/** One frame every nine blocks (45 frames) while setting up: the build-up shows without dominating. */
+const LEAD_STRIDE = 9;
+/** 施放前停留的物理幀數（約 0.4 秒）。 / Physics frames to hold the pre-cast board (about 0.4 s). */
+const HOLD_BEFORE = 24;
 
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -115,7 +125,27 @@ async function boot() {
   throw new Error('the game never became ready');
 }
 
-const settle = (frames) => page.evaluate((n) => window.__pump(n), frames);
+/**
+ * 逐塊推進物理並依 `captureStride` 抓幀。整段一次推完就沒有中間狀態可抓，而每塊 5 幀剛好
+ * 對應 GIF 的 12 fps，所以「抓一張」＝「一格」。
+ * Pump the physics in blocks, grabbing a frame every `captureStride` blocks. Pumping a whole stretch
+ * at once would leave no intermediate states to capture, and one five-frame block is exactly one
+ * GIF frame at 12 fps.
+ */
+let captureStride = Infinity;
+let captureTick = 0;
+let pendingShot = null;
+
+async function settle(frames) {
+  let remaining = frames;
+  while (remaining > 0) {
+    const step = Math.min(CAPTURE_EVERY, remaining);
+    await page.evaluate((n) => window.__pump(n), step);
+    remaining -= step;
+    captureTick += 1;
+    if (pendingShot !== null && captureTick % captureStride === 0) await pendingShot();
+  }
+}
 
 /** 盤面快照：每顆的虛擬座標與半徑，加上畫布位置與縮放。 / Board snapshot plus canvas geometry. */
 async function readBoard() {
@@ -240,10 +270,14 @@ const SCENARIOS = [
   },
   {
     id: 'scramble',
+    /* 重排要有「之前」才看得懂：先看它把左邊堆成柱、右邊一顆孤立。 */
+    /* A permutation needs a before: build a column on the left and one lonely body on the right. */
+    lead: true,
     hold: 60,
     async setup() {
       /* 一邊擠成一堆、一邊孤立：重排之後「誰去了哪」才看得出來。 */
-      for (const fx of [0.24, 0.26, 0.28, 0.3, 0.8]) await drop(fx);
+      /* A pile on the left, one lonely body on the right: only then does a permutation read. */
+      for (const fx of [0.22, 0.26, 0.3, 0.34, 0.38, 0.78]) await drop(fx);
       await settle(40);
     },
     async act() {
@@ -279,7 +313,7 @@ const SCENARIOS = [
   },
   {
     id: 'shake',
-    hold: 150,
+    hold: 130,
     async setup() {
       for (const fx of [0.26, 0.4, 0.54, 0.68]) await drop(fx);
       await settle(40);
@@ -291,9 +325,18 @@ const SCENARIOS = [
   },
   {
     id: 'reshuffle',
-    hold: 260,
+    /*
+     * 「清空重落」必須先看見被清掉的是什麼：佈置階段逐顆下三顆，把容器填起來，
+     * 之後那一下清空才有東西可以失去。
+     * "Clear and re-rain" only reads if you see what got cleared: the lead-in drops three bodies
+     * into the container, so the sweep actually takes something away.
+     */
+    lead: true,
+    hold: 180,
     async setup() {
-      for (const fx of [0.3, 0.44, 0.58]) await drop(fx);
+      /* 先把容器堆到有份量：清空時才有東西可失去。 */
+      /* Fill the container first, so clearing it actually takes something away. */
+      for (const fx of [0.24, 0.36, 0.48, 0.6, 0.72, 0.3, 0.54]) await drop(fx);
       await settle(40);
     },
     async act() {
@@ -346,10 +389,13 @@ const SCENARIOS = [
      * four corners, and the change is obvious at a glance.
      */
     query: '?debug=1',
-    crop: { x: 0, y: 0.45, w: 1, h: 0.55 },
+    /* 先看盤面怎麼落成，再看到同一批顆粒的碰撞體被換掉 —— 否則「換了」沒有參照物。 */
+    /* See the board settle first, then watch the same bodies swap colliders; otherwise "changed" has nothing to compare against. */
+    lead: true,
+    crop: { x: 0.1, y: 0.62, w: 0.8, h: 0.38 },
     hold: 90,
     async setup() {
-      for (const fx of [0.3, 0.44, 0.58, 0.72]) await drop(fx);
+      for (const fx of [0.3, 0.44, 0.58, 0.72, 0.38]) await drop(fx);
       await settle(40);
     },
     async act() {
@@ -394,13 +440,16 @@ for (const scenario of SCENARIOS) {
   fs.mkdirSync(dir, { recursive: true });
 
   /*
-   * 預設直接抓**畫布**（透明 PNG，之後由 Python 疊在單色上）：畫布以外的背景是靜態漸層圖，
-   * 把它拍進 GIF 等於每格都帶一堆不會動卻無法壓縮的雜訊 —— 那正是檔案變成幾 MB 的原因。
+   * 預設直接抓**畫布**（透明 PNG，之後由 Python 疊上真正的背景圖）：把頁面截圖塞進 GIF 等於
+   * 每格都帶一張不會動卻無法壓縮的照片背景 —— 第一版就是這樣變成 27MB。透明畫布 ＋ 由合成器
+   * 疊回 `assets/ui/background.webp` 的對應區域，既保留真實色調，又只付一次代價。
    * 只有需要畫布以外東西的情境（連勢不墜要看連擊卡）才整頁截圖。
-   * The default grabs the **canvas** (a transparent PNG, later composited over a flat colour):
-   * the page background is a static gradient image, and baking it into the GIF makes every frame
-   * carry noise that never moves and cannot be compressed — which is what blew the files up to
-   * megabytes. Only a scenario needing something outside the canvas (the combo card) shoots the page.
+   * The default grabs the **canvas** (a transparent PNG; Python composites it onto the real
+   * backdrop): baking page screenshots into a GIF makes every frame carry a photographic
+   * background that never moves and cannot be compressed — that is what made the first attempt
+   * 27MB. A transparent canvas plus the matching crop of `assets/ui/background.webp` keeps the true
+   * colours while paying for the backdrop only once. Only a scenario needing something outside the
+   * canvas (the combo card) shoots the page.
    */
   let index = 0;
   const shot = async () => {
@@ -414,21 +463,33 @@ for (const scenario of SCENARIOS) {
     index += 1;
   };
 
+  pendingShot = shot;
+  captureTick = 0;
+
+  /*
+   * 「前設情景」：需要先看到盤面怎麼堆起來的技能（重排、清空重落、換幾何），佈置階段就開始抓，
+   * 但抓得稀一點 —— 佈置只是背景故事，不該佔掉大半格數。
+   * A lead-in: for the skills whose point is what the board looked like first (reshuffle, scramble,
+   * a geometry swap), capture during setup as well — sparsely, because the build-up is context and
+   * must not eat most of the frames.
+   */
+  captureStride = scenario.lead === true ? LEAD_STRIDE : Infinity;
   await scenario.setup();
   const before = await readBoard();
-  await shot();
+
+  /* 施放前停留約半秒：不然「之前」只閃一格，看不出前後差別。 */
+  /* Hold the pre-cast board for about half a second; otherwise "before" is a single flash. */
+  captureStride = 1;
+  await settle(HOLD_BEFORE);
 
   const extra = await scenario.act();
   await settle(CAPTURE_EVERY);
   const after = await readBoard();
-  await shot();
 
   const rounds = Math.floor(scenario.hold / CAPTURE_EVERY);
-  for (let i = 0; i < rounds; i += 1) {
-    await settle(CAPTURE_EVERY);
-    await shot();
-  }
+  for (let i = 0; i < rounds; i += 1) await settle(CAPTURE_EVERY);
 
+  pendingShot = null;
   const final = scenario.checkAt === 'final' ? await readBoard() : after;
   const verdict = scenario.check(before, final, extra);
 
@@ -436,6 +497,10 @@ for (const scenario of SCENARIOS) {
     id: scenario.id,
     frames: index,
     clip,
+    viewport: await page.evaluate(() => ({
+      width: window.innerWidth,
+      height: window.innerHeight,
+    })),
     mode: scenario.mode ?? 'canvas',
     crop: scenario.crop ?? null,
     count: { before: before.bodies.length, after: after.bodies.length },

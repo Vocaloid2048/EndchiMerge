@@ -115,7 +115,7 @@ export const zhHans: Messages = {
   'skillGuide.desc.shake':
     '容器左右摇晃，把堆叠摇散、让颗粒重新落位。摇晃期间不能投放。',
   'skillGuide.desc.reshuffle':
-    '清空容器，再重新落下 {count} 颗已解锁的方团团。逐颗落下，所以不会互相嵌入或挤穿墙壁。',
+    '清空容器，再重新落下 {count} 颗已解锁的方团团。',
   'skillGuide.desc.fate_swap':
     '点选两颗方团团，交换它们的位置与速度，并轻轻推开压在新位置上的邻居。需要两个不同的目标。',
   'skillGuide.desc.shrink_all':

@@ -124,7 +124,7 @@ export const yue: Messages = {
   'skillGuide.desc.shake':
     '容器左右搖，搖散個堆，等啲方團團重新落位。搖緊嘅時候唔可以投放。',
   'skillGuide.desc.reshuffle':
-    '清空容器，再重新落 {count} 粒已解鎖嘅方團團。一粒一粒咁落，所以唔會互相嵌住或者擠穿牆。',
+    '清空容器，再重新落 {count} 粒已解鎖嘅方團團。',
   'skillGuide.desc.fate_swap':
     '撳兩粒方團團，交換佢哋嘅位置同速度，順手輕輕推開壓住新位置嘅鄰居。要揀兩個唔同嘅目標。',
   'skillGuide.desc.shrink_all':
@@ -140,7 +140,7 @@ export const yue: Messages = {
   'settings.rules.masterNote': '開咗先可以改下面啲規則；開住嗰陣嘅成績唔會記錄喺排行榜度。',
   'settings.rules.endless': '無盡模式',
   'settings.rules.endlessNote': '掂到警戒線都唔會彈 5 秒警告同結束，可以一直玩落去。',
-  'settings.rules.more': '（遲啲再補）',
+  'settings.rules.more': '（遲啲再加）',
   'settings.language.heading': '語言',
   'settings.language.subtitle': '介面顯示語言',
   'settings.language.note': '預設跟返你部機或者瀏覽器嘅語言揀。',
