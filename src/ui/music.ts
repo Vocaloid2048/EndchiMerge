@@ -13,10 +13,11 @@
 import { i18n, t } from '../i18n';
 
 /**
- * 預設音量。這是一首背景音樂，壓在音效之下而不是當主角。
+ * 預設音量。這是一首背景音樂，壓在音效之下而不是當主角；0.4 的七成是實聽之後的定案。
  * The default volume: background music, sitting under the effects rather than in front of them.
+ * Seven tenths of the previous 0.4, settled by ear.
  */
-const DEFAULT_VOLUME = 0.4;
+const DEFAULT_VOLUME = 0.28;
 
 /**
  * 會被當成「手勢」的事件；`pointerdown` 涵蓋滑鼠與觸控，`keydown` 涵蓋鍵盤。
@@ -36,8 +37,8 @@ export interface MusicToggleOptions {
    */
   src: string;
   /**
-   * 音量 0–1；預設 0.4。
-   * Volume 0–1; defaults to 0.4.
+   * 音量 0–1；預設 0.28。
+   * Volume 0–1; defaults to 0.28.
    */
   volume?: number;
 }
