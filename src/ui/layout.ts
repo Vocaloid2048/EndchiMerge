@@ -12,7 +12,7 @@ import type { Rect } from '../core/types';
 import { i18nAriaLabel, i18nText, i18nTitle, type MessageKey } from '../i18n';
 import { applyDesignTokens } from './designTokens';
 import { appendChildren, el } from './dom';
-import { createAssetIcon, type AssetIconName } from './icons';
+import { createAssetIcon, createIcon, type AssetIconName } from './icons';
 
 /**
  * 七個區域的識別名，對應 design.md §2.2 的編號 1–7。
@@ -222,10 +222,21 @@ function buildSkillList(): HTMLElement {
   const grid = el('div', 'skill-grid');
   grid.dataset['hook'] = 'skill-grid';
 
+  /*
+   * 技能說明（i）：貼在面板右上角，與標題同高。它只是個按鈕，彈窗由 `ui/skillGuide.ts` 負責。
+   * The skill guide "(i)": pinned to the panel's top-right, level with the title. This is only the
+   * button — the popup itself lives in `ui/skillGuide.ts`.
+   */
+  const guideButton = el('button', 'panel__info');
+  guideButton.type = 'button';
+  guideButton.dataset['action'] = 'skill-guide';
+  guideButton.append(createIcon('info'));
+  i18nAriaLabel(guideButton, 'skillGuide.open');
+
   const title = el('h2', 'panel__title');
   i18nText(title, 'label.skillList');
 
-  appendChildren(panel, title, meter, grid);
+  appendChildren(panel, title, guideButton, meter, grid);
   return panel;
 }
 

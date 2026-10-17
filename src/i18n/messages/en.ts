@@ -101,6 +101,41 @@ export const en: Messages = {
   'skillBar.ariaCumulativeUses': '{name} ({uses}/{threshold} skills cast, free)',
   'skillBar.ariaCost': '{name} (costs {cost} SP)',
   'skillBar.ariaLocked': '{name} (locked)',
+  'skillBar.used': 'Used',
+  'skillBar.ariaUsed': '{name} (already used this run; it will not unlock again)',
+
+  /* ── Skill guide ───────────────────────────────────────────────── */
+  'skillGuide.open': 'Skill guide',
+  'skillGuide.title': 'Skill guide',
+  'skillGuide.close': 'Close the skill guide',
+  'skillGuide.groupPaid': '{cost} SP',
+  'skillGuide.groupFree': 'Free skills',
+  'skillGuide.cost': 'Costs {cost} SP',
+  'skillGuide.costFree': 'Free',
+  'skillGuide.unlockSp': 'Ready whenever you can afford it, locked again once spent.',
+  'skillGuide.unlockSpent': 'Unlocks after {threshold} SP spent this run.',
+  'skillGuide.unlockUses': 'Unlocks after {threshold} skills cast this run.',
+  'skillGuide.media': 'Illustration / animation',
+  'skillGuide.desc.discard':
+    'Pick one dumpling and take it off the board — no merge, no score. Use it to clear a low-level body in the way or make room for a big one.',
+  'skillGuide.desc.ascend':
+    'Pick one dumpling and promote it one level, provided the next level is already unlocked in the collection. No score, no combo, no SP — it is a purchase.',
+  'skillGuide.desc.protocol_float':
+    'Every dumpling floats upward for a moment, with the space just below the overflow line as its ceiling. A breather for a pile that is about to spill.',
+  'skillGuide.desc.scramble':
+    'Randomly permutes the positions of every dumpling. It reuses the spots already on the board, so bodies are never stacked onto one point and blown apart.',
+  'skillGuide.desc.combo_grace':
+    'The next {drops} drops will not break the chain even with nothing merged. Casting it again takes the larger value instead of adding.',
+  'skillGuide.desc.shake':
+    'Shakes the container side to side to loosen the pile and let the bodies settle again. No dropping while it shakes.',
+  'skillGuide.desc.reshuffle':
+    'Clears the container and drops {count} unlocked dumplings again, one at a time, so they neither nest in each other nor squeeze through the walls.',
+  'skillGuide.desc.fate_swap':
+    'Pick two dumplings and swap their positions and velocities, nudging whatever sits on the new spots. Needs two distinct targets.',
+  'skillGuide.desc.shrink_all':
+    'Shrinks every dumpling on the board to radius {radius}; it never enlarges. Bodies already smaller are left alone, and anything merged later keeps its normal size.',
+  'skillGuide.desc.square_core':
+    'This run judges merge edges by the core square instead of the sprite outline: the collider itself becomes a square, for bodies already on the board and for later drops alike. Once per run.',
 
   'settings.title': 'Settings',
   'settings.close': 'Close settings',

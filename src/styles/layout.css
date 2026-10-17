@@ -426,6 +426,50 @@
 }
 
 /*
+ * 技能說明（i）：面板右上角、與標題同一水平帶的一顆圓鈕。
+ * The skill guide "(i)": a round button in the panel's top-right, on the title's band.
+ *
+ * 放在標題右側而不是列表右上角的第一格 —— 格網會被捲動，按鈕跟著捲走就永遠找不到了。
+ * It sits beside the title rather than in the grid's first top-right cell: the grid scrolls, and a
+ * button that scrolls away can never be found again.
+ */
+.panel--skill .panel__info {
+  position: absolute;
+  top: 12px;
+  right: 18px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 2px solid rgba(215, 215, 215, 0.32);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-fg-muted);
+  cursor: pointer;
+  transition:
+    color var(--transition-fast),
+    border-color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.panel--skill .panel__info:hover {
+  color: var(--color-fg);
+  border-color: rgba(249, 255, 81, 0.7);
+  background: rgba(249, 255, 81, 0.12);
+}
+
+.panel--skill .panel__info:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.panel--skill .panel__info .icon {
+  width: 20px;
+  height: 20px;
+}
+
+/*
  * 技力條（`1408:2301` / `1408:2304` / `1408:2306`）：三顆 120×16 的膠囊，y=82，
  * 欄距 16。**一條代表一點技力**，所以段數由 `sp.max` 決定而不是寫死三條 ——
  * 設計稿剛好三條只是因為當下的 `sp.max` 是 3。
@@ -468,28 +512,57 @@
   position: absolute;
   top: 113px;
   left: 21px;
-  right: 21px;
+  /*
+   * 右緣貼到面板邊界（原本是 21px）：三欄 120 ＋ 兩道 16 欄距共 392，而內容區只有 393 ——
+   * 捲軸一佔用哪怕 1px，第三欄的卡片就會被壓住。把容器往右多伸 21px，捲軸便落在卡片右側的
+   * 留白裡；卡片仍從 x=21 起排，位置與寬度一點沒變（使用者：「把 scrollbar 放外面一點點」）。
+   * The right edge now meets the panel's edge (it used to be 21px): three 120px columns plus two
+   * 16px gutters come to 392 inside a 393px content box, so a scrollbar taking even 1px would
+   * cover the third column. Extending the container 21px to the right puts the scrollbar in the
+   * clearance beside the cards, while the cards still start at x=21 with unchanged size and
+   * position (the user: "move the scrollbar a little further out").
+   */
+  right: 0;
   bottom: 21px;
   display: grid;
   grid-template-columns: repeat(3, 120px);
   gap: 13px 16px;
   align-content: start;
   /*
-   * **只准垂直捲動**（使用者定案）。三欄 120 加欄距 16 剛好 392，而內容區寬 393 —— 一旦
-   * 瀏覽器為垂直捲軸留出寬度，橫向就會溢出，於是「不能橫向捲動」立刻變成「有一條橫向
-   * 捲軸」。`overflow-x: hidden` 直接把這條路封死，`scrollbar-gutter: stable` 則先預留
-   * 捲軸寬度，讓卡片格網不會因為捲軸出現／消失而左右跳動。
-   * **Vertical scrolling only** (the user's decision). Three 120px columns with 16px gutters come
-   * to 392 against a 393px content box — the moment the browser reserves width for a vertical
-   * scrollbar, the grid overflows horizontally and "no horizontal scrolling" turns into "there is
-   * a horizontal scrollbar". `overflow-x: hidden` closes that door, and `scrollbar-gutter: stable`
-   * reserves the gutter up front so the grid never shifts left and right as the scrollbar appears
+   * **只准垂直捲動**（使用者定案）。容器現在比卡片列寬（右緣貼齊面板），所以橫向溢出不再是
+   * 問題；`scrollbar-gutter: stable` 仍留著，讓捲軸出現／消失時卡片不會左右跳動。
+   * **Vertical scrolling only** (the user's decision). The container is now wider than the card
+   * columns (its right edge meets the panel), so horizontal overflow is no longer a concern;
+   * `scrollbar-gutter: stable` stays so the cards never shift sideways as the scrollbar appears
    * and disappears.
    */
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-gutter: stable;
+  /* 細捲軸：佔用寬度小，才留得下「卡片右側那一點留白」（見上）。 */
+  /* A thin scrollbar: it needs little width, so the clearance beside the cards survives (see above). */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(215, 215, 215, 0.4) transparent;
   overscroll-behavior: contain;
+}
+
+/* Chromium 系沒有 `scrollbar-width: thin` 之外的微調，只能用私有偽元素指定寬度與顏色。 */
+/* Chromium honours little beyond `scrollbar-width: thin`, so the width and colour are set through the vendor pseudo-elements. */
+.skill-grid::-webkit-scrollbar {
+  width: 8px;
+}
+
+.skill-grid::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.skill-grid::-webkit-scrollbar-thumb {
+  border-radius: 8px;
+  background: rgba(215, 215, 215, 0.4);
+}
+
+.skill-grid::-webkit-scrollbar-thumb:hover {
+  background: rgba(215, 215, 215, 0.62);
 }
 
 /* ── 技能卡（`1408:2333` 等，120×150）────────────────────────────────── */
@@ -633,6 +706,18 @@
 }
 
 /*
+ * 累計施放次數型（`n/m` 是次數）：獨立一色，蓋過上面的消耗分級。
+ * The cast-count badge (`n/m` counts casts): its own colour, overriding the cost tiers above.
+ *
+ * 它總是免費技能（`cost: 0`），若沿用免費的綠色，玩家會把 `0/8` 讀成「技力 0 點」。
+ * It is always a free skill (`cost: 0`); reusing the free-tier green makes `0/8` read as
+ * "0 SP" instead of "no casts yet".
+ */
+.skill-card[data-unlock='cumulativeUses'] .skill-card__badge {
+  background: var(--color-badge-uses);
+}
+
+/*
  * 未解鎖的遮罩：整張卡覆蓋（使用者定案），中間顯示解鎖進度。
  * The locked mask covers the whole card (the user's decision) and shows unlock progress.
  *
@@ -661,6 +746,32 @@
 /* 解鎖進度是文字百分比（技力計本身已經用「一條一點」表達絕對值）。 */
 .skill-card__progress {
   display: block;
+}
+
+/*
+ * 一次性技能用完之後的「已使用」字樣：它不會再解鎖，所以遮罩上不放百分比。
+ * The "used" label of a spent one-shot skill: it never unlocks again, so the mask carries no
+ * percentage.
+ */
+.skill-card__used {
+  display: none;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.skill-card--exhausted .skill-card__used {
+  display: block;
+}
+
+/* 用完的卡片比「未解鎖」更沉一些：這是終局，不是等待。 */
+/* A spent card sits deeper than "locked": that is final, not pending. */
+.skill-card--exhausted {
+  cursor: not-allowed;
+}
+
+.skill-card--exhausted .skill-card__mask {
+  background: rgba(20, 21, 26, 0.9);
 }
 
 

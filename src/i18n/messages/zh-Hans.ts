@@ -87,6 +87,41 @@ export const zhHans: Messages = {
   'skillBar.ariaCumulativeUses': '{name}（累计使用技能 {uses}/{threshold}，免费）',
   'skillBar.ariaCost': '{name}（消耗 {cost} 技力）',
   'skillBar.ariaLocked': '{name}（未解锁）',
+  'skillBar.used': '已使用',
+  'skillBar.ariaUsed': '{name}（本局已使用，不会再解锁）',
+
+  /* ── 技能说明 / Skill guide ────────────────────────────────────── */
+  'skillGuide.open': '技能说明',
+  'skillGuide.title': '技能说明',
+  'skillGuide.close': '关闭技能说明',
+  'skillGuide.groupPaid': '{cost} 点技力',
+  'skillGuide.groupFree': '免费技能',
+  'skillGuide.cost': '消耗 {cost} 点技力',
+  'skillGuide.costFree': '免费',
+  'skillGuide.unlockSp': '技力足够就能发动，用掉即时上锁。',
+  'skillGuide.unlockSpent': '本局累计消耗 {threshold} 点技力后解锁。',
+  'skillGuide.unlockUses': '本局累计施放 {threshold} 次技能后解锁。',
+  'skillGuide.media': '示意图／动画',
+  'skillGuide.desc.discard':
+    '点一颗方团团，直接把它移出容器，不合成也不计分。用来清掉挡路的低级颗粒，或替大颗粒腾出空间。',
+  'skillGuide.desc.ascend':
+    '点一颗方团团，把它升到下一级，但下一级必须已在图鉴解锁。升级不计分、不计连击，也不给技力 —— 它是一次购买。',
+  'skillGuide.desc.protocol_float':
+    '短时间内让场上所有方团团向上浮起，以溢位线下方为天花板。给快要满出来的堆叠一次喘息的机会。',
+  'skillGuide.desc.scramble':
+    '把场上所有方团团的位置随机重排。重排用的是既有落点，所以颗粒不会被挤到同一点炸开。',
+  'skillGuide.desc.combo_grace':
+    '接下来 {drops} 次投放即使没有合成，连击也不会中断。重复施放取较大值，不会累加。',
+  'skillGuide.desc.shake':
+    '容器左右摇晃，把堆叠摇散、让颗粒重新落位。摇晃期间不能投放。',
+  'skillGuide.desc.reshuffle':
+    '清空容器，再重新落下 {count} 颗已解锁的方团团。逐颗落下，所以不会互相嵌入或挤穿墙壁。',
+  'skillGuide.desc.fate_swap':
+    '点选两颗方团团，交换它们的位置与速度，并轻轻推开压在新位置上的邻居。需要两个不同的目标。',
+  'skillGuide.desc.shrink_all':
+    '把场上所有方团团缩到半径 {radius}（只缩不放）。已经更小的不受影响，之后合成出来的仍是原本尺寸。',
+  'skillGuide.desc.square_core':
+    '本局改用核心正方形判定边缘，取代 sprite 轮廓：碰撞体本身就是正方形，已经在场上与之后投放的都会换过去。本局只准用一次。',
 
   'settings.title': '设置',
   'settings.close': '关闭设置',

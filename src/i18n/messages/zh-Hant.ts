@@ -115,6 +115,41 @@ export const zhHant = {
   'skillBar.ariaCumulativeUses': '{name}（累計使用技能 {uses}/{threshold}，免費）',
   'skillBar.ariaCost': '{name}（消耗 {cost} 技力）',
   'skillBar.ariaLocked': '{name}（未解鎖）',
+  'skillBar.used': '已使用',
+  'skillBar.ariaUsed': '{name}（本局已使用，不會再解鎖）',
+
+  /* ── 技能說明 / Skill guide ────────────────────────────────────── */
+  'skillGuide.open': '技能說明',
+  'skillGuide.title': '技能說明',
+  'skillGuide.close': '關閉技能說明',
+  'skillGuide.groupPaid': '{cost} 點技力',
+  'skillGuide.groupFree': '免費技能',
+  'skillGuide.cost': '消耗 {cost} 點技力',
+  'skillGuide.costFree': '免費',
+  'skillGuide.unlockSp': '技力足夠就能發動，用掉即時上鎖。',
+  'skillGuide.unlockSpent': '本局累計消耗 {threshold} 點技力後解鎖。',
+  'skillGuide.unlockUses': '本局累計施放 {threshold} 次技能後解鎖。',
+  'skillGuide.media': '示意圖／動畫',
+  'skillGuide.desc.discard':
+    '點一顆方團團，直接把它移出容器，不合成也不計分。用來清掉擋路的低級顆粒，或替大顆粒騰出空間。',
+  'skillGuide.desc.ascend':
+    '點一顆方團團，把它升到下一級，但下一級必須已在圖鑑解鎖。升級不計分、不計連擊，也不給技力 —— 它是一次購買。',
+  'skillGuide.desc.protocol_float':
+    '短時間內讓場上所有方團團向上浮起，以溢位線下方為天花板。給快要滿出來的堆疊一次喘息的機會。',
+  'skillGuide.desc.scramble':
+    '把場上所有方團團的位置隨機重排。重排用的是既有落點，所以顆粒不會被擠到同一點炸開。',
+  'skillGuide.desc.combo_grace':
+    '接下來 {drops} 次投放即使沒有合成，連擊也不會中斷。重複施放取較大值，不會累加。',
+  'skillGuide.desc.shake':
+    '容器左右搖晃，把堆疊搖散、讓顆粒重新落位。搖晃期間不能投放。',
+  'skillGuide.desc.reshuffle':
+    '清空容器，再重新落下 {count} 顆已解鎖的方團團。逐顆落下，所以不會互相嵌入或擠穿牆壁。',
+  'skillGuide.desc.fate_swap':
+    '點選兩顆方團團，交換它們的位置與速度，並輕輕推開壓在新位置上的鄰居。需要兩個不同的目標。',
+  'skillGuide.desc.shrink_all':
+    '把場上所有方團團縮到半徑 {radius}（只縮不放）。已經更小的不受影響，之後合成出來的仍是原本尺寸。',
+  'skillGuide.desc.square_core':
+    '本局改用核心正方形判定邊緣，取代 sprite 輪廓：碰撞體本身就是正方形，已經在場上與之後投放的都會換過去。本局只准用一次。',
 
   /* ── 設定彈窗 / Settings popup ─────────────────────────────────── */
   'settings.title': '設定',

@@ -96,6 +96,41 @@ export const yue: Messages = {
   'skillBar.ariaCumulativeUses': '{name}（累計用咗技能 {uses}/{threshold}，免費）',
   'skillBar.ariaCost': '{name}（要 {cost} 技力）',
   'skillBar.ariaLocked': '{name}（未解鎖）',
+  'skillBar.used': '已用過',
+  'skillBar.ariaUsed': '{name}（呢局已經用過，唔會再解鎖）',
+
+  /* ── 技能說明 / Skill guide ────────────────────────────────────── */
+  'skillGuide.open': '技能說明',
+  'skillGuide.title': '技能說明',
+  'skillGuide.close': '閂咗技能說明',
+  'skillGuide.groupPaid': '{cost} 點技力',
+  'skillGuide.groupFree': '免費技能',
+  'skillGuide.cost': '要用 {cost} 點技力',
+  'skillGuide.costFree': '免費',
+  'skillGuide.unlockSp': '技力夠就撳得，用咗即刻鎖返。',
+  'skillGuide.unlockSpent': '呢局累計嘥夠 {threshold} 點技力就解鎖。',
+  'skillGuide.unlockUses': '呢局累計施放 {threshold} 次技能就解鎖。',
+  'skillGuide.media': '示意圖／動畫',
+  'skillGuide.desc.discard':
+    '撳一粒方團團，直接掟出容器，唔合成亦唔計分。用嚟清走擋路嘅低級粒，或者幫大粒騰位。',
+  'skillGuide.desc.ascend':
+    '撳一粒方團團，將佢升上一級，但下一級要圖鑑已經解鎖。升級唔計分、唔計連擊，亦都唔會畀技力 —— 當係買返嚟。',
+  'skillGuide.desc.protocol_float':
+    '短時間內全場方團團一齊向上浮，以溢位線下面做天花板。堆到就爆嘅時候喘返一口氣。',
+  'skillGuide.desc.scramble':
+    '將全場方團團嘅位置隨機調亂。用嘅係本身已經有嘅落點，所以唔會幾粒疊埋一齊爆開。',
+  'skillGuide.desc.combo_grace':
+    '跟住落嘅 {drops} 次就算冇合成，連擊都唔會斷。重複施放取大嗰個，唔會累加。',
+  'skillGuide.desc.shake':
+    '容器左右搖，搖散個堆，等啲粒重新落位。搖緊嘅時候唔可以投放。',
+  'skillGuide.desc.reshuffle':
+    '清空容器，再重新落 {count} 粒已解鎖嘅方團團。一粒一粒咁落，所以唔會互相嵌住或者擠穿牆。',
+  'skillGuide.desc.fate_swap':
+    '撳兩粒方團團，交換佢哋嘅位置同速度，順手輕輕推開壓住新位置嘅鄰居。要揀兩個唔同嘅目標。',
+  'skillGuide.desc.shrink_all':
+    '全場方團團縮到半徑 {radius}（只縮唔放）。本身細過嘅唔受影響，之後合成出嚟嘅照舊原本尺寸。',
+  'skillGuide.desc.square_core':
+    '呢一局改用核心正方形判邊緣，唔再用 sprite 輪廓：碰撞體本身就係正方形，場上已經有嘅同之後落嘅都會轉過去。一局只可以用一次。',
 
   'settings.title': '設定',
   'settings.close': '閂咗佢',

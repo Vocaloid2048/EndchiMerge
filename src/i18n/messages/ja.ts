@@ -101,6 +101,41 @@ export const ja: Messages = {
   'skillBar.ariaCumulativeUses': '{name}（スキル使用 {uses}/{threshold}、無料）',
   'skillBar.ariaCost': '{name}（{cost} 技力消費）',
   'skillBar.ariaLocked': '{name}（ロック中）',
+  'skillBar.used': '使用済み',
+  'skillBar.ariaUsed': '{name}（このゲームでは使用済み。再解放されません）',
+
+  /* ── スキル説明 / Skill guide ──────────────────────────────────── */
+  'skillGuide.open': 'スキルの説明',
+  'skillGuide.title': 'スキルの説明',
+  'skillGuide.close': 'スキルの説明を閉じる',
+  'skillGuide.groupPaid': '技力{cost}',
+  'skillGuide.groupFree': '無料スキル',
+  'skillGuide.cost': '技力{cost}を消費',
+  'skillGuide.costFree': '無料',
+  'skillGuide.unlockSp': '技力が足りれば発動でき、使うとすぐロックされます。',
+  'skillGuide.unlockSpent': 'このゲームで累計{threshold}技力を消費すると解放されます。',
+  'skillGuide.unlockUses': 'このゲームで累計{threshold}回スキルを使うと解放されます。',
+  'skillGuide.media': 'イメージ／アニメーション',
+  'skillGuide.desc.discard':
+    '方團團をひとつ選んで、そのまま容器の外へ。合成も得点もありません。邪魔な低レベルの粒を片づけたり、大きな粒の場所を空けるのに使います。',
+  'skillGuide.desc.ascend':
+    '方團團をひとつ選んで一段階昇格させます。次の段階が図鑑で解放済みであることが条件。得点・コンボ・技力は増えません —— 買い物です。',
+  'skillGuide.desc.protocol_float':
+    'しばらくの間、場のすべての方團團が上へ浮きます。オーバーフロー線のすぐ下が天井です。あふれそうな山に一息つかせる技です。',
+  'skillGuide.desc.scramble':
+    '場のすべての方團團の位置をランダムに入れ替えます。既にある着地点の並べ替えなので、一点に重なって弾け飛ぶことはありません。',
+  'skillGuide.desc.combo_grace':
+    '次の{drops}回のドロップは、合成が起きなくてもコンボが切れません。重ねて使うと大きい方だけが残り、加算はされません。',
+  'skillGuide.desc.shake':
+    '容器を左右に揺らして山をほぐし、粒を落ち着かせます。揺れている間はドロップできません。',
+  'skillGuide.desc.reshuffle':
+    '容器を空にして、解放済みの方團團を{count}個もう一度落とします。一顆ずつ落とすので、重なり合ったり壁を抜けたりしません。',
+  'skillGuide.desc.fate_swap':
+    '方團團をふたつ選び、位置と速度を入れ替えます。新しい位置に乗っている隣はそっと押しのけます。異なる二つが必要です。',
+  'skillGuide.desc.shrink_all':
+    '場のすべての方團團を半径{radius}まで小さくします（大きくはなりません）。すでに小さい粒はそのまま、あとで合成された粒は元の大きさです。',
+  'skillGuide.desc.square_core':
+    'このゲーム中は、合成の辺の判定を sprite の輪郭ではなく中心の正方形で行います。当たり判定そのものが正方形になり、場にある粒も今後落ちる粒も切り替わります。ゲーム中に一度だけ。',
 
   'settings.title': '設定',
   'settings.close': '設定を閉じる',

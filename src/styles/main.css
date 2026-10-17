@@ -6,13 +6,13 @@
  * 主畫面幾何在 layout.css、名冊在 melting-list.css、結算覆蓋層在 game-over.css、
  * 確認對話框在 confirm-dialog.css、排行榜在 leaderboard.css、發布設定欄位在
  * publish-fields.css、首次的發布詢問在 publish-prompt.css、遊戲說明在 help.css、
- * 設定彈窗在 settings.css。
+ * 設定彈窗在 settings.css、技能說明在 skill-guide.css。
  * This file owns only the reset and the layout host. Tokens live in tokens.css, panel
  * appearance in panels.css, main-screen geometry in layout.css, the roster in
  * melting-list.css, the end-of-run overlay in game-over.css, the confirmation dialog in
  * confirm-dialog.css, the leaderboard in leaderboard.css, the publish-settings fields in
  * publish-fields.css, the one-off publish prompt in publish-prompt.css, the help popup in
- * help.css and the settings popup in settings.css.
+ * help.css, the settings popup in settings.css and the skill guide in skill-guide.css.
  */
 
 @import './tokens.css';
@@ -27,6 +27,7 @@
 @import './publish-prompt.css';
 @import './help.css';
 @import './settings.css';
+@import './skill-guide.css';
 
 *,
 *::before,

@@ -46,6 +46,11 @@ export const ICON_NAMES = [
   'shrink',
   'squareCore',
   /**
+   * 「技能說明」的 (i) 按鈕。
+   * The (i) glyph on the skill-guide button.
+   */
+  'info',
+  /**
    * 技能欄的備援字形：技能 id 對不上任何圖示時用說明鍵頂上。
    * The skill bar's fallback glyph: the help icon stands in when no id matches.
    */
@@ -95,6 +100,9 @@ const ICON_PATHS: Record<IconName, string> = {
   /* 以方代圓：圓中取方。 */
   /* Square Rule: a square inside a circle. */
   squareCore: '<circle cx="12" cy="12" r="8.5"/><rect x="8" y="8" width="8" height="8" rx="1.2"/>',
+  /* 技能說明：圓圈裡的一個 i。 */
+  /* Skill guide: an "i" inside a circle. */
+  info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5"/><path d="M12 7.8v0.1"/>',
 };
 
 /**

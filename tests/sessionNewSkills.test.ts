@@ -320,6 +320,148 @@ describe('以方代圓 / square core', () => {
     expect(session.squareMergeEnabled).toBe(false);
   });
 
+  it('rebuilds the bodies already on the board as squares', () => {
+    /*
+     * 輪廓是「身體 ＋ 兩側翅膀」（寬 3r、高 r），方形則是 2r × 2r。量回傳的碰撞體頂點邊界，
+     * 就能分辨引擎實際拿哪個形狀在撞 —— 這正是使用者報的「已投放的沒有轉過去」。
+     * The outline is "body plus wings" (3r wide, r tall) while the square is 2r by 2r. Measuring the
+     * returned collider vertices' bounds tells which shape the engine actually runs — exactly the
+     * "bodies already on the board did not convert" the user reported.
+     */
+    const levels = [levelDef(1, 40, 2), levelDef(2, 50, null)];
+    const silhouettes = new Map<number, { x: number; y: number }[] | null>([
+      [1, wings(40)],
+      [2, wings(50)],
+    ]);
+
+    const session = new GameSession({
+      config: buildConfig(levels, []),
+      rng: createRng(2),
+      virtualWidth: 700,
+      silhouettes,
+    });
+
+    dropAt(session, 350, 200);
+    runFrames(session, 60);
+
+    /** 碰撞體的水平／垂直跨度（世界座標）。 / The collider's horizontal and vertical extent, in world space. */
+    const spans = (): { width: number; height: number } => {
+      const points = session.colliderOutlines.flatMap((outline) => outline.parts.flat());
+      const xs = points.map((point) => point.x);
+      const ys = points.map((point) => point.y);
+
+      return {
+        width: Math.max(...xs) - Math.min(...xs),
+        height: Math.max(...ys) - Math.min(...ys),
+      };
+    };
+
+    const before = spans();
+    expect(before.width).toBeCloseTo(120, 0);
+
+    session.useSquareMerge();
+
+    const after = spans();
+    expect(after.width).toBeCloseTo(80, 0);
+    expect(after.height).toBeCloseTo(80, 0);
+  });
+
+  it('refreshes the pile upward without launching anything out of the container', () => {
+    /*
+     * 換幾何要「更新」一下：新碰撞體比舊輪廓大，顆粒可能已經嵌進地板或鄰居。
+     * 護欄是這條測試的重點 —— 對 Matter 施加裸力 1 會把顆粒發射出去（曾實測一顆停在地板上的
+     * r=50 顆粒直接飛到畫面上方），所以力以重力為單位、由質量算出，效果只是「這一步不受重力」。
+     * The swap needs a "refresh": the new collider is larger than the old outline, so bodies may
+     * already be inside the floor or a neighbour. The guard is the point of this test — a bare
+     * Matter force of 1 launches bodies (measured: a r=50 body resting on the floor ended up above
+     * the screen), so the force is measured in gravities and derived from mass: the effect is
+     * simply "gravity does not apply for this one step".
+     */
+    const levels = [levelDef(1, 40, 2), levelDef(2, 50, null)];
+    const silhouettes = new Map<number, { x: number; y: number }[] | null>([
+      [1, wings(40)],
+      [2, wings(50)],
+    ]);
+
+    const build = (): GameSession =>
+      new GameSession({
+        config: buildConfig(levels, []),
+        rng: createRng(2),
+        virtualWidth: 700,
+        silhouettes,
+      });
+
+    const plain = build();
+    dropAt(plain, 350, 200);
+    /*
+     * 先讓它完全落定在地板上（約 4 秒）：這一條測的正是「貼著地板換形狀」——
+     * 停在地板上的顆粒一旦換成更大的碰撞體就嵌進地板，那才是會彈飛的情形。
+     * Let it come to rest on the floor first (about 4 s): this test is about **swapping shape while
+     * touching the floor** — a resting body whose collider then grows is the case that gets fired
+     * out of the container.
+     */
+    runFrames(plain, 240);
+
+    const nudged = build();
+    dropAt(nudged, 350, 200);
+    runFrames(nudged, 240);
+
+    const restY = nudged.bodies[0]?.y ?? 0;
+    expect(restY).toBeGreaterThan(nudged.playArea.y + nudged.playArea.height * 0.5);
+
+    nudged.useSquareMerge();
+
+    /* 一重力抵一步重力：速度只會被「抵掉」，不會被踢起來。 */
+    plain.step(FRAME_MS);
+    nudged.step(FRAME_MS);
+    expect(nudged.bodies[0]?.velocity?.y ?? 0).toBeGreaterThanOrEqual(
+      plain.bodies[0]?.velocity?.y ?? 0,
+    );
+
+    /*
+     * 一秒之後仍然在容器裡：換成更大的碰撞體若不管，解算器的分離衝量會把它彈出容器
+     * （方形的對角線是 `r√2`，貼地的那顆原位已經在地板裡）。
+     * Still inside the container a second later: left alone, a bigger collider makes the solver
+     * resolve that overlap with an impulse that fires the body out (a square's diagonal is `r√2`,
+     * so a body resting on the floor already has its new corners inside the floor).
+     */
+    runFrames(nudged, 60);
+    const settledY = nudged.bodies[0]?.y ?? Number.NEGATIVE_INFINITY;
+    expect(settledY).toBeGreaterThan(nudged.playArea.y);
+    expect(settledY).toBeLessThan(nudged.playArea.y + nudged.playArea.height);
+  });
+
+  it('locks itself for the rest of the run once cast', () => {
+    /*
+     * 一次性：用過即永久上鎖。技力本身不再變動（`sp` 解鎖），所以「還能不能按」只取決於
+     * 一次性旗標 —— 若沒有它，這張卡會立刻又能按。
+     * One-shot: spent means locked for good. SP never changes (`sp` gating), so "can it be pressed"
+     * depends on the one-shot flag alone; without it the card would be pressable again at once.
+     */
+    const session = new GameSession({
+      config: buildConfig(CHAIN, [skill({ id: 'square_core', cost: 0 })]),
+      rng: createRng(5),
+      virtualWidth: CANVAS,
+    });
+
+    dropAt(session, 200);
+
+    const card = (): (typeof session.skillCards)[number] | undefined =>
+      session.skillCards.find((entry) => entry.id === 'square_core');
+
+    expect(card()?.unlocked).toBe(true);
+    expect(card()?.exhausted).toBe(false);
+
+    expect(session.activateSkill('square_core')).toBe(true);
+    expect(card()?.exhausted).toBe(true);
+    expect(card()?.unlocked).toBe(false);
+    expect(session.activateSkill('square_core')).toBe(false);
+
+    /* 新的一局：重新可以買。 */
+    session.reset();
+    expect(card()?.exhausted).toBe(false);
+  });
+
   it('stops merges that happen only because a decoration touches', () => {
     /*
      * 翅膀伸出核心方形之外：兩顆並排時**實體**已經接觸，方形還差 `r`。碰撞路徑若不看方形，

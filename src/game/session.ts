@@ -14,6 +14,7 @@ import {
 } from '../core/physics';
 import {
   CEILING_THICKNESS,
+  ENGINE_GRAVITY_SCALE,
   FLOAT_OVERFLOW_BUFFER_MS,
   MERGE_OUTLINE_GAP,
   MERGE_PUSH_FACTOR,
@@ -80,6 +81,26 @@ const RAIN_STAGGER = 8;
  * size mismatch from launching a body across the container.
  */
 const SCRAMBLE_SEPARATION_MAX = 24;
+
+/**
+ * 「以方代圓」換幾何時，對每顆方團團施加的向上力，**以一個重力為單位**。
+ * The upward force applied to every dumpling when "Square Rule" swaps the geometry, **in units of
+ * gravity**.
+ *
+ * 只是「喚醒一下」，不是浮動技能：肉眼只看見整堆輕輕一跳。
+ * It is only a wake-up, not the float skill: all the player sees is the pile giving a small hop.
+ *
+ * **不要寫成 Matter 的裸力 1。** Matter 的力是很小的數（重力本身就是 `mass × gravityY ×
+ * ENGINE_GRAVITY_SCALE`，量級 0.001），裸力 1 會讓一顆 r=50 的顆粒每步獲得 27 單位／步的速度
+ * —— 那不是「微小」，是發射。所以這裡以重力為單位，力由 `nudgeAll()` 按質量與重力算出，
+ * 效果等於「多受一步重力、但方向朝上」。
+ * **Never a bare Matter force of 1.** Matter forces are tiny numbers (gravity itself is
+ * `mass × gravityY × ENGINE_GRAVITY_SCALE`, order 0.001); a bare force of 1 gives a r=50 body
+ * 27 units per step — that is a launch, not a nudge. Measured in gravities here, and turned into a
+ * force from each body's mass and the current gravity by `nudgeAll()`, one unit means "one extra
+ * step of gravity, pointing up".
+ */
+const SQUARE_REFRESH_NUDGE = 1;
 
 /**
  * 「核心正方形」的四個角（區域座標），邊長 `2r × sizeFactor`。
@@ -265,6 +286,15 @@ export interface SkillCardState {
   active: boolean;
   /** 選取中已經點了幾顆。 */
   selectedCount: number;
+  /**
+   * 本局是否已用掉且**不會再解鎖**（一次性技能）。
+   * Whether this skill was spent and will **not** unlock again this run (a one-shot skill).
+   *
+   * 與 `unlocked: false` 的差別在文案：一次性用完是「已使用」，不是「還差多少」。
+   * It differs from plain `unlocked: false` in the wording: a spent one-shot reads "used", not
+   * "how much is left".
+   */
+  exhausted: boolean;
 }
 
 export interface GameSessionOptions {
@@ -387,6 +417,12 @@ export class GameSession implements SkillBoard {
    * free skills count too.
    */
   private skillUsesValue = 0;
+
+  /**
+   * 本局已經用掉的一次性技能 id（用過即永久上鎖）。
+   * Ids of one-shot skills spent this run (spent means locked for good).
+   */
+  private readonly spentOnce = new Set<string>();
 
   /**
    * 合成邊緣判定是否已改用「核心正方形」（「以方代圓」，本局持續）。
@@ -900,6 +936,7 @@ export class GameSession implements SkillBoard {
       unlockThreshold: skill.unlock.kind === 'sp' ? 0 : skill.unlock.threshold,
       active: this.activeSkill === skill,
       selectedCount: this.activeSkill === skill ? this.selectedIds.length : 0,
+      exhausted: skill.oncePerRun && this.spentOnce.has(skill.id),
     }));
   }
 
@@ -1058,6 +1095,9 @@ export class GameSession implements SkillBoard {
     this.skillUsesValue += 1;
     if (skill.unlock.kind === 'cumulativeUses') this.skillUsesValue = 0;
 
+    /* 一次性技能：用過就永遠不再解鎖（「以方代圓」是本局的規則改寫，第二次沒有意義）。 */
+    if (skill.oncePerRun) this.spentOnce.add(skill.id);
+
     /*
      * 以累計消耗解鎖的免費技能（命運互換）用掉之後，累計歸零 → 重新上鎖（使用者定案）。
      * A free skill gated by cumulative spend (fate swap) resets the running total once used, so
@@ -1071,6 +1111,9 @@ export class GameSession implements SkillBoard {
 
   /** 這個技能現在可不可以按。 */
   private isUnlocked(skill: Skill): boolean {
+    /* 一次性技能用掉之後不再解鎖 —— 不論累計值後來又存到多少。 */
+    if (this.spentOnce.has(skill.id)) return false;
+
     if (skill.unlock.kind === 'cumulativeSpent') {
       return this.sp.cumulativeSpent + 1e-9 >= skill.unlock.threshold;
     }
@@ -1558,13 +1601,31 @@ export class GameSession implements SkillBoard {
    * Switch this run's merge-edge test to the core square ("Square Rule"); repeat calls only
    * update the scale.
    *
+   * 第一次施放要把**已經在場上**的顆粒也換掉：逐顆重建剛體（`respawnEntry` 會保留位置、角度與
+   * 速度，並更新 body id 索引），之後投放的自然走 `createBody` 的方形分支。換完再對全部顆粒
+   * 施加一點微小向上力 —— 新的碰撞體比舊輪廓大，顆粒之間可能已經互相嵌住，這一下把它們喚醒
+   * 讓解算器重新推開，堆疊才不會卡在舊幾何裡。
+   * The first cast must also convert the bodies **already on the board**: each one is rebuilt (see
+   * `respawnEntry`, which keeps position, angle and velocity and re-indexes the body id), and later
+   * drops take `createBody`'s square branch by themselves. A tiny upward force on every body then
+   * follows: the new collider is larger than the old outline, so bodies may already be nested, and
+   * this wakes them so the solver can push them apart instead of leaving the pile stuck in the old
+   * geometry.
+   *
    * @param sizeFactor 正方形邊長相對 `2r` 的倍率；夾在 `[0.5, 2]`。
    */
   useSquareMerge(sizeFactor = 1): void {
     const scale = Number.isFinite(sizeFactor) ? sizeFactor : 1;
+    const first = !this.squareMerge;
 
     this.squareMerge = true;
     this.squareScale = Math.min(Math.max(scale, 0.5), 2);
+
+    if (!first) return;
+
+    for (const entry of this.entries) this.respawnEntry(entry, entry.level, entry.radius);
+
+    this.nudgeAll(SQUARE_REFRESH_NUDGE);
   }
 
   /** 連擊護盾還剩幾次投放；供 HUD 或測試查詢。 */
@@ -1790,6 +1851,33 @@ export class GameSession implements SkillBoard {
    */
   private wakeAll(): void {
     for (const entry of this.entries) Matter.Sleeping.set(entry.body, false);
+  }
+
+  /**
+   * 對每一顆方團團施加一點向上的力（換幾何之後的「更新」），單位是重力。
+   * Apply a small upward force to every dumpling (the refresh after a geometry swap), in gravities.
+   *
+   * 力必須按質量算：Matter 的力是以「質量 × 加速度」表達的，同一顆粒的質量由等級與尺寸決定，
+   * 一個固定數值會讓小顆粒被彈飛、大顆粒紋絲不動。
+   * The force has to be derived from mass: Matter expresses force as mass × acceleration, and a
+   * body's mass follows its level and size, so a fixed number would fling a small body and leave a
+   * big one untouched.
+   *
+   * 休眠剛體收不到力，所以先叫醒再施力；兩者都只影響下一個物理步。
+   * A sleeping body receives no force, so it is woken first; both only affect the next step.
+   */
+  private nudgeAll(gravities: number): void {
+    if (!Number.isFinite(gravities) || gravities === 0) return;
+
+    const unit = this.appliedGravityY * ENGINE_GRAVITY_SCALE * gravities;
+
+    for (const entry of this.entries) {
+      Matter.Sleeping.set(entry.body, false);
+      Matter.Body.applyForce(entry.body, entry.body.position, {
+        x: 0,
+        y: -unit * entry.body.mass,
+      });
+    }
   }
 
   /** 把位移差量套到牆上（牆是靜態剛體，只有位置要搬）。 */
@@ -2128,6 +2216,20 @@ export class GameSession implements SkillBoard {
       /* 標記起來，除錯時看得出這顆是哪一級。 */
       label: `level-${String(labelBodyId)}`,
     };
+
+    /*
+     * 「以方代圓」之後，**碰撞體本身**就是核心正方形。判定與碰撞體是同一塊幾何，玩家看到的
+     * 邊界才等於引擎認的邊界；只把判定換成方形而碰撞體仍舊是帶翅膀的輪廓，兩者會一直互相矛盾
+     * （合成按方形、堆疊按輪廓）。
+     * Under "Square Rule" the **collider itself** is the core square. Judgement and collider are
+     * then the same geometry, so the edge the player sees is the edge the engine obeys; leaving
+     * the collider as a winged outline while judging by squares keeps the two contradicting each
+     * other (merging by square, stacking by outline).
+     */
+    if (this.squareMerge) {
+      const body = createPolygonBody(x, y, coreSquare(radius, this.squareScale), material);
+      if (body !== null) return body;
+    }
 
     const polygon = this.silhouettes?.get(level.id);
     if (polygon !== undefined && polygon !== null) {
@@ -2912,6 +3014,7 @@ export class GameSession implements SkillBoard {
      */
     this.squareMerge = false;
     this.squareScale = 1;
+    this.spentOnce.clear();
     this.rainRemaining = 0;
     this.rainSpawned = 0;
     this.rainAccumulatorMs = 0;

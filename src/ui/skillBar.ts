@@ -8,7 +8,7 @@
  */
 
 import type { SkillCardState } from '../game/session';
-import { i18n, t } from '../i18n';
+import { i18n, i18nText, t } from '../i18n';
 import { el } from './dom';
 import { createIcon, type IconName } from './icons';
 
@@ -72,6 +72,11 @@ interface CardNodes {
   badge: HTMLElement;
   caption: HTMLElement;
   progress: HTMLElement;
+  /**
+   * 一次性技能的「已使用」字樣（在遮罩內，只有用完之後才顯示）。
+   * The one-shot skill's "used" label, inside the mask and shown only after it is spent.
+   */
+  used: HTMLElement;
   /**
    * 上次寫入的狀態簽名，用來判斷要不要動 DOM。
    * The last written state signature, deciding whether the DOM changes.
@@ -138,13 +143,15 @@ export function createSkillBar(options: SkillBarOptions): SkillBar {
      */
     const mask = el('span', 'skill-card__mask');
     const progress = el('span', 'skill-card__progress');
+    const used = el('span', 'skill-card__used');
+    i18nText(used, 'skillBar.used');
 
-    mask.append(progress);
+    mask.append(progress, used);
     root.append(glyph, name, caption, badge, mask);
 
     host.append(root);
 
-    const nodes: CardNodes = { root, name, badge, caption, progress, signature: '' };
+    const nodes: CardNodes = { root, name, badge, caption, progress, used, signature: '' };
     cards.set(state.id, nodes);
     return nodes;
   }
@@ -171,6 +178,7 @@ export function createSkillBar(options: SkillBarOptions): SkillBar {
         captionText,
         state.unlocked ? '1' : '0',
         state.active ? '1' : '0',
+        state.exhausted ? '1' : '0',
         state.selectedCount,
         Math.round(state.progress * 100),
         state.targeting,
@@ -185,22 +193,36 @@ export function createSkillBar(options: SkillBarOptions): SkillBar {
       nodes.badge.textContent = badgeText;
       nodes.caption.textContent = captionText;
       nodes.root.dataset['cost'] = String(state.cost);
+      /*
+       * 解鎖來源也寫進 `data-unlock`：徽章顏色除了按消耗分級，還要區分「累計施放次數」那一種
+       * （`n/m` 是次數，不是點數，用消耗的配色會誤導）。
+       * The unlock kind also goes into `data-unlock`: besides the cost tier, the badge colour must
+       * tell a cast-count gate apart from a cost gate (`n/m` counts casts, not points, so the cost
+       * palette would mislead).
+       */
+      nodes.root.dataset['unlock'] = state.unlockKind;
       nodes.root.classList.toggle('skill-card--locked', !state.unlocked);
       nodes.root.classList.toggle('skill-card--active', state.active);
+      nodes.root.classList.toggle('skill-card--exhausted', state.exhausted);
       nodes.root.disabled = !state.unlocked;
       nodes.root.setAttribute('aria-disabled', String(!state.unlocked));
 
       /*
        * 遮罩上顯示「還差多少」的百分比：技力是連續累積的，玩家要的是還有多近。
-       * The mask shows how far off as a percentage: SP accrues continuously and what the player wants is the distance left.
+       * 一次性技能用完之後改說「已使用」——它不會再解鎖，顯示進度是騙人的。
+       * The mask shows how far off as a percentage: SP accrues continuously and what the player
+       * wants is the distance left. A spent one-shot says "used" instead — it never unlocks
+       * again, so a progress figure would be a lie.
        */
-      nodes.progress.textContent = state.unlocked
-        ? ''
-        : `${String(Math.round(state.progress * 100))}%`;
+      nodes.progress.textContent =
+        state.unlocked || state.exhausted
+          ? ''
+          : `${String(Math.round(state.progress * 100))}%`;
       nodes.progress.style.setProperty('--skill-progress', `${String(state.progress * 100)}%`);
 
-      const label =
-        state.unlockKind === 'cumulativeSpent'
+      const label = state.exhausted
+        ? t('skillBar.ariaUsed', { name })
+        : state.unlockKind === 'cumulativeSpent'
           ? t('skillBar.ariaCumulative', {
               name,
               spent: Math.round(state.cumulativeSpent),

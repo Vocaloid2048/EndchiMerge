@@ -27,6 +27,7 @@ import { attachRestartConfirm } from './ui/restartButton';
 import { attachStageScale } from './ui/scale';
 import { createSettings, type SettingsView } from './ui/settings';
 import { createSkillBar, type SkillBar } from './ui/skillBar';
+import { createSkillGuide } from './ui/skillGuide';
 import { createSkillHint, type SkillHint } from './ui/skillHint';
 import { createSpMeter, type SpMeter } from './ui/spMeter';
 
@@ -207,6 +208,29 @@ async function bootstrap(): Promise<void> {
    */
   const skillHint = createSkillHint({ host: layout.root });
   skillHint.update(session.skillCards);
+
+  /*
+   * 技能說明彈窗（技能列表右上角的 (i)）。內容來自 `skills.json` 的定義，不碰 session ——
+   * 說明是靜態的，場上發生什麼都不會改變它。
+   * The skill guide popup (the "(i)" at the skill list's top-right). Its content comes from the
+   * `skills.json` definitions and never touches the session: the copy is static and nothing on the
+   * board changes it.
+   */
+  const skillGuide = createSkillGuide({
+    host: layout.root,
+    skills: config.skills.skills,
+    nameFor: (def): string =>
+      resolveLocalizedName(def.name, skillNames.get(def.id), i18n.locale),
+  });
+
+  const skillGuideButton = layout.regions.skill.querySelector<HTMLButtonElement>(
+    'button[data-action="skill-guide"]',
+  );
+  if (skillGuideButton !== null) {
+    skillGuideButton.addEventListener('click', (): void => {
+      skillGuide.open();
+    });
+  }
 
   const updateHud = (): void => {
     hud.update({

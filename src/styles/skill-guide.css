@@ -1,0 +1,228 @@
+/*
+ * 技能說明彈窗（`ui/skillGuide.ts`）。
+ * The skill guide popup.
+ *
+ * 蓋在整個設計畫布上（1920×1080），尺寸都是**設計稿像素**，跟著畫布被 `ui/scale.ts` 等比縮放
+ * —— 與設定彈窗、排行榜、結算覆蓋層同一套座標語言。
+ * It covers the whole design canvas (1920×1080), so its sizes are **design pixels** scaled with the
+ * canvas by `ui/scale.ts` — the same coordinate language as the settings popup, the leaderboard and
+ * the end-of-run overlay.
+ *
+ * 版面是使用者定案的兩欄：**左邊按技力需求分類的選單、右邊是所選技能的說明**。右邊由上而下是
+ * 名字 → 消耗與解鎖條件 → 媒體位（示意圖／GIF 預留）→ 描述。
+ * The two-column layout the user decided on: **a menu grouped by SP cost on the left, the selected
+ * skill's description on the right**, which reads name → cost and unlock condition → media slot
+ * (reserved for an illustration or GIF) → description.
+ */
+
+.skill-guide {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(12, 13, 18, 0.66);
+  backdrop-filter: blur(6px);
+  z-index: 27;
+}
+
+/* `[hidden]` 一定要蓋掉上面的 `display: grid`，否則彈窗會永遠顯示。 */
+.skill-guide[hidden] {
+  display: none;
+}
+
+.skill-guide__card {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 24px;
+  width: 1060px;
+  /*
+   * 固定高度（而不是隨內容長高）：左欄有 10 個技能，內容自然高度會把卡片撐得比右欄的說明高，
+   * 於是選單自己在滑，右欄卻留一堆空白。給死高度，兩欄就對齊，選單也夠位放完。
+   * A fixed height rather than one that grows with the content: the left menu holds ten skills, and
+   * its natural height would outgrow the right column's copy, leaving the menu scrolling while the
+   * detail sits in whitespace. Fixing the height aligns both columns and gives the menu room.
+   */
+  height: 820px;
+  max-height: 820px;
+  padding: 40px 48px 44px;
+  border-radius: 32px;
+  background: var(--glass-fill);
+  border: 1px solid var(--glass-stroke);
+  box-shadow: var(--glass-shadow);
+}
+
+/* ── 標題列 ──────────────────────────────────────────────────────────── */
+
+.skill-guide__header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 24px;
+}
+
+.skill-guide__title {
+  margin: 0;
+  font-size: 34px;
+  font-weight: 700;
+  color: var(--color-fg);
+}
+
+.skill-guide__close {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-fg);
+  font-size: 30px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.skill-guide__close:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.skill-guide__close:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ── 兩欄本體 ────────────────────────────────────────────────────────── */
+
+.skill-guide__body {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 36px;
+  min-height: 0;
+}
+
+/*
+ * 左欄選單：分類標題 ＋ 一列一個技能，可捲動（技能數量由 `skills.json` 決定，不寫死）。
+ * The left menu: a group heading plus one row per skill, scrollable (the skill count comes from
+ * `skills.json` rather than being fixed here).
+ */
+.skill-guide__menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  padding-right: 12px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(215, 215, 215, 0.4) transparent;
+}
+
+.skill-guide__group {
+  margin: 10px 0 2px;
+  color: var(--color-fg-dim);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.skill-guide__group:first-child {
+  margin-top: 0;
+}
+
+.skill-guide__item {
+  padding: 10px 16px;
+  border: 1px solid transparent;
+  border-radius: 16px;
+  background: transparent;
+  color: var(--color-fg-muted);
+  font: inherit;
+  font-size: 19px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.skill-guide__item:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--color-fg);
+}
+
+.skill-guide__item--current {
+  border-color: rgba(249, 255, 81, 0.55);
+  background: var(--color-accent-soft);
+  color: var(--color-fg);
+  font-weight: 700;
+}
+
+.skill-guide__item:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ── 右欄內容 ────────────────────────────────────────────────────────── */
+
+.skill-guide__detail {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 14px;
+  min-height: 0;
+  padding: 24px 28px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.skill-guide__name {
+  margin: 0;
+  color: var(--color-fg);
+  font-size: 30px;
+  font-weight: 700;
+}
+
+.skill-guide__meta {
+  margin: 0;
+  color: var(--color-fg-dim);
+  font-size: 17px;
+  line-height: 1.5;
+}
+
+/*
+ * 媒體位：現在只有虛線框與提示字，之後放 `<img>`／`<video>` 不必改結構
+ * （`[data-slot="skill-media"]` 就是掛載點，`data-skill-id` 讓每個技能各有自己的位子）。
+ * The media slot: only a dashed frame and a hint for now; adding an `<img>` or `<video>` later
+ * needs no structural change (`[data-slot="skill-media"]` is the hook, `data-skill-id` gives each
+ * skill its own slot).
+ *
+ * 用 `min-height` 而不是固定高度：預留的是一塊**可以放圖的空間**，不是一個必須填滿的洞。
+ * It uses `min-height` rather than a fixed height: what is reserved is room an image *can* fill,
+ * not a hole that must be filled.
+ */
+.skill-guide__media {
+  display: grid;
+  place-items: center;
+  min-height: 260px;
+  border: 2px dashed rgba(215, 215, 215, 0.22);
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.skill-guide__media > img,
+.skill-guide__media > video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.skill-guide__media-hint {
+  color: var(--color-fg-dim);
+  font-size: 16px;
+  letter-spacing: 0.04em;
+}
+
+.skill-guide__desc {
+  margin: 0;
+  color: var(--color-fg-muted);
+  font-size: 19px;
+  line-height: 1.7;
+}

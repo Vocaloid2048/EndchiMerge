@@ -92,6 +92,18 @@ export abstract class Skill {
   }
 
   /**
+   * 是否本局只准用一次（用過即永久上鎖）。預設不是。
+   * Whether this may be cast only once per run (spent means locked for good). Off by default.
+   *
+   * 用於**改寫本局規則**的技能：效果一旦生效就沒有第二次的意義，再解鎖只是白存技力。
+   * For skills that **rewrite this run's rules**: once the effect holds, a second cast means
+   * nothing, so re-unlocking would only waste SP.
+   */
+  get oncePerRun(): boolean {
+    return false;
+  }
+
+  /**
    * 執行效果；`targets` 依玩家點選順序排列（`immediate` 為空陣列）。
    * Runs the effect; `targets` is in pick order (empty for `immediate` skills).
    */
