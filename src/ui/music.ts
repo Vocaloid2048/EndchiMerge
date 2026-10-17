@@ -5,19 +5,21 @@
  * 預設就該有聲，但瀏覽器只准「使用者手勢」之後才播放 —— 先試一次，被擋下就把第一次點擊／按鍵
  * 當成那個手勢再試，成功後立刻解綁。按下音符鍵本身不算手勢：那一下的意思通常是「靜音」，
  * 讓它順手把音樂播出來只會閃一下。
+ * 上一次靜音過的話（`muted`），開頁一聲不出，連試都不試 —— 那是玩家自己的選擇。
  * Sound is on by default, yet browsers only allow playback after a user gesture: try once up front,
  * and when that is blocked treat the first press or key as the gesture. The note button itself is
  * excluded — a press there normally means "mute", and starting playback on the way would only blip.
+ * When the last visit ended muted (`muted`) the page stays silent and does not even try: that was
+ * the player's own choice.
  */
 
 import { i18n, t } from '../i18n';
 
 /**
- * 預設音量。這是一首背景音樂，壓在音效之下而不是當主角；0.4 的七成是實聽之後的定案。
+ * 預設音量。這是一首背景音樂，壓在音效之下而不是當主角；
  * The default volume: background music, sitting under the effects rather than in front of them.
- * Seven tenths of the previous 0.4, settled by ear.
  */
-const DEFAULT_VOLUME = 0.28;
+const DEFAULT_VOLUME = 0.05;
 
 /**
  * 會被當成「手勢」的事件；`pointerdown` 涵蓋滑鼠與觸控，`keydown` 涵蓋鍵盤。
@@ -37,8 +39,21 @@ export interface MusicToggleOptions {
    */
   src: string;
   /**
-   * 音量 0–1；預設 0.28。
-   * Volume 0–1; defaults to 0.28.
+   * 開頁時是否已經靜音（來自偏好）；預設不是。靜音開局就完全不嘗試播放 ——
+   * 聲音是玩家上次自己關掉的，不該在載入時先響一下。
+   * Whether it starts muted (from the preferences); defaults to no. Starting muted skips the
+   * playback attempt entirely: the player turned the sound off last time, so it must not blip
+   * on load.
+   */
+  muted?: boolean;
+  /**
+   * 靜音狀態改變時回報（用來寫回偏好）。
+   * Reports a change of the mute state (written back into the preferences).
+   */
+  onMutedChange?: (muted: boolean) => void;
+  /**
+   * 音量 0–1；預設 0.05。
+   * Volume 0–1; defaults to 0.05.
    */
   volume?: number;
 }
@@ -70,7 +85,8 @@ export function createMusicToggle(options: MusicToggleOptions): MusicToggle {
   audio.preload = 'auto';
   audio.volume = options.volume ?? DEFAULT_VOLUME;
 
-  let muted = false;
+  let muted = options.muted === true;
+  audio.muted = muted;
 
   function render(): void {
     button.setAttribute('aria-pressed', String(muted));
@@ -117,6 +133,9 @@ export function createMusicToggle(options: MusicToggleOptions): MusicToggle {
     muted = !muted;
     audio.muted = muted;
     render();
+    /* 記住這個選擇：下次開頁不再響。 */
+    /* Remember the choice, so the next visit stays quiet. */
+    options.onMutedChange?.(muted);
     /* 解除靜音時音樂可能從未開始（自動播放被擋、而玩家一直沒碰過畫面）。 */
     /* Unmuting may find the track never started: autoplay was blocked and the player never touched the page. */
     if (!muted) attempt();

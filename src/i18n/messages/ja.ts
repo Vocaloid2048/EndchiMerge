@@ -150,6 +150,11 @@ export const ja: Messages = {
   'settings.rules.endlessNote':
     '警告ラインに触れても 5 秒警告とゲーム終了は発生しません。投下の制限はそのままなので、いっぱいになったらスキルで場所を空けます。',
   'settings.rules.more': '（今後追加）',
+  'endlessConfirm.title': 'エンドレスモードをオンにしますか？',
+  'endlessConfirm.message':
+    'このプレイのスコアはランキングに記録されません。あとでエンドレスモードをオフに戻しても、このプレイは記録されません。',
+  'endlessConfirm.confirm': 'エンドレスモードをオン',
+  'endlessConfirm.confirmHold': 'オンにする（{seconds}）',
   'settings.language.heading': '言語',
   'settings.language.subtitle': 'インターフェースの表示言語',
   'settings.language.note': '初期値はお使いの端末またはブラウザの言語に従います。',

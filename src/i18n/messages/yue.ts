@@ -143,6 +143,11 @@ export const yue: Messages = {
   'settings.rules.endless': '無盡模式',
   'settings.rules.endlessNote': '掂到警戒線都唔會彈 5 秒警告同結束；投放禁令照舊，堆滿咗就只可以靠技能騰返啲位。',
   'settings.rules.more': '（遲啲再加）',
+  'endlessConfirm.title': '開無盡模式？',
+  'endlessConfirm.message':
+    '呢一局嘅分數唔會記錄喺排行榜；就算之後熄返無盡模式，呢一局都唔會補記。',
+  'endlessConfirm.confirm': '開無盡模式',
+  'endlessConfirm.confirmHold': '開（{seconds}）',
   'settings.language.heading': '語言',
   'settings.language.subtitle': '介面顯示語言',
   'settings.language.note': '預設跟返你部機或者瀏覽器嘅語言揀。',

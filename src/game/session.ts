@@ -509,6 +509,18 @@ export class GameSession implements SkillBoard {
   private endless = false;
 
   /**
+   * 這一局有沒有開過無盡模式（一次為真，`reset()` 才復原）。
+   * Whether endless mode was switched on at any point in this run (one-way until `reset()`).
+   *
+   * 開過就代表這一局的分數不是原本的規則打出來的 —— 即使之後關掉，也不能補記到排行榜
+   * （使用者定案）。所以它與 `endless` 分開：一個是「現在是不是無盡」，一個是「這局乾淨嗎」。
+   * Switching it on means the score was not produced under the normal rules, so even after
+   * turning it off the run may not reach the leaderboard (the user's decision). Hence the
+   * separate flag: one says "endless now", the other says "this run is clean".
+   */
+  private endlessTainted = false;
+
+  /**
    * 最後一次投放的時刻；`-Infinity` 代表「還沒投過」，所以開局第一顆不受冷卻限制。
    * When the last drop happened; `-Infinity` means "never", so the opening drop is never
    * gated by the cooldown.
@@ -3061,6 +3073,14 @@ export class GameSession implements SkillBoard {
     this.skillUsesValue = 0;
     this.comboGraceDrops = 0;
     /*
+     * 新的一局重新「乾淨」——但無盡模式是跨局設定，這一局若仍然開著，那它就由開頭髒到尾。
+     * 所以旗標跟著**當下的** `endless` 走，而不是無條件歸零。
+     * A new run starts clean again — but endless mode is a cross-run setting, so if it is still
+     * on, this run is dirty from the start. The flag therefore follows the **current** `endless`
+     * rather than resetting unconditionally.
+     */
+    this.endlessTainted = this.endless;
+    /*
      * 「以方代圓」是**這一局**的規則改寫，不是跨局設定：新的一局回到 sprite 輪廓判定，
      * 否則上一局買到的便利會靜靜跟著玩家。
      * "Square Rule" is a rewrite of **this run's** rules, not a persisted setting: a new run goes
@@ -3377,7 +3397,21 @@ export class GameSession implements SkillBoard {
     if (this.endless === on) return;
 
     this.endless = on;
-    if (on) this.overflow.reset();
+
+    if (on) {
+      this.overflow.reset();
+      /* 開過就髒了：關掉也不會白回來（見 `endlessTainted`）。 */
+      /* Once on, the run is dirty; turning it off does not launder it (see `endlessTainted`). */
+      this.endlessTainted = true;
+    }
+  }
+
+  /**
+   * 這一局的分數可以記入排行榜嗎（沒開過無盡模式）。
+   * Whether this run's score may reach the leaderboard (endless mode never switched on).
+   */
+  get rankEligible(): boolean {
+    return !this.endlessTainted;
   }
 
   /** 這一局是否已結束（溢位逾時）。 */

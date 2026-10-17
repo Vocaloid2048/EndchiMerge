@@ -8,7 +8,8 @@
 
 import type { LeaderboardSource } from '../game/leaderboard';
 import type { PreferencesStore } from '../game/preferences';
-import { i18n, i18nAriaLabel, i18nText, LOCALE_LABELS, LOCALES, type Locale, type MessageKey } from '../i18n';
+import { i18n, i18nAriaLabel, i18nText, LOCALE_LABELS, LOCALES, t, type Locale, type MessageKey } from '../i18n';
+import { createConfirmDialog, type ConfirmDialogTexts } from './confirmDialog';
 import { appendChildren, el } from './dom';
 import { createPublishFields, type PublishFields } from './publishFields';
 
@@ -28,6 +29,31 @@ export interface SettingsOptions {
    * The leaderboard source (display name and sharing consent).
    */
   leaderboard: LeaderboardSource;
+}
+
+/**
+ * 開啟無盡模式之前，確認鈕要鎖住多久（毫秒）。
+ * How long the confirm button stays locked before endless mode may be switched on.
+ *
+ * 五秒不是防誤觸的裝飾：無盡模式一開，這一局就永遠不能進排行榜（即使之後關掉），
+ * 而玩家通常是在「快輸了」的一刻才想起來有這個開關。等五秒，讓那個念頭冷卻一下。
+ * Five seconds is not decoration: switching endless on makes this run permanently unranked
+ * (even after turning it off), and players usually remember the switch at the moment they are
+ * about to lose. The wait lets that impulse cool.
+ */
+const ENDLESS_HOLD_MS = 5000;
+
+/**
+ * 無盡模式警告的文案；語系變更時整組重取一次。
+ * The endless-mode warning's copy, re-read as a whole when the locale changes.
+ */
+function endlessTexts(): ConfirmDialogTexts {
+  return {
+    title: t('endlessConfirm.title'),
+    message: t('endlessConfirm.message'),
+    confirmLabel: t('endlessConfirm.confirm'),
+    holdLabel: t('endlessConfirm.confirmHold'),
+  };
 }
 
 export interface SettingsView {
@@ -127,6 +153,22 @@ export function createSettings(options: SettingsOptions): SettingsView {
 
   /* ── ① 遊戲玩法 / 規則更改 ────────────────────────────────────────── */
 
+  /*
+   * 無盡模式的警告：先講清楚「這一局不記榜」，確認鈕鎖五秒才可按。
+   * The endless-mode warning: say "this run is not ranked" up front, and lock the confirm
+   * button for five seconds.
+   */
+  const endlessDialog = createConfirmDialog({
+    host: options.host,
+    ...endlessTexts(),
+    tone: 'accent',
+    holdMs: ENDLESS_HOLD_MS,
+    onConfirm: (): void => preferences.setEndless(true),
+    /* 取消：把開關撥回去。偏好沒有變，所以不會有通知替我們重畫。 */
+    /* Cancel: flip the switch back. The preference never changed, so no notification redraws it. */
+    onCancel: (): void => sync(),
+  });
+
   const masterSwitch = buildSwitchRow({
     labelKey: 'settings.rules.master',
     noteKey: 'settings.rules.masterNote',
@@ -136,7 +178,14 @@ export function createSettings(options: SettingsOptions): SettingsView {
   const endlessSwitch = buildSwitchRow({
     labelKey: 'settings.rules.endless',
     noteKey: 'settings.rules.endlessNote',
-    onChange: (on): void => preferences.setEndless(on),
+    onChange: (on): void => {
+      if (!on) {
+        preferences.setEndless(false);
+        return;
+      }
+
+      endlessDialog.open();
+    },
   });
 
   const more = el('p', 'settings__more');
@@ -256,6 +305,7 @@ export function createSettings(options: SettingsOptions): SettingsView {
    * Re-syncs on a locale change: `applyTo()` handles the static copy, but the controls' state (ticks, radios, availability) is updated here.
    */
   const unsubscribeLocale = i18n.subscribe((): void => {
+    endlessDialog.setTexts(endlessTexts());
     if (!root.hidden) sync();
   });
 
@@ -315,6 +365,7 @@ export function createSettings(options: SettingsOptions): SettingsView {
       unsubscribeLeaderboard();
       unsubscribeLocale();
       closeButton.removeEventListener('click', onCloseClick);
+      endlessDialog.dispose();
       fields.dispose();
       close();
       document.removeEventListener('keydown', onKeyDown, true);

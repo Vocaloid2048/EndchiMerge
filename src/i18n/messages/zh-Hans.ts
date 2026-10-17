@@ -134,6 +134,11 @@ export const zhHans: Messages = {
   'settings.rules.endless': '无尽模式',
   'settings.rules.endlessNote': '碰到警戒线也不会触发 5 秒警告与结束；投放禁令不变，堆满了就只能靠技能腾出空间。',
   'settings.rules.more': '（未来再补充）',
+  'endlessConfirm.title': '开启无尽模式？',
+  'endlessConfirm.message':
+    '本局的分数不会记录在排行榜上；即使之后关闭无尽模式，这一局也不会补记。',
+  'endlessConfirm.confirm': '开启无尽模式',
+  'endlessConfirm.confirmHold': '开启（{seconds}）',
   'settings.language.heading': '语言',
   'settings.language.subtitle': '界面显示语言',
   'settings.language.note': '默认依照你的设备或浏览器语言自动选择。',

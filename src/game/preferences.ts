@@ -1,6 +1,6 @@
 /**
- * 玩家偏好設定：語系、規則變更總開關與無盡模式；只做讀寫與通知，不含遊戲規則。
- * Player preferences — locale, the rules master gate and endless mode; read/write/notify only.
+ * 玩家偏好設定：語系、規則變更總開關、無盡模式與音樂靜音；只做讀寫與通知，不含遊戲規則。
+ * Player preferences — locale, the rules master gate, endless mode and the music mute; read/write/notify only.
  */
 
 import { STORAGE_KEYS } from '../core/constants';
@@ -20,6 +20,11 @@ export interface Preferences {
    * Endless mode; only applies while `rulesEnabled` is true.
    */
   endless: boolean;
+  /**
+   * 背景音樂是否靜音；記住上一次的選擇，下次開頁照那個狀態來。
+   * Whether the background music is muted; the last choice is remembered and applied on the next visit.
+   */
+  musicMuted: boolean;
 }
 
 export interface PreferencesOptions {
@@ -49,9 +54,11 @@ export interface PreferencesStore {
   readonly locale: Locale;
   readonly rulesEnabled: boolean;
   readonly endless: boolean;
+  readonly musicMuted: boolean;
   setLocale(locale: Locale): void;
   setRulesEnabled(on: boolean): void;
   setEndless(on: boolean): void;
+  setMusicMuted(muted: boolean): void;
   /**
    * 訂閱變更；回傳取消訂閱的函式。
    * Subscribes to changes and returns an unsubscribe function.
@@ -68,7 +75,12 @@ function toBool(value: unknown): boolean {
  * Parses a saved preferences blob; each bad field falls back instead of discarding the whole blob.
  */
 function parsePreferences(text: string | null, fallbackLocale: Locale): Preferences {
-  const fallback: Preferences = { locale: fallbackLocale, rulesEnabled: false, endless: false };
+  const fallback: Preferences = {
+    locale: fallbackLocale,
+    rulesEnabled: false,
+    endless: false,
+    musicMuted: false,
+  };
   if (text === null) return fallback;
 
   try {
@@ -83,6 +95,7 @@ function parsePreferences(text: string | null, fallbackLocale: Locale): Preferen
       locale,
       rulesEnabled,
       endless: rulesEnabled && toBool(candidate['endless']),
+      musicMuted: toBool(candidate['musicMuted']),
     };
   } catch {
     return fallback;
@@ -106,7 +119,8 @@ export function createPreferencesStore(options: PreferencesOptions = {}): Prefer
     if (
       next.locale === state.locale &&
       next.rulesEnabled === state.rulesEnabled &&
-      next.endless === state.endless
+      next.endless === state.endless &&
+      next.musicMuted === state.musicMuted
     ) {
       return;
     }
@@ -129,6 +143,10 @@ export function createPreferencesStore(options: PreferencesOptions = {}): Prefer
       return state.endless;
     },
 
+    get musicMuted(): boolean {
+      return state.musicMuted;
+    },
+
     setLocale(locale: Locale): void {
       if (!isLocale(locale)) return;
       update({ ...state, locale });
@@ -148,6 +166,12 @@ export function createPreferencesStore(options: PreferencesOptions = {}): Prefer
        * Endless mode cannot stand without the gate (the UI disables it too; this is the last guard).
        */
       update({ ...state, endless: state.rulesEnabled && on });
+    },
+
+    setMusicMuted(muted: boolean): void {
+      /* 靜音與規則無關：它不受總開關管，也不影響成績。 */
+      /* The mute is unrelated to the rules: the master gate does not govern it, and it never affects a score. */
+      update({ ...state, musicMuted: muted });
     },
 
     subscribe(listener: () => void): () => void {

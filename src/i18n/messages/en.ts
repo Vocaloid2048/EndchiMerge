@@ -150,6 +150,11 @@ export const en: Messages = {
   'settings.rules.endlessNote':
     'Touching the warning line no longer triggers the 5-second warning or ends the run; the drop rule still applies, so once it is full only skills can make room.',
   'settings.rules.more': '(more to come)',
+  'endlessConfirm.title': 'Turn on endless mode?',
+  'endlessConfirm.message':
+    'This run will not be recorded on the leaderboard. Turning endless mode back off later will not restore it — the run stays unranked.',
+  'endlessConfirm.confirm': 'Turn on endless mode',
+  'endlessConfirm.confirmHold': 'Turn on ({seconds})',
   'settings.language.heading': 'Language',
   'settings.language.subtitle': 'Interface language',
   'settings.language.note': 'Defaults to your device or browser language.',

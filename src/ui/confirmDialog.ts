@@ -3,7 +3,7 @@
  * The confirmation dialog (modal): owns only open/close, keyboard and focus; the action is the caller's.
  */
 
-import { t } from '../i18n';
+import { formatMessage, t } from '../i18n';
 import { appendChildren, el } from './dom';
 
 /**
@@ -19,6 +19,12 @@ export interface ConfirmDialogTexts {
    * The cancel label; defaults to the `common.cancel` translation.
    */
   cancelLabel?: string;
+  /**
+   * 倒數期間確認鈕的文字；`{seconds}` 會被代入。未提供時在 `confirmLabel` 後加上 `（n）`。
+   * The confirm label while the hold counts down; `{seconds}` is substituted. Defaults to
+   * `confirmLabel` followed by `(n)`.
+   */
+  holdLabel?: string;
 }
 
 export interface ConfirmDialogOptions extends ConfirmDialogTexts {
@@ -32,7 +38,17 @@ export interface ConfirmDialogOptions extends ConfirmDialogTexts {
    * The confirm button's tone: `'danger'` (default, destructive) or `'accent'`.
    */
   tone?: 'danger' | 'accent';
+  /**
+   * 確認鈕要先鎖住多少毫秒（倒數期間不可按）；0（預設）＝ 立刻可按。
+   * How long the confirm button stays locked, in ms; 0 (the default) means it is pressable at once.
+   */
+  holdMs?: number;
   onConfirm: () => void;
+  /**
+   * 取消時的通知（例如把剛翻動的開關撥回去）；未提供時什麼都不做。
+   * Notified on cancel (e.g. to flip a switch back); omitted means nothing happens.
+   */
+  onCancel?: () => void;
 }
 
 export interface ConfirmDialog {
@@ -85,12 +101,62 @@ export function createConfirmDialog(options: ConfirmDialogOptions): ConfirmDialo
   root.append(card);
   options.host.append(root);
 
-  function setTexts(texts: ConfirmDialogTexts): void {
-    title.textContent = texts.title;
-    message.textContent = texts.message;
-    confirm.textContent = texts.confirmLabel;
-    cancel.textContent = texts.cancelLabel ?? t('common.cancel');
-    root.setAttribute('aria-label', texts.title);
+  /*
+   * 倒數：`holdUntil` 是時戳而不是「剩幾秒」，所以分頁被凍結再回來時不會少算。
+   * The hold is a timestamp rather than a countdown value, so a frozen tab does not under-count.
+   */
+  const holdMs = Math.max(0, options.holdMs ?? 0);
+  let texts: ConfirmDialogTexts = options;
+  let holdUntil = 0;
+  let holdTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** 依「還在倒數嗎」寫確認鈕：鎖住時顯示剩餘秒數，鎖完就是原來的標籤。 */
+  function renderConfirm(): void {
+    const remaining = holdUntil - Date.now();
+
+    if (remaining <= 0) {
+      confirm.disabled = false;
+      confirm.textContent = texts.confirmLabel;
+      return;
+    }
+
+    confirm.disabled = true;
+    confirm.textContent = formatMessage(texts.holdLabel ?? '{confirmLabel}（{seconds}）', {
+      confirmLabel: texts.confirmLabel,
+      seconds: Math.ceil(remaining / 1000),
+    });
+  }
+
+  function stopHold(): void {
+    if (holdTimer !== null) {
+      clearInterval(holdTimer);
+      holdTimer = null;
+    }
+
+    holdUntil = 0;
+    renderConfirm();
+  }
+
+  function startHold(): void {
+    if (holdMs <= 0) return;
+
+    holdUntil = Date.now() + holdMs;
+    renderConfirm();
+
+    /* 200ms 一跳：秒數換得夠準，又不至於每一幀碰 DOM。 */
+    holdTimer = setInterval((): void => {
+      renderConfirm();
+      if (holdUntil - Date.now() <= 0) stopHold();
+    }, 200);
+  }
+
+  function setTexts(next: ConfirmDialogTexts): void {
+    texts = next;
+    title.textContent = next.title;
+    message.textContent = next.message;
+    cancel.textContent = next.cancelLabel ?? t('common.cancel');
+    root.setAttribute('aria-label', next.title);
+    renderConfirm();
   }
 
   setTexts(options);
@@ -102,10 +168,13 @@ export function createConfirmDialog(options: ConfirmDialogOptions): ConfirmDialo
   let previouslyFocused: HTMLElement | null = null;
 
   /**
-   * 兩顆鈕就是整個對話框的可聚焦集合；Tab 只在它們之間循環。
-   * The two buttons are the dialog's whole focusable set; Tab only cycles between them.
+   * 整個對話框的可聚焦集合；Tab 只在它們之間循環。倒數期間確認鈕是停用的，
+   * 那時只剩取消可聚焦（把焦點丟給停用鈕會什麼都不發生）。
+   * The dialog's focusable set; Tab only cycles between them. While the hold runs the confirm
+   * button is disabled, leaving cancel alone (focusing a disabled button does nothing).
    */
-  const focusables: readonly HTMLButtonElement[] = [cancel, confirm];
+  const focusables = (): readonly HTMLButtonElement[] =>
+    confirm.disabled ? [cancel] : [cancel, confirm];
 
   const onKeyDown = (event: KeyboardEvent): void => {
     if (event.key === 'Escape') {
@@ -116,13 +185,14 @@ export function createConfirmDialog(options: ConfirmDialogOptions): ConfirmDialo
 
     if (event.key !== 'Tab') return;
 
-    const index = focusables.indexOf(document.activeElement as HTMLButtonElement);
+    const order = focusables();
+    const index = order.indexOf(document.activeElement as HTMLButtonElement);
     if (index === -1) return;
 
     const step = event.shiftKey ? -1 : 1;
-    const next = (index + step + focusables.length) % focusables.length;
+    const next = (index + step + order.length) % order.length;
     event.preventDefault();
-    focusables[next]?.focus();
+    order[next]?.focus();
   };
 
   const onBackdropPointerDown = (event: PointerEvent): void => {
@@ -131,7 +201,10 @@ export function createConfirmDialog(options: ConfirmDialogOptions): ConfirmDialo
     if (event.target === root) close();
   };
 
-  const onCancelClick = (): void => close();
+  const onCancelClick = (): void => {
+    close();
+    options.onCancel?.();
+  };
 
   const onConfirmClick = (): void => {
     /* 先關閉再執行動作，否則畫面會先變、對話框還多留一幀。 */
@@ -144,6 +217,7 @@ export function createConfirmDialog(options: ConfirmDialogOptions): ConfirmDialo
     if (root.hidden) return;
 
     root.hidden = true;
+    stopHold();
     document.removeEventListener('keydown', onKeyDown, true);
     root.removeEventListener('pointerdown', onBackdropPointerDown);
 
@@ -157,6 +231,7 @@ export function createConfirmDialog(options: ConfirmDialogOptions): ConfirmDialo
     previouslyFocused =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     root.hidden = false;
+    startHold();
     document.addEventListener('keydown', onKeyDown, true);
     root.addEventListener('pointerdown', onBackdropPointerDown);
 

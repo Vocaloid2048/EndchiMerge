@@ -1232,6 +1232,36 @@ describe('GameSession — 溢位與結束 / overflow and game over', () => {
     expect(unlockedByMerge).toBe(true);
     expect(gate.has(2)).toBe(true);
   });
+  it('marks the run unranked the moment endless is switched on', () => {
+    const session = makeOverflowRoom();
+
+    expect(session.rankEligible).toBe(true);
+
+    session.setEndless(true);
+    expect(session.rankEligible).toBe(false);
+
+    /*
+     * 關掉不會「洗白」：這一局的分數已經不是原本的規則打出來的（使用者定案）。
+     * Turning it back off does not launder the run: its score was not produced under the
+     * normal rules (the user's decision).
+     */
+    session.setEndless(false);
+    expect(session.rankEligible).toBe(false);
+  });
+
+  it('only gives the next run a clean slate when endless is off', () => {
+    const session = makeOverflowRoom();
+
+    session.setEndless(true);
+    session.reset();
+    /* 無盡模式是跨局設定，仍然開著 ⇒ 新的一局一樣不記榜。 */
+    /* Endless is a cross-run setting and still on, so the new run is unranked too. */
+    expect(session.rankEligible).toBe(false);
+
+    session.setEndless(false);
+    session.reset();
+    expect(session.rankEligible).toBe(true);
+  });
 });
 
 describe('GameSession — 解鎖與生成池 / unlocks and the draw pool', () => {

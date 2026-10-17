@@ -164,6 +164,11 @@ export const zhHant = {
   'settings.rules.endless': '無盡模式',
   'settings.rules.endlessNote': '碰到警戒線也不會觸發 5 秒警告與結束；投放禁令不變，堆滿了就只能靠技能騰出空間。',
   'settings.rules.more': '（未來再補充）',
+  'endlessConfirm.title': '開啟無盡模式？',
+  'endlessConfirm.message':
+    '本局的分數不會記錄在排行榜上；即使之後關掉無盡模式，這一局也不會補記。',
+  'endlessConfirm.confirm': '開啟無盡模式',
+  'endlessConfirm.confirmHold': '開啟（{seconds}）',
   'settings.language.heading': '語言',
   'settings.language.subtitle': '介面顯示語言',
   'settings.language.note': '預設依照你的裝置或瀏覽器語言自動選擇。',

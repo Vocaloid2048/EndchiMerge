@@ -129,6 +129,39 @@ describe('createPreferencesStore — 總開關與無盡模式的閘門', () => {
   });
 });
 
+describe('createPreferencesStore — 音樂靜音 / the music mute', () => {
+  it('starts with sound on and remembers the choice', () => {
+    const storage = new FakeStorage();
+
+    const first = createPreferencesStore({ storage, key: KEY });
+    expect(first.musicMuted).toBe(false);
+
+    first.setMusicMuted(true);
+
+    const second = createPreferencesStore({ storage, key: KEY });
+    expect(second.musicMuted).toBe(true);
+  });
+
+  it('is not governed by the rules gate', () => {
+    const store = createPreferencesStore({ storage: null });
+
+    store.setMusicMuted(true);
+    store.setRulesEnabled(false);
+
+    /* 靜音不是規則：關掉總開關不該把音樂開回來。 */
+    /* The mute is not a rule: closing the master gate must not bring the music back. */
+    expect(store.musicMuted).toBe(true);
+  });
+
+  it('reads a save without the field as unmuted', () => {
+    const storage = new FakeStorage();
+    storage.seed(KEY, JSON.stringify({ locale: 'en', rulesEnabled: false }));
+
+    const store = createPreferencesStore({ storage, key: KEY });
+    expect(store.musicMuted).toBe(false);
+  });
+});
+
 describe('createPreferencesStore — 通知 / notifications', () => {
   it('notifies subscribers once per real change', () => {
     const store = createPreferencesStore({ storage: null });
