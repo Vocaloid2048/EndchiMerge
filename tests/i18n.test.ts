@@ -88,6 +88,23 @@ describe('字典完整性 / dictionary completeness', () => {
   });
 });
 
+/**
+ * 技能說明是玩家看到的規則，不該洩漏內部常數。
+ * The skill copy is the rules as the player reads them, so it must not leak internal constants.
+ */
+describe('技能說明 / skill guide copy', () => {
+  it('describes the shrink by its effect, not by a radius', () => {
+    for (const locale of LOCALES) {
+      const text = MESSAGES[locale]['skillGuide.desc.shrink_all'];
+
+      /* 半徑是實作細節：改平衡時不該連文案一起改。 */
+      /* The radius is an implementation detail; retuning it should not rewrite the copy. */
+      expect(text, locale).not.toContain('{radius}');
+      expect(text, locale).not.toMatch(/\d/u);
+    }
+  });
+});
+
 describe('I18n — 查表與切換 / lookup and switching', () => {
   it('looks up the active locale', () => {
     const i18n = new I18n('en');

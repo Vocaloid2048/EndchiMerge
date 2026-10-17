@@ -225,3 +225,38 @@
   outline: 3px solid var(--color-fg);
   outline-offset: 3px;
 }
+
+/* ── 音樂署名 ──────────────────────────────────────────────────────── */
+
+/*
+ * 四行是清單而不是段落，行距收到 1.6：1.9 會把它們拆散成互不相干的句子。
+ * 標籤轉淡、內容保持正文亮度，一眼看得出哪一半是可點的東西。
+ * The four lines are a list rather than prose, so the leading drops to 1.6: 1.9 would break them
+ * apart into unrelated sentences. The labels dim while the values keep the body's brightness.
+ */
+.help__credit {
+  color: var(--color-fg);
+  line-height: 1.6;
+}
+
+.help__credit-label {
+  color: var(--color-fg-dim);
+}
+
+/* 行內連結：底線用強調色，文字仍與正文同色，讀起來不會像一整排按鈕。 */
+.help__credit-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--color-accent);
+  text-underline-offset: 4px;
+  overflow-wrap: anywhere;
+}
+
+.help__credit-link:hover {
+  color: var(--color-accent);
+}
+
+.help__credit-link:focus-visible {
+  outline: 3px solid var(--color-fg);
+  outline-offset: 3px;
+}

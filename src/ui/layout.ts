@@ -166,7 +166,13 @@ function buildMusicButton(): HTMLButtonElement {
   const music = el('button', 'panel panel--pill music');
   music.type = 'button';
   music.dataset['action'] = 'music';
-  i18nTitle(music, 'chrome.music');
+  /*
+   * `title` 不掛 `data-i18n-title`：它講「按下去會怎樣」（關閉／開啟音樂），由 `ui/music.ts`
+   * 隨靜音狀態自己寫；掛了標記反而會在換語系時被 `applyTo()` 蓋回一句靜態的「音樂開關」。
+   * The `title` is deliberately untagged: it says what a press will do (mute or play) and is
+   * written by `ui/music.ts` alongside the muted state. Tagging it would let `applyTo()` reset it
+   * to a static "Music" on every locale change.
+   */
   i18nAriaLabel(music, 'chrome.music');
   music.setAttribute('aria-pressed', 'false');
   music.append(createAssetIcon('music'));

@@ -30,6 +30,8 @@ export const zhHans: Messages = {
   'chrome.toolbar': '工具栏',
   'chrome.canvas': '游戏容器：方向键瞄准、空格键投放，或用鼠标点击投放。方团团在此落下与合成。',
   'chrome.music': '音乐开关',
+  'chrome.musicMute': '关闭音乐',
+  'chrome.musicUnmute': '开启音乐',
   'chrome.spMeter': '技力',
 
   'toolbar.leaderboard': '排行榜',
@@ -119,7 +121,7 @@ export const zhHans: Messages = {
   'skillGuide.desc.fate_swap':
     '点选两颗方团团，交换它们的位置与速度，并轻轻推开压在新位置上的邻居。需要两个不同的目标。',
   'skillGuide.desc.shrink_all':
-    '把场上所有方团团缩到半径 {radius}。已经更小的不受影响，之后合成出来的仍是原本尺寸。',
+    '把场上所有方团团缩成同样大小。已经更小的不受影响，之后合成出来的仍是原本尺寸。',
   'skillGuide.desc.square_core':
     '本局改用核心正方形判定边缘，取代轮廓：碰撞体本身就是正方形，已经在场上与之后投放的都会换过去。本局只准用一次。',
 
@@ -165,6 +167,11 @@ export const zhHans: Messages = {
   'help.author.server': '加入 Discord 服务器',
   'help.author.serverAria': '加入《方团团大作战》的 Discord 支援服务器',
   'help.repo.label': 'GitHub 项目',
+  'help.music.heading': '音乐',
+  'help.music.lead': '背景音乐',
+  'help.music.license': '授权',
+  'help.music.promoted': '音乐推广',
+  'help.music.download': '免费下载／在线收听',
   'help.copyright.heading': '版权声明',
   'help.copyright.body1':
     '请注意：本项目与鹰角网络（Hypergryph）及 Gryphline 无关。《方团团大作战》仅为一款由粉丝自行开发的网页游戏，本游戏中使用的素材均由 夜芷冰 及 社群协作者 制作，所有角色名称与相关美术版权归原权利人所有。本项目源代码版权归夜芷冰拥有。',

@@ -119,4 +119,15 @@ npm run db:migrate # create the tables in whatever DATABASE_URL names (all three
 
 ---
 
+## <span style="color:#569CD6">🎵 Music credit</span>
+
+The in-game background music is **Take A Walk** by Hotham. With thanks to the artist.
+
+- **Music**: Take A Walk by Hotham — https://soundcloud.com/hothammusic
+- **License**: Creative Commons — Attribution 3.0 Unported — CC BY 3.0
+- **Free Download / Stream**: https://links.al/elY
+- **Music promoted by Audio Library**: https://links.al/youtube
+
+---
+
 [繁體中文版](README.md)

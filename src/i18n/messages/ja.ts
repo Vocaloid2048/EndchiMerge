@@ -41,6 +41,8 @@ export const ja: Messages = {
   'chrome.canvas':
     'ゲームコンテナ：方向キーで狙い、スペースキーで落とす、またはクリックで落とします。方團團はここで落下し、合成されます。',
   'chrome.music': '音楽',
+  'chrome.musicMute': '音楽をオフ',
+  'chrome.musicUnmute': '音楽をオン',
   'chrome.spMeter': '技力',
 
   'toolbar.leaderboard': 'ランキング',
@@ -133,7 +135,7 @@ export const ja: Messages = {
   'skillGuide.desc.fate_swap':
     '方團團をふたつ選び、位置と速度を入れ替えます。新しい位置に乗っている隣はそっと押しのけます。異なる二つが必要です。',
   'skillGuide.desc.shrink_all':
-    '場のすべての方團團を半径{radius}まで小さくします（大きくはなりません）。すでに小さい粒はそのまま、あとで合成された粒は元の大きさです。',
+    '場のすべての方團團を同じ大きさまで小さくします。すでに小さい粒はそのまま、あとで合成された粒は元の大きさです。',
   'skillGuide.desc.square_core':
     'このゲーム中は、合成の辺の判定を輪郭ではなく中心の正方形で行います。当たり判定そのものが正方形になり、場にある粒も今後落ちる粒も切り替わります。ゲーム中に一度だけ。',
 
@@ -181,6 +183,11 @@ export const ja: Messages = {
   'help.author.server': 'Discord サーバーに参加',
   'help.author.serverAria': '『方團團大作戰』の Discord サポートサーバーに参加する',
   'help.repo.label': 'GitHub リポジトリ',
+  'help.music.heading': '音楽',
+  'help.music.lead': 'BGM',
+  'help.music.license': 'ライセンス',
+  'help.music.promoted': '音楽プロモーション',
+  'help.music.download': '無料ダウンロード／ストリーミング',
   'help.copyright.heading': '権利表記',
   'help.copyright.body1':
     'ご注意：本プロジェクトは Hypergryph および Gryphline とは一切関係ありません。「方團團大作戰」はファンが自主制作したウェブゲームにすぎず、本作で使用している素材は 夜芷冰 とコミュニティの協力者が制作したものです。キャラクター名および関連するアートワークの権利は、それぞれの権利者に帰属します。本プロジェクトのソースコードの著作権は 夜芷冰 に帰属します。',

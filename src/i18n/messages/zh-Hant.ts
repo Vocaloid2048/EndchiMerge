@@ -47,6 +47,8 @@ export const zhHant = {
   'chrome.toolbar': '工具列',
   'chrome.canvas': '遊戲容器：方向鍵瞄準、空白鍵投放，或用滑鼠點擊投放。方團團在此落下與合成。',
   'chrome.music': '音樂開關',
+  'chrome.musicMute': '關閉音樂',
+  'chrome.musicUnmute': '開啟音樂',
   'chrome.spMeter': '技力',
 
   'toolbar.leaderboard': '排行榜',
@@ -147,7 +149,7 @@ export const zhHant = {
   'skillGuide.desc.fate_swap':
     '點選兩顆方團團，交換它們的位置與速度，並輕輕推開壓在新位置上的鄰居。需要兩個不同的目標。',
   'skillGuide.desc.shrink_all':
-    '把場上所有方團團縮到半徑 {radius}。已經更小的不受影響，之後合成出來的仍是原本尺寸。',
+    '把場上所有方團團縮成同樣大小。已經更小的不受影響，之後合成出來的仍是原本尺寸。',
   'skillGuide.desc.square_core':
     '本局改用核心正方形判定邊緣，取代輪廓：碰撞體本身就是正方形，已經在場上與之後投放的都會換過去。本局只准用一次。',
 
@@ -200,6 +202,11 @@ export const zhHant = {
   'help.author.server': '加入 Discord 伺服器',
   'help.author.serverAria': '加入《方團團大作戰》的 Discord 支援伺服器',
   'help.repo.label': 'GitHub 專案',
+  'help.music.heading': '音樂',
+  'help.music.lead': '背景音樂',
+  'help.music.license': '授權',
+  'help.music.promoted': '音樂推廣',
+  'help.music.download': '免費下載／串流',
   'help.copyright.heading': '版權聲明',
   'help.copyright.body1':
     '請注意：本專案與鷹角網絡（Hypergryph）及 Gryphline 無關。《方團團大作戰》僅為一款由粉絲自行開發之網頁遊戲，本遊戲中使用的素材均由 夜芷冰 及 社群協作者 製作，所有角色名稱與相關美術版權歸原權利人所有。本專案原始碼版權歸夜芷冰擁有。',

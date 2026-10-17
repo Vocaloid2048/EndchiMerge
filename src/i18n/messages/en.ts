@@ -40,6 +40,8 @@ export const en: Messages = {
   'chrome.canvas':
     'Game container: aim with the arrow keys, drop with Space, or click to drop. Dumplings fall and merge here.',
   'chrome.music': 'Music',
+  'chrome.musicMute': 'Mute music',
+  'chrome.musicUnmute': 'Play music',
   'chrome.spMeter': 'SP',
 
   'toolbar.leaderboard': 'Leaderboard',
@@ -133,7 +135,7 @@ export const en: Messages = {
   'skillGuide.desc.fate_swap':
     'Pick two dumplings and swap their positions and velocities, nudging whatever sits on the new spots. Needs two distinct targets.',
   'skillGuide.desc.shrink_all':
-    'Shrinks every dumpling on the board to radius {radius}. Bodies already smaller are left alone, and anything merged later keeps its normal size.',
+    'Shrinks every dumpling on the board to the same size. Bodies already smaller are left alone, and anything merged later keeps its normal size.',
   'skillGuide.desc.square_core':
     'This run judges merge edges by the core square instead of the outline: the collider itself becomes a square, for bodies already on the board and for later drops alike. Once per run.',
 
@@ -181,6 +183,11 @@ export const en: Messages = {
   'help.author.server': 'Join the Discord server',
   'help.author.serverAria': 'Join the EndchiMerge support Discord server',
   'help.repo.label': 'GitHub repository',
+  'help.music.heading': 'Music',
+  'help.music.lead': 'Background music',
+  'help.music.license': 'License',
+  'help.music.promoted': 'Music promoted by',
+  'help.music.download': 'Free download / stream',
   'help.copyright.heading': 'Copyright',
   'help.copyright.body1':
     'Please note: this project has no connection to Hypergryph or Gryphline. “EndchiMerge” is simply a web game developed by a fan; the assets used in it were made by 夜芷冰 and community contributors, and all character names and related artwork remain the property of their respective rights holders. The copyright of this project’s source code belongs to 夜芷冰.',

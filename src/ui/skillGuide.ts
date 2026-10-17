@@ -40,15 +40,14 @@ const DESC_KEYS: Readonly<Record<string, MessageKey>> = {
  * The numeric parameters the descriptions may use, taken from the config; missing values fall
  * back to the skill's own default.
  *
- * 一個技能只會用到其中一個，三個一併傳進去 —— `formatMessage` 只替換模板裡真的出現的佔位符。
- * A skill uses at most one of them; all three are passed because `formatMessage` only replaces the
+ * 一個技能只會用到其中一個，兩個一併傳進去 —— `formatMessage` 只替換模板裡真的出現的佔位符。
+ * A skill uses at most one of them; both are passed because `formatMessage` only replaces the
  * placeholders that actually appear in the template.
  */
 function descParams(def: SkillDef): Record<string, number> {
   return {
     drops: def.params.drops ?? 3,
     count: def.params.count ?? 30,
-    radius: def.params.radius ?? 37.5,
   };
 }
 

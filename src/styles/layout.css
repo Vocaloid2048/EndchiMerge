@@ -290,6 +290,38 @@
   padding: 0;
   color: var(--color-fg);
   cursor: pointer;
+  transition: color var(--transition-fast), filter var(--transition-fast);
+}
+
+.music:hover {
+  filter: brightness(1.25);
+}
+
+/*
+ * 靜音（`aria-pressed="true"`）：圖示轉淡，並斜著劃一道槓。
+ * Muted (`aria-pressed="true"`): the glyph dims and a slash is drawn across it.
+ *
+ * 斜槓用偽元素而不是第二份圖示：它跟 `currentColor` 同色，換主題時不必再維護一張圖。
+ * 6px 比圖示的線寬粗一級，才不會被音符本身吃掉；顏色取正文色，壓過已經轉淡的圖示。
+ * A pseudo-element rather than a second icon: it follows `currentColor`, so a theme change needs
+ * no second asset. Its 6px beats the glyph's stroke so the note does not swallow it, and the
+ * body colour sits above the dimmed glyph.
+ */
+.music[aria-pressed='true'] {
+  color: var(--color-fg-dim);
+}
+
+.music[aria-pressed='true']::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 58px;
+  height: 6px;
+  margin: -3px 0 0 -29px;
+  border-radius: 999px;
+  background: var(--color-fg);
+  transform: rotate(-45deg);
 }
 
 /*

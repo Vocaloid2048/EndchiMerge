@@ -1,6 +1,7 @@
 /**
- * 遊戲說明彈窗（工具列的「?」）：玩法、製作緣由、作者（頭像／徽章／連結）、版權聲明四段。
- * The help popup (the toolbar's "?"): four sections — how to play, why it exists, the author (avatar, badges, links) and the copyright notice.
+ * 遊戲說明彈窗（工具列的「?」）：玩法、製作緣由、作者（頭像／徽章／連結）、音樂署名、版權聲明五段。
+ * The help popup (the toolbar's "?"): five sections — how to play, why it exists, the author
+ * (avatar, badges, links), the music credit and the copyright notice.
  *
  * 文字全部掛 i18n 標記，語系一換由 `main.ts` 的 `applyTo()` 一次改掉，這裡不必訂閱任何東西；
  * 段落一段一個 `<p>`，行距與段距靠 CSS。
@@ -48,6 +49,21 @@ const AUTHOR_GITHUB = 'https://github.com/Vocaloid2048/';
  * The support server's Discord invite.
  */
 const SERVER_INVITE = 'https://discord.gg/uXatcbWKv2';
+
+/*
+ * 背景音樂的署名資料。曲名、作者與授權名稱都是專有名詞，五個語系照原樣顯示，所以不進字典；
+ * CC BY 3.0 要求同時標明曲名、作者、授權與可點擊的連結，四樣都在這裡。
+ * The background music's credit data. The title, the artist and the licence name are proper nouns
+ * shown as-is in every locale, so they stay out of the tables. CC BY 3.0 asks for the title, the
+ * artist, the licence and a link to it — all four live here.
+ */
+const MUSIC_TRACK = 'Take A Walk';
+const MUSIC_ARTIST = 'Hotham';
+const MUSIC_ARTIST_URL = 'https://soundcloud.com/hothammusic';
+const MUSIC_DOWNLOAD_URL = 'https://links.al/elY';
+const MUSIC_PROMOTED_URL = 'https://links.al/youtube';
+const MUSIC_LICENSE_URL = 'https://creativecommons.org/licenses/by/3.0/';
+const MUSIC_LICENSE_NAME = 'Creative Commons — Attribution 3.0 Unported — CC BY 3.0';
 
 /*
  * 品牌標誌：官方商標的簡化路徑（24×24 視圖框），著色走 `currentColor`，
@@ -186,6 +202,70 @@ function buildAuthorBlock(): HTMLElement {
   return block;
 }
 
+/**
+ * 一行署名：標籤（走 i18n）＋ 分隔號 ＋ 內容。
+ * One credit line: the label (via i18n), the locale's separator, then the content.
+ */
+function buildCreditLine(labelKey: MessageKey, content: readonly (Node | string)[]): HTMLElement {
+  const line = el('p', 'help__text help__credit');
+
+  const label = el('span', 'help__credit-label');
+  i18nText(label, labelKey);
+
+  const separator = el('span');
+  i18nText(separator, 'label.statSuffix');
+
+  line.append(label, separator);
+  appendChildren(line, ...content);
+
+  return line;
+}
+
+/**
+ * 正文裡的連結：與段落同字級，靠顏色與底線標示。
+ * A link inside running text: same size as the paragraph, marked by colour and an underline.
+ */
+function buildTextLink(href: string, text: string): HTMLAnchorElement {
+  const link = el('a', 'help__credit-link', text);
+  link.href = href;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.title = href;
+
+  return link;
+}
+
+/**
+ * 音樂署名區塊：曲名、作者、授權、推廣方與下載連結。
+ * The music credit section: title, artist, licence, promoter and the download link.
+ */
+function buildMusicSection(): HTMLElement {
+  const heading = el('h3', 'help__heading');
+  i18nText(heading, 'help.music.heading');
+
+  const section = el('section', 'help__section');
+  appendChildren(
+    section,
+    heading,
+    /* 「by」不是文案而是曲目寫法，五個語系一律照這個格式。 */
+    /* "by" is the track's own notation rather than copy, so every locale reads the same. */
+    buildCreditLine('help.music.lead', [
+      MUSIC_TRACK,
+      ' by ',
+      buildTextLink(MUSIC_ARTIST_URL, MUSIC_ARTIST),
+    ]),
+    buildCreditLine('help.music.license', [
+      buildTextLink(MUSIC_LICENSE_URL, MUSIC_LICENSE_NAME),
+    ]),
+    buildCreditLine('help.music.promoted', [buildTextLink(MUSIC_PROMOTED_URL, 'Audio Library')]),
+    buildCreditLine('help.music.download', [
+      buildTextLink(MUSIC_DOWNLOAD_URL, 'links.al/elY'),
+    ]),
+  );
+
+  return section;
+}
+
 export function createHelp(options: HelpOptions): HelpView {
   const titleId = 'help-title';
 
@@ -250,13 +330,16 @@ export function createHelp(options: HelpOptions): HelpView {
   const author = el('section', 'help__section');
   appendChildren(author, authorHeading, buildAuthorBlock(), links);
 
-  /* ④ 版權聲明 */
+  /* ④ 音樂署名 */
+  const music = buildMusicSection();
+
+  /* ⑤ 版權聲明 */
   const copyright = buildSection('help.copyright.heading', [
     'help.copyright.body1',
     'help.copyright.body2',
   ]);
 
-  appendChildren(body, play, origin, author, copyright);
+  appendChildren(body, play, origin, author, music, copyright);
 
   const card = el('div', 'help__card');
   appendChildren(card, header, body);

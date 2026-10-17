@@ -22,6 +22,7 @@ import { createLayout, type Layout } from './ui/layout';
 import { createLeaderboard, type LeaderboardView } from './ui/leaderboard';
 import { createMeltingList, type MeltingList } from './ui/meltingList';
 import { createMobileGate, type MobileGate } from './ui/mobileGate';
+import { createMusicToggle, type MusicToggle } from './ui/music';
 import { createNotice } from './ui/notice';
 import { createPublishPrompt, type PublishPromptView } from './ui/publishPrompt';
 import { attachRestartConfirm } from './ui/restartButton';
@@ -67,6 +68,7 @@ export interface AppContext {
   detachI18n: () => void;
   detachPreferences: () => void;
   mobileGate: MobileGate;
+  music: MusicToggle;
 }
 
 async function bootstrap(): Promise<void> {
@@ -103,6 +105,18 @@ async function bootstrap(): Promise<void> {
    * than shrink to a third along with the 1920×1080 stage.
    */
   const mobileGate = createMobileGate({ host });
+
+  /*
+   * 背景音樂：默認播放，音符鍵靜音。它不屬於任何區域，所以與配置、素材、物理都無關 ——
+   * 版面一建好就可以開始，玩家不必等我下載完整份配置才聽到音樂。
+   * The background music: playing by default, muted by the note button. It belongs to no region and
+   * so depends on neither config nor assets nor physics — it can start as soon as the layout exists,
+   * rather than waiting for the whole config.
+   */
+  const music = createMusicToggle({
+    button: layout.chrome.music,
+    src: `${import.meta.env.BASE_URL}assets/music/take-a-walk.mp3`,
+  });
 
   /*
    * 語系一換就把整個版面重寫一遍：`applyTo()` 走 `[data-i18n]` 等標記，連之後才掛上的彈窗一併換掉。
@@ -645,6 +659,7 @@ async function bootstrap(): Promise<void> {
     detachI18n,
     detachPreferences,
     mobileGate,
+    music,
   };
   exposeForDebugging(context);
 }

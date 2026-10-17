@@ -122,4 +122,15 @@ npm run db:migrate # 對 DATABASE_URL 指的資料庫建表（三個方言都支
 
 ---
 
+## <span style="color:#569CD6">🎵 音樂版權</span>
+
+遊戲背景音樂採用 **Take A Walk** by Hotham，謹此致謝。
+
+- **Music**: Take A Walk by Hotham — https://soundcloud.com/hothammusic
+- **License**: Creative Commons — Attribution 3.0 Unported — CC BY 3.0
+- **Free Download / Stream**: https://links.al/elY
+- **Music promoted by Audio Library**: https://links.al/youtube
+
+---
+
 [English Version](README-en.md)

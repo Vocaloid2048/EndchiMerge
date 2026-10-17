@@ -33,6 +33,8 @@ export const yue: Messages = {
   'chrome.toolbar': '工具列',
   'chrome.canvas': '遊戲容器：撳方向鍵瞄準、空白鍵投放，或者用滑鼠撳落去投放。方團團會跌喺度同埋合成。',
   'chrome.music': '音樂開關',
+  'chrome.musicMute': '熄音樂',
+  'chrome.musicUnmute': '開音樂',
   'chrome.spMeter': '技力',
 
   'toolbar.leaderboard': '排行榜',
@@ -128,7 +130,7 @@ export const yue: Messages = {
   'skillGuide.desc.fate_swap':
     '撳兩粒方團團，交換佢哋嘅位置同速度，順手輕輕推開壓住新位置嘅鄰居。要揀兩個唔同嘅目標。',
   'skillGuide.desc.shrink_all':
-    '全場方團團縮到半徑 {radius}。本身細過呢個半徑嘅唔受影響，之後投放、合成出嚟嘅照舊原本尺寸。',
+    '全場方團團一律縮到同一個尺寸。本身細過呢個尺寸嘅唔受影響，之後投放、合成出嚟嘅照舊原本大小。',
   'skillGuide.desc.square_core':
     '呢一局改用核心正方形判邊緣，唔再用輪廓：碰撞體本身就係正方形，場上已經有嘅同之後落嘅都會轉過去。一局只可以用一次。',
 
@@ -174,6 +176,11 @@ export const yue: Messages = {
   'help.author.server': '入嚟我地嘅 Discord 伺服器',
   'help.author.serverAria': '加入《方團團大作戰》嘅 Discord 支援伺服器',
   'help.repo.label': 'GitHub Repo',
+  'help.music.heading': '音樂',
+  'help.music.lead': '背景音樂',
+  'help.music.license': '授權',
+  'help.music.promoted': '音樂推廣',
+  'help.music.download': '免費下載／收聽',
   'help.copyright.heading': '版權聲明',
 
   /** 版權聲明 - 不需要粵語翻譯 */
