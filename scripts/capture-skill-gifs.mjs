@@ -1,0 +1,453 @@
+/**
+ * 技能示意 GIF 產生器（第一段）：接管時間軸 → 逐幀驅動真實遊戲 → 截圖。
+ * Skill GIF generator, stage one: take over the timeline, drive the real game frame by frame and
+ * screenshot each frame. Stage two is `assemble-skill-gifs.py`, which turns the frames into GIFs.
+ *
+ * 用法 / Usage:
+ *   1. 先開開發伺服器：`npm run dev`（腳本預設打 http://localhost:5199/）
+ *   2. `CHROME_PATH=<chromium 執行檔> node scripts/capture-skill-gifs.mjs [skill-id]`
+ *   3. `python scripts/assemble-skill-gifs.py`
+ *
+ * 需要 `playwright-core`（等同 repo 外的臨時依賴；`npm i -D playwright-core` 或指向任何已安裝的位置），
+ * 而 `CHROME_PATH` 指向一個 Chromium／Chrome 執行檔 —— 不必下載瀏覽器。
+ * Requires `playwright-core` and a Chromium/Chrome binary in `CHROME_PATH`; nothing needs downloading.
+ *
+ * 兩個關鍵前提：
+ * 1. 假的 `requestAnimationFrame` ＋ 假的 `performance.now`，所以時間只由 `__pump()` 推進 ——
+ *    每張截圖之間都是同一段物理時間，GIF 不會因為截圖慢而「跳格」。
+ * 2. 開發模式會把 `session` 與 `viewport` 掛到 `window.__endchi`（見 `main.ts`），所以腳本讀得到
+ *    每一顆的真實座標，不必靠猜位置去點它。
+ * Two prerequisites: a fake rAF/performance.now so only `__pump()` advances time, and the dev-only
+ * `window.__endchi` handle (see `main.ts`) so the script can read every body's real position
+ * instead of guessing where to click.
+ */
+import { chromium } from 'playwright-core';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const EXE = process.env.CHROME_PATH;
+const OUT = path.join(os.tmpdir(), 'endchi-skill-gifs');
+const BASE = process.env.DEV_URL ?? 'http://localhost:5199/';
+
+if (EXE === undefined) {
+  throw new Error('Set CHROME_PATH to a Chromium/Chrome executable, e.g. CHROME_PATH="C:/.../chrome.exe".');
+}
+/** 每 5 個 60fps 物理幀抓一張 ＝ 12fps 的 GIF。 / One shot every five physics frames = 12 fps. */
+const CAPTURE_EVERY = 5;
+
+fs.mkdirSync(OUT, { recursive: true });
+
+const browser = await chromium.launch({ executablePath: EXE });
+/** 目前情境的頁面；輔助函式都靠它。 / The current scenario's page; every helper uses it. */
+let page;
+
+async function makePage(query) {
+  const context = await browser.newContext({
+    viewport: { width: 1920, height: 1080 },
+    deviceScaleFactor: 1,
+  });
+  page = await context.newPage();
+  page.on('pageerror', (e) => console.log('PAGEERROR', e.message));
+
+  await page.addInitScript(() => {
+    window.__t = 0;
+    window.__pending = null;
+    window.requestAnimationFrame = (cb) => {
+      window.__pending = cb;
+      return 1;
+    };
+    window.cancelAnimationFrame = () => {
+      window.__pending = null;
+    };
+    Object.defineProperty(window.performance, 'now', { configurable: true, value: () => window.__t });
+    window.__pump = (frames, dt = 1000 / 60) => {
+      for (let i = 0; i < frames; i += 1) {
+        window.__t += dt;
+        const cb = window.__pending;
+        window.__pending = null;
+        if (cb) cb(window.__t);
+      }
+    };
+    localStorage.setItem('endchimerge:unlocks', JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));
+    localStorage.setItem('endchimerge:share-score', 'true');
+    localStorage.setItem('endchimerge:publish-prompt', 'true');
+  });
+
+  await context.route('**/config/skills.json', async (route) => {
+    const res = await route.fetch();
+    const json = await res.json();
+    /* 示意圖只在乎「做出效果」，所以每個技能都免費且隨時可按。 */
+    json.sp.max = 3;
+    json.sp.initial = 3;
+    json.sp.gainPerDrop = 10;
+    json.sp.gainPerCombo = 10;
+    for (const skill of json.skills) {
+      skill.cost = 0;
+      skill.unlock = { kind: 'sp' };
+    }
+    await route.fulfill({ json });
+  });
+
+  await page.goto(BASE + query, { waitUntil: 'networkidle' });
+  await boot();
+  return context;
+}
+
+/**
+ * 等到技能卡建好。載入會等圖片解碼（真時間），而畫面更新要我們推幀（假時間），
+ * 所以兩者交錯：給一點真時間，再推幾幀。
+ * Wait until the cards exist. Loading waits on image decoding (real time) while drawing needs
+ * pumped frames (fake time), so the two are interleaved.
+ */
+async function boot() {
+  for (let i = 0; i < 60; i += 1) {
+    await page.waitForTimeout(100);
+    await page.evaluate(() => window.__pump(4));
+    const ready = await page.evaluate(
+      () => Boolean(window.__endchi) && document.querySelectorAll('button[data-skill-id]').length > 0,
+    );
+    if (ready) {
+      await page.evaluate(() => window.__pump(4));
+      return;
+    }
+  }
+  throw new Error('the game never became ready');
+}
+
+const settle = (frames) => page.evaluate((n) => window.__pump(n), frames);
+
+/** 盤面快照：每顆的虛擬座標與半徑，加上畫布位置與縮放。 / Board snapshot plus canvas geometry. */
+async function readBoard() {
+  return page.evaluate(() => {
+    const { session, viewport } = window.__endchi;
+    const rect = document.querySelector('canvas').getBoundingClientRect();
+    return {
+      scale: viewport.scale,
+      virtualWidth: viewport.virtualWidth,
+      rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      bodies: session.bodies.map((body) => ({
+        levelId: body.levelId,
+        x: body.x,
+        y: body.y,
+        radius: body.radius,
+      })),
+    };
+  });
+}
+
+/** 虛擬座標 → 視窗座標。 / Virtual coordinates into viewport pixels. */
+function toCss(board, point) {
+  return {
+    x: board.rect.x + point.x * board.scale,
+    y: board.rect.y + point.y * board.scale,
+  };
+}
+
+async function clickVirtual(board, point) {
+  const css = toCss(board, point);
+  await page.mouse.move(css.x, css.y);
+  await page.mouse.down();
+  await page.mouse.up();
+}
+
+/** 在某個虛擬 X 投放一顆（Y 不影響投放，只影響瞄準）。 / Drop at a virtual X (Y does not matter for dropping). */
+async function dropAt(vx) {
+  const board = await readBoard();
+  await clickVirtual(board, { x: vx, y: board.virtualWidth * 0 });
+  await settle(58);
+}
+
+/** 按畫面寬度的比例投放。 / Drop at a fraction of the visible width. */
+async function drop(fx) {
+  const board = await readBoard();
+  await dropAt(board.virtualWidth * fx);
+}
+
+/** 挑一顆：`pick` 決定挑哪顆（預設最大）。 / Choose a body; the largest by default. */
+function choose(bodies, pick) {
+  if (bodies.length === 0) return null;
+  const byRadius = [...bodies].sort((a, b) => a.radius - b.radius);
+  if (pick === 'smallest') return byRadius[0];
+  if (pick === 'leftmost') return [...bodies].sort((a, b) => a.x - b.x)[0];
+  if (pick === 'rightmost') return [...bodies].sort((a, b) => b.x - a.x)[0];
+  return byRadius[byRadius.length - 1];
+}
+
+/** 目前的連擊串長（直接讀 session）。 / The current chain length, read straight off the session. */
+function chain() {
+  return page.evaluate(() => window.__endchi.session.comboCount);
+}
+
+async function cast(id) {
+  await page.click(`button[data-skill-id="${id}"]`);
+  await settle(4);
+}
+
+/**
+ * 一個情境：`setup` 佈置盤面，`act` 施放（可含點選），`hold` 是施放後要抓的物理幀數。
+ * A scenario: `setup` builds the board, `act` casts (possibly with picks), `hold` is how many
+ * physics frames to capture afterwards.
+ */
+const PILE = [0.24, 0.4, 0.56, 0.72];
+
+const SCENARIOS = [
+  {
+    id: 'discard',
+    hold: 60,
+    async setup() {
+      for (const fx of PILE) await drop(fx);
+      await settle(40);
+    },
+    async act() {
+      await cast('discard');
+      const board = await readBoard();
+      const target = choose(board.bodies);
+      if (target !== null) await clickVirtual(board, target);
+    },
+    check: (before, after) => after.bodies.length === before.bodies.length - 1,
+  },
+  {
+    id: 'ascend',
+    hold: 60,
+    async setup() {
+      for (const fx of [0.28, 0.44, 0.6]) await drop(fx);
+      await settle(40);
+    },
+    async act() {
+      await cast('ascend');
+      const board = await readBoard();
+      const target = choose(board.bodies, 'smallest');
+      if (target !== null) await clickVirtual(board, target);
+    },
+    /* 顆數不變、其中一顆的等級變高 ＝ 升級生效。 / Same count, one body a level higher = the promotion landed. */
+    check: (before, after) =>
+      after.bodies.length === before.bodies.length &&
+      after.bodies.some((body, index) => body.levelId > before.bodies[index].levelId),
+  },
+  {
+    id: 'protocol_float',
+    hold: 96,
+    async setup() {
+      for (const fx of [0.24, 0.38, 0.52, 0.66, 0.8]) await drop(fx);
+      await settle(40);
+    },
+    async act() {
+      await cast('protocol_float');
+    },
+    check: (before, after) =>
+      Math.min(...after.bodies.map((b) => b.y)) < Math.min(...before.bodies.map((b) => b.y)) - 40,
+  },
+  {
+    id: 'scramble',
+    hold: 60,
+    async setup() {
+      /* 一邊擠成一堆、一邊孤立：重排之後「誰去了哪」才看得出來。 */
+      for (const fx of [0.24, 0.26, 0.28, 0.3, 0.8]) await drop(fx);
+      await settle(40);
+    },
+    async act() {
+      await cast('scramble');
+    },
+    /* 重排是「位置互換」，所以看某一顆走了多遠，而不是看最小／最大 x。 */
+    check: (before, after) =>
+      before.bodies.some((body, index) => Math.abs(body.x - after.bodies[index].x) > 25),
+  },
+  {
+    id: 'combo_grace',
+    region: 'combo',
+    mode: 'page',
+    hold: 150,
+    async setup() {
+      /*
+       * 一直往同一點丟，直到真的合成一次（掉落池不只一級，所以兩顆不一定同級）。
+       * 連擊必須在施放前就 ≥ 1，否則護盾沒有東西可保，GIF 也看不出效果。
+       * Keep dropping on one spot until a merge actually happens (the pool holds more than one
+       * level, so two drops are not guaranteed to match). The chain has to be ≥ 1 before the cast,
+       * or the shield has nothing to protect and the GIF shows nothing.
+       */
+      for (let i = 0; i < 14 && (await chain()) < 1; i += 1) await drop(0.5);
+      await settle(45);
+    },
+    async act() {
+      const before = await chain();
+      await cast('combo_grace');
+      for (const fx of [0.24, 0.8, 0.24]) await drop(fx);
+      return before;
+    },
+    check: (before, after, extra) => typeof extra === 'number' && extra >= 1,
+  },
+  {
+    id: 'shake',
+    hold: 150,
+    async setup() {
+      for (const fx of [0.26, 0.4, 0.54, 0.68]) await drop(fx);
+      await settle(40);
+    },
+    async act() {
+      await cast('shake');
+    },
+    check: () => true,
+  },
+  {
+    id: 'reshuffle',
+    hold: 260,
+    async setup() {
+      for (const fx of [0.3, 0.44, 0.58]) await drop(fx);
+      await settle(40);
+    },
+    async act() {
+      await cast('reshuffle');
+    },
+    checkAt: 'final',
+    check: (before, after) => after.bodies.length > before.bodies.length,
+  },
+  {
+    id: 'fate_swap',
+    hold: 60,
+    async setup() {
+      await drop(0.26);
+      await drop(0.74);
+      await settle(40);
+    },
+    async act() {
+      await cast('fate_swap');
+      const board = await readBoard();
+      const left = choose(board.bodies, 'leftmost');
+      const right = choose(board.bodies, 'rightmost');
+      if (left !== null) await clickVirtual(board, left);
+      await settle(4);
+      if (right !== null) await clickVirtual(board, right);
+    },
+    /* 互換之後第一顆應該跑到另一邊。 / After the swap the first body ends up on the other side. */
+    check: (before, after) => after.bodies[0].x > before.bodies[0].x + 25,
+  },
+  {
+    id: 'shrink_all',
+    hold: 60,
+    async setup() {
+      for (const fx of [0.26, 0.4, 0.54, 0.68]) await drop(fx);
+      await settle(40);
+    },
+    async act() {
+      await cast('shrink_all');
+    },
+    check: (before, after) =>
+      Math.max(...after.bodies.map((b) => b.radius)) <
+      Math.max(...before.bodies.map((b) => b.radius)) - 5,
+  },
+  {
+    id: 'square_core',
+    /*
+     * 這一招改的是**碰撞體**，靜態畫面看不出來；`?debug=1` 的除錯輔助線剛好把碰撞體畫成
+     * 紅線 ＋ 藍點，所以只有這張圖開著它 —— 圓形輪廓變成四個角，一眼就看得出改了什麼。
+     * This skill changes the **collider**, which a still frame does not show; `?debug=1` draws the
+     * collider as red edges plus blue dots, so this one GIF keeps it on: the round outline becomes
+     * four corners, and the change is obvious at a glance.
+     */
+    query: '?debug=1',
+    crop: { x: 0, y: 0.45, w: 1, h: 0.55 },
+    hold: 90,
+    async setup() {
+      for (const fx of [0.3, 0.44, 0.58, 0.72]) await drop(fx);
+      await settle(40);
+    },
+    async act() {
+      await cast('square_core');
+    },
+    check: (before, after) => after.bodies.length > 0,
+  },
+];
+
+const only = process.argv[2];
+
+for (const scenario of SCENARIOS) {
+  if (only !== undefined && only !== scenario.id) continue;
+
+  const context = await makePage(scenario.query ?? '');
+  const clip = await page.evaluate(({ region, crop }) => {
+    const canvas = document.querySelector('canvas').getBoundingClientRect();
+    if (region === null) {
+      if (crop === null) {
+        return { x: canvas.x, y: canvas.y, width: canvas.width, height: canvas.height };
+      }
+      return {
+        x: canvas.x + canvas.width * crop.x,
+        y: canvas.y + canvas.height * crop.y,
+        width: canvas.width * crop.w,
+        height: canvas.height * crop.h,
+      };
+    }
+    const extra = document.querySelector(`[data-region="${region}"]`).getBoundingClientRect();
+    const x = Math.min(canvas.x, extra.x);
+    const y = Math.min(canvas.y, extra.y);
+    return {
+      x,
+      y,
+      width: Math.max(canvas.x + canvas.width, extra.x + extra.width) - x,
+      height: Math.max(canvas.y + canvas.height, extra.y + extra.height) - y,
+    };
+  }, { region: scenario.region ?? null, crop: scenario.crop ?? null });
+
+  const dir = path.join(OUT, scenario.id);
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+
+  /*
+   * 預設直接抓**畫布**（透明 PNG，之後由 Python 疊在單色上）：畫布以外的背景是靜態漸層圖，
+   * 把它拍進 GIF 等於每格都帶一堆不會動卻無法壓縮的雜訊 —— 那正是檔案變成幾 MB 的原因。
+   * 只有需要畫布以外東西的情境（連勢不墜要看連擊卡）才整頁截圖。
+   * The default grabs the **canvas** (a transparent PNG, later composited over a flat colour):
+   * the page background is a static gradient image, and baking it into the GIF makes every frame
+   * carry noise that never moves and cannot be compressed — which is what blew the files up to
+   * megabytes. Only a scenario needing something outside the canvas (the combo card) shoots the page.
+   */
+  let index = 0;
+  const shot = async () => {
+    const file = path.join(dir, `${String(index).padStart(3, '0')}.png`);
+    if (scenario.mode === 'page') {
+      await page.screenshot({ clip, type: 'png', path: file });
+    } else {
+      const dataUrl = await page.evaluate(() => document.querySelector('canvas').toDataURL('image/png'));
+      fs.writeFileSync(file, Buffer.from(dataUrl.split(',')[1], 'base64'));
+    }
+    index += 1;
+  };
+
+  await scenario.setup();
+  const before = await readBoard();
+  await shot();
+
+  const extra = await scenario.act();
+  await settle(CAPTURE_EVERY);
+  const after = await readBoard();
+  await shot();
+
+  const rounds = Math.floor(scenario.hold / CAPTURE_EVERY);
+  for (let i = 0; i < rounds; i += 1) {
+    await settle(CAPTURE_EVERY);
+    await shot();
+  }
+
+  const final = scenario.checkAt === 'final' ? await readBoard() : after;
+  const verdict = scenario.check(before, final, extra);
+
+  const summary = {
+    id: scenario.id,
+    frames: index,
+    clip,
+    mode: scenario.mode ?? 'canvas',
+    crop: scenario.crop ?? null,
+    count: { before: before.bodies.length, after: after.bodies.length },
+    levels: { before: before.bodies.map((b) => b.levelId), after: after.bodies.map((b) => b.levelId) },
+    radii: { before: before.bodies.map((b) => Math.round(b.radius)), after: after.bodies.map((b) => Math.round(b.radius)) },
+    pass: verdict,
+  };
+
+  fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(summary, null, 1));
+  console.log(JSON.stringify(summary));
+
+  await context.close();
+}
+
+await browser.close();

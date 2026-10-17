@@ -197,8 +197,13 @@
  * 用 `min-height` 而不是固定高度：預留的是一塊**可以放圖的空間**，不是一個必須填滿的洞。
  * It uses `min-height` rather than a fixed height: what is reserved is room an image *can* fill,
  * not a hole that must be filled.
+ *
+ * 有圖時（`--filled`）收起虛線框：那圈虛線是「這裡還是空的」的標記，圖進來就不該再畫。
+ * When artwork is present (`--filled`) the dashed frame goes away: it marks an empty slot, and
+ * there is no point drawing it around an image.
  */
 .skill-guide__media {
+  position: relative;
   display: grid;
   place-items: center;
   min-height: 260px;
@@ -207,11 +212,32 @@
   overflow: hidden;
 }
 
+/*
+ * 圖用絕對定位填滿那塊框：框的高度來自格線的 `1fr`（不確定高度），而當成格線項目時
+ * `height: 100%` 會退回 auto —— 直式的 GIF 於是撐得比框還高，被 `overflow: hidden` 切掉下半。
+ * 絕對定位 ＋ `object-fit: contain` 才能保證整張圖都在框內。
+ * The image fills the frame absolutely: the frame's height comes from a `1fr` grid track (not a
+ * definite height), and as a grid item `height: 100%` falls back to auto — so a portrait GIF grew
+ * taller than its frame and `overflow: hidden` cut off the bottom. Absolute positioning with
+ * `object-fit: contain` keeps the whole image inside.
+ */
 .skill-guide__media > img,
 .skill-guide__media > video {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+.skill-guide__media--filled {
+  border-color: transparent;
+}
+
+/* GIF 的邊角跟著容器圓角走，不然放大時會看到方角戳出來。 */
+/* The GIF's corners follow the container's rounding, so a scaled-up clip cannot poke out. */
+.skill-guide__media--filled > img {
+  border-radius: 16px;
 }
 
 .skill-guide__media-hint {

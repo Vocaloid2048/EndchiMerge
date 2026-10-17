@@ -107,8 +107,29 @@ export function createSkillGuide(options: SkillGuideOptions): SkillGuideView {
    */
   const media = el('div', 'skill-guide__media');
   media.dataset['slot'] = 'skill-media';
+
+  /*
+   * 示意 GIF：`public/assets/skills/<id>.gif`，一個技能一張，選到哪個就載哪個（`src` 在
+   * `renderDetail()` 才設定，所以不會一次抓十張）。圖片沒有 `alt` —— 右邊那段描述已經講了
+   * 同一件事，再念一次只會吵。
+   * The illustration GIF at `public/assets/skills/<id>.gif`, one per skill; `src` is set in
+   * `renderDetail()`, so only the selected skill loads. It carries an empty `alt` because the
+   * description beside it already says the same thing, and repeating it would only be noise.
+   */
+  const mediaImage = el('img', 'skill-guide__media-image');
+  mediaImage.alt = '';
+  mediaImage.decoding = 'async';
+
   const mediaHint = el('span', 'skill-guide__media-hint');
-  media.append(mediaHint);
+  media.append(mediaImage, mediaHint);
+
+  /* 沒有對應素材時退回提示字，而不是留一個破圖。 */
+  /* Fall back to the hint when a skill has no artwork, rather than showing a broken image. */
+  mediaImage.addEventListener('error', (): void => {
+    mediaImage.hidden = true;
+    mediaHint.hidden = false;
+    media.classList.remove('skill-guide__media--filled');
+  });
 
   const desc = el('p', 'skill-guide__desc');
 
@@ -179,6 +200,7 @@ export function createSkillGuide(options: SkillGuideOptions): SkillGuideView {
       name.textContent = '';
       meta.textContent = '';
       desc.textContent = '';
+      mediaImage.hidden = true;
       mediaHint.textContent = '';
       return;
     }
@@ -192,7 +214,13 @@ export function createSkillGuide(options: SkillGuideOptions): SkillGuideView {
     desc.textContent = key === undefined ? '' : t(key, descParams(def));
 
     mediaHint.textContent = t('skillGuide.media');
+    mediaHint.hidden = true;
+    mediaImage.hidden = false;
+    media.classList.add('skill-guide__media--filled');
     media.dataset['skillId'] = def.id;
+
+    const source = `${import.meta.env.BASE_URL}assets/skills/${def.id}.gif`;
+    if (mediaImage.getAttribute('src') !== source) mediaImage.src = source;
 
     for (const [id, item] of items) {
       const current = id === def.id;

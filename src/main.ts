@@ -477,6 +477,22 @@ async function bootstrap(): Promise<void> {
    */
   const debugOverlay = import.meta.env.DEV && new URLSearchParams(window.location.search).has('debug');
 
+  /*
+   * 開發模式下的除錯把手：截圖／錄影腳本與 QA 要讀盤面（每顆的位置、等級）才不必靠猜，
+   * 而 `session` 本來就沒有對外入口。刻意**不**綁 `?debug=1` —— 那個參數會疊出除錯輔助線，
+   * 錄示意圖時不想把它們拍進去。正式建置不會留任何痕跡。
+   * A dev-only debug handle: screenshot/recording scripts and QA need to read the board (each
+   * body's position and level) instead of guessing, and `session` has no other way out. It is
+   * deliberately **not** tied to `?debug=1`, which draws the debug guides that should stay out of
+   * an illustration. A production build carries no trace of it.
+   */
+  if (import.meta.env.DEV) {
+    (window as unknown as { __endchi?: { session: GameSession; viewport: Viewport } }).__endchi = {
+      session,
+      viewport,
+    };
+  }
+
   const loop = new FrameLoop({
     viewport,
     session,
