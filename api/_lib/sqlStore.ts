@@ -161,8 +161,39 @@ export class SqlStore implements Store {
     });
   }
 
-  private async insertScore(tx: Driver, row: ScoreRow): Promise<boolean> {
-    const result = await tx.query(this.dialect.insertScore(), [
+  /**
+   * 同一局的即時更新：覆蓋數字、不新增一列；`created_at` 不動（它是速率限制視窗與審計的起點）。
+   * 被退回的更新整條跳過 —— 不合理的提交不該抹掉之前那筆已驗證的成績。
+   * A live update to the same run: overwrites the figures without adding a row; `created_at` stays
+   * put (it anchors the rate-limit window and the audit trail). A rejected update is skipped
+   * entirely — an implausible submission must not erase an earlier verified result.
+   */
+  async updateScore(row: ScoreRow): Promise<void> {
+    if (!row.verified) return;
+
+    await this.driver.transaction(async (tx) => {
+      const b = new Binder(this.dialect);
+
+      await tx.query(
+        `update scores set
+           display_name = ${b.bind(row.displayName)},
+           score = ${b.bind(row.score)},
+           duration_ms = ${b.bind(row.durationMs)},
+           merges = ${b.bind(row.merges)},
+           drops = ${b.bind(row.drops)},
+           max_combo = ${b.bind(row.maxCombo)},
+           version = ${b.bind(row.version)},
+           verified = ${b.bind(row.verified)},
+           rejected = ${b.bind(row.rejected)}
+         where run_id = ${b.bind(row.runId)} and device_id = ${b.bind(row.deviceId)}`,
+        b.params,
+      );
+
+      await this.upsertProfile(tx, row);
+    });
+  }
+
+  private async insertScore(tx: Driver, row: ScoreRow): Promise<boolean> {    const result = await tx.query(this.dialect.insertScore(), [
       row.runId,
       row.deviceId,
       row.displayName,

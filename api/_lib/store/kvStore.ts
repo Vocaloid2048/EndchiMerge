@@ -108,6 +108,28 @@ export class KvStore implements Store {
      * Submissions that failed the checks never enter the board. */
     if (!row.verified) return true;
 
+    await this.mergeProfile(row);
+
+    return true;
+  }
+
+  /*
+   * 同一局的即時更新：覆蓋數字而不是新增一列；`atMs` 保留首次提交的時間（與另外兩個 store 一致）。
+   * 被退回的更新整條跳過 —— 不合理的提交不該抹掉之前那筆已驗證的成績。
+   * A live update to the same run: overwrites the figures instead of adding a row, keeping the first
+   * submission's `atMs` (consistent with the other two stores). A rejected update is skipped
+   * entirely — an implausible submission must not erase an earlier verified result.
+   */
+  async updateScore(row: ScoreRow): Promise<void> {
+    const existing = await this.getScore(row.runId);
+    if (existing === null || existing.deviceId !== row.deviceId) return;
+    if (!row.verified) return;
+
+    await kv().put(SCORE_PREFIX + row.runId, JSON.stringify({ ...row, atMs: existing.atMs }));
+    await this.mergeProfile(row);
+  }
+
+  private async mergeProfile(row: ScoreRow): Promise<void> {
     const previous = await this.getProfile(row.deviceId);
     const userTag = await resolveUserTag({
       displayName: row.displayName,
@@ -119,8 +141,6 @@ export class KvStore implements Store {
     const updated = applyProfileUpdate(previous, row, userTag);
 
     await kv().put(PROFILE_PREFIX + row.deviceId, JSON.stringify(updated));
-
-    return true;
   }
 
   async getProfile(deviceId: string): Promise<ProfileRow | null> {

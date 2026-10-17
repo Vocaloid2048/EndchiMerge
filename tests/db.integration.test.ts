@@ -192,6 +192,56 @@ describe('SqlStore — 真的資料庫 / a real database', () => {
     expect(profile?.bestScore).toBe(900);
   });
 
+  /*
+   * 即時上載：同一局再送一次較高的分數，是原地更新那一列，`created_at` 不動，profile 往前推。
+   * Live upload: a higher score for the same run updates that row in place, `created_at` stays put,
+   * and the profile moves up.
+   */
+  it('updates the same run in place when a later submission is higher', async () => {
+    const device = deviceId('live-update');
+    const run = score(device, { score: 300, durationMs: 30_000, merges: 10, drops: 15, maxCombo: 3 });
+
+    expect(await store.saveScore(run)).toBe(true);
+
+    await store.updateScore({
+      ...run,
+      score: 900,
+      durationMs: 60_000,
+      merges: 30,
+      drops: 40,
+      maxCombo: 5,
+      atMs: AT + 30_000,
+    });
+
+    const stored = await store.getScore(run.runId);
+    expect(stored).toMatchObject({ score: 900, durationMs: 60_000, merges: 30, maxCombo: 5 });
+    /* `created_at` 不動：它錨住速率限制視窗與審計時間。 */
+    expect(stored?.atMs).toBe(AT);
+    expect((await store.getProfile(device))?.bestScore).toBe(900);
+  });
+
+  /*
+   * 被退回的更新不覆蓋之前那筆已驗證的成績。
+   * A rejected update never overwrites an earlier verified result.
+   */
+  it('leaves the stored row alone when the update is rejected', async () => {
+    const device = deviceId('live-rejected');
+    const run = score(device);
+
+    expect(await store.saveScore(run)).toBe(true);
+
+    await store.updateScore({
+      ...run,
+      score: 9_000_000,
+      verified: false,
+      rejected: 'score_above_ceiling',
+      atMs: AT + 1_000,
+    });
+
+    expect((await store.getScore(run.runId))?.score).toBe(900);
+    expect((await store.getProfile(device))?.bestScore).toBe(900);
+  });
+
   it('stores a rejected run without putting it on the board', async () => {
     const device = deviceId('rejected');
     const run = score(device, { score: 9_000_000, verified: false, rejected: 'score_above_ceiling' });

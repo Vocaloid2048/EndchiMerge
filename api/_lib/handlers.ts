@@ -231,16 +231,65 @@ export const handleScore: CoreHandler = async (request, deps) => {
     return { response: fail(401, 'bad_token', 'the token does not match this run'), deviceId, runId };
   }
 
-  /* 冪等：這一局已收過就回同一裁決，且放在**消耗憑證之前** —— 斷線重試時憑證早已標記用過。
-   * Idempotent: reuse the verdict, checked **before** the token is consumed, so retries still succeed. */
+  /*
+   * 同一局的再次提交：即時上載會在一局之內送很多次，所以「這一局已收過」不等於「可以忽略」。
+   * 已存在的紀錄改為**更新**（重新驗證一次，profile 仍是單調的），否則榜會永遠停在第一次中途
+   * 送出的分數 —— 那正是一局打到 81 卻只看到 34 的原因。
+   * A repeat for the same run: live uploads send many times within one run, so "already received" is
+   * not "ignore it". An existing row is **updated** instead (re-verified; the profile stays
+   * monotonic), otherwise the board would freeze at the first mid-run score — exactly why a run
+   * reaching 81 still showed 34.
+   *
+   * 只有通過檢查的更新才覆蓋：一筆被退回的提交不該抹掉之前那筆已驗證的成績。
+   * Only a passing update overwrites: a rejected submission must not erase an earlier verified one.
+   */
   const existing = await deps.store.getScore(runId);
   if (existing !== null) {
+    /* 憑證已驗過裝置，這一條只是防守：一局的成績不可能屬於兩個裝置。
+     * The token already pinned the device; this is a guard: one run cannot belong to two devices. */
+    if (existing.deviceId !== deviceId) {
+      return { response: fail(403, 'device_mismatch', 'this run belongs to another device'), deviceId, runId };
+    }
+
+    const durationVerdict = checkClaimedDuration(
+      durationMs,
+      tokenRow.issuedAtMs,
+      now,
+      CLOCK_TOLERANCE_MS,
+    );
+    const updateVerdict = durationVerdict.verified
+      ? checkRationality({ score, merges, drops, maxCombo, durationMs })
+      : durationVerdict;
+
+    if (updateVerdict.verified) {
+      await deps.store.updateScore({
+        runId,
+        deviceId,
+        displayName,
+        /* 只是一個提議；profile 已經有號就沿用（見下方 `saveScore` 的同一條規則）。 */
+        userTag: newUserTag(),
+        score,
+        durationMs,
+        merges,
+        drops,
+        maxCombo,
+        version,
+        verified: true,
+        rejected: null,
+        atMs: now,
+      });
+    } else {
+      console.error(
+        `[api] rejected update run=${runId} device=${deviceId} reason=${updateVerdict.reason}`,
+      );
+    }
+
     const profile = await deps.store.getProfile(deviceId);
 
     return {
       response: verdictResponse({
-        verified: existing.verified,
-        reason: existing.rejected,
+        verified: updateVerdict.verified,
+        reason: updateVerdict.verified ? null : updateVerdict.reason,
         bestScore: profile?.bestScore ?? 0,
         bestDurationMs: profile?.bestDurationMs ?? 0,
         bestMaxCombo: profile?.bestMaxCombo ?? 0,

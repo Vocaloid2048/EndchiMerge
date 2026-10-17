@@ -499,8 +499,8 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
   });
 
   /**
-   * 冪等：同一張憑證與同一個局號重送要拿回同一個裁決（先查既有成績，再驗 `used_at`）。
-   * Idempotent: the same token and run id return the same verdict (the stored score is checked before `used_at`).
+   * 重試：同一張憑證與同一個局號重送同一組數字，仍然只有一列、裁決一致（是更新而不是新增）。
+   * A retry: the same token, run id and numbers still yields one row and the same verdict (an update, not an insert).
    */
   it('returns the same verdict for a retry and does not double-count', async () => {
     const { deps, advance } = makeDeps();
@@ -517,6 +517,56 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
     expect(second.status).toBe(200);
     expect(second.body.verified).toBe(first.body.verified);
     expect(second.body.best).toEqual(first.body.best);
+  });
+
+  /**
+   * 即時上載：同一局中途再送一次較高的分數，榜要跟著升 —— 不是停在第一次那一筆。
+   * Live uploads: a higher score sent again for the same run must move the board, not freeze it.
+   */
+  it('updates the same run when a later submission is higher', async () => {
+    const { deps, store, advance } = makeDeps();
+
+    const started = await startRun(deps);
+    advance(60_000);
+
+    const early = await submitRun(deps, started, {
+      score: 300,
+      merges: 10,
+      drops: 15,
+      maxCombo: 3,
+      durationMs: 60_000,
+    });
+    expect(early.body.best.score).toBe(300);
+
+    advance(60_000);
+    const later = await submitRun(deps, started, GOOD_RUN);
+
+    expect(later.status).toBe(200);
+    expect(later.body.verified).toBe(true);
+    expect(later.body.best.score).toBe(900);
+    expect((await store.getScore(started.runId))?.score).toBe(900);
+    expect(((await board(deps)).body as { total: number }).total).toBe(1);
+  });
+
+  /**
+   * 被退回的更新不能抹掉之前那筆已驗證的成績。
+   * A rejected update must not erase an earlier verified result.
+   */
+  it('keeps the earlier result when a later update is rejected', async () => {
+    const { deps, store, advance } = makeDeps();
+
+    const started = await startRun(deps);
+    advance(60_000);
+
+    const early = await submitRun(deps, started, GOOD_RUN);
+    expect(early.body.best.score).toBe(900);
+
+    advance(1_000);
+    const bogus = await submitRun(deps, started, { ...GOOD_RUN, score: 9_000_000 });
+
+    expect(bogus.body.verified).toBe(false);
+    expect(bogus.body.best.score).toBe(900);
+    expect((await store.getScore(started.runId))?.score).toBe(900);
   });
 
   it('refuses a token that was consumed without a stored score', async () => {

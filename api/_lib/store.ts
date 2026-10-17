@@ -118,6 +118,16 @@ export interface Store {
    *   network retry cannot double-count.
    */
   saveScore(row: ScoreRow): Promise<boolean>;
+  /**
+   * 在同一局上覆寫數字（即時上載用）：不新增列，只把這一局推進到最新一次提交，並把 profile
+   * 往前推。未通過檢查的更新整條跳過（不抹掉之前那筆已驗證的成績）。`saveScore` 的冪等仍然
+   * 成立 —— 同一局永遠只有一列。
+   * Overwrites a run's figures in place (live uploads): no extra row, just the run advanced to its
+   * latest submission and the profile pushed forward. A rejected update is skipped entirely (it
+   * must not erase an earlier verified result). `saveScore`'s idempotency still holds — one run is
+   * always one row.
+   */
+  updateScore(row: ScoreRow): Promise<void>;
 
   getProfile(deviceId: string): Promise<ProfileRow | null>;
   /**
@@ -286,6 +296,30 @@ export class MemoryStore implements Store {
      */
     if (!row.verified) return true;
 
+    await this.mergeProfile(row);
+
+    return true;
+  }
+
+  /*
+   * 同一局的即時更新：覆蓋數字而不是新增一列；`atMs` 保留首次提交的時間（與 SQL 的 `created_at` 一致）。
+   * 被退回的更新**兩者都不動** —— 一筆不合理的提交不該抹掉之前那筆已驗證的成績（首次提交的退回
+   * 仍由 `saveScore` 留檔作審計）。
+   * A live update to the same run: overwrites the figures instead of adding a row, keeping the first
+   * submission's `atMs` (matching SQL's `created_at`). A rejected update **touches neither** — an
+   * implausible submission must not erase an earlier verified result (a rejected *first* submission
+   * is still recorded for audit by `saveScore`).
+   */
+  async updateScore(row: ScoreRow): Promise<void> {
+    const existing = this.scores.get(row.runId);
+    if (existing === undefined || existing.deviceId !== row.deviceId) return;
+    if (!row.verified) return;
+
+    this.scores.set(row.runId, { ...row, atMs: existing.atMs });
+    await this.mergeProfile(row);
+  }
+
+  private async mergeProfile(row: ScoreRow): Promise<void> {
     const previous = this.profiles.get(row.deviceId) ?? null;
     const userTag = await resolveUserTag({
       displayName: row.displayName,
@@ -297,8 +331,6 @@ export class MemoryStore implements Store {
     const updated = applyProfileUpdate(previous, row, userTag);
 
     this.profiles.set(row.deviceId, updated);
-
-    return true;
   }
 
   /** 這個「名字＋號」是不是已經被**別的**裝置佔用。 */
