@@ -109,9 +109,9 @@ export const ja: Messages = {
   'skillGuide.title': 'スキルの説明',
   'skillGuide.close': 'スキルの説明を閉じる',
   'skillGuide.groupPaid': '技力{cost}',
-  'skillGuide.groupFree': '無料スキル',
+  'skillGuide.groupSpecial': '特殊スキル',
   'skillGuide.cost': '技力{cost}を消費',
-  'skillGuide.costFree': '無料',
+  'skillGuide.costSpecial': '特殊スキル',
   'skillGuide.unlockSp': '技力が足りれば発動でき、使うとすぐロックされます。',
   'skillGuide.unlockSpent': 'このゲームで累計{threshold}技力を消費すると解放されます。',
   'skillGuide.unlockUses': 'このゲームで累計{threshold}回スキルを使うと解放されます。',
@@ -129,13 +129,13 @@ export const ja: Messages = {
   'skillGuide.desc.shake':
     '容器を左右に揺らして山をほぐし、粒を落ち着かせます。揺れている間はドロップできません。',
   'skillGuide.desc.reshuffle':
-    '容器を空にして、解放済みの方團團を{count}個もう一度落とします。一顆ずつ落とすので、重なり合ったり壁を抜けたりしません。',
+    '容器を空にして、解放済みの方團團を{count}個もう一度落とします。',
   'skillGuide.desc.fate_swap':
     '方團團をふたつ選び、位置と速度を入れ替えます。新しい位置に乗っている隣はそっと押しのけます。異なる二つが必要です。',
   'skillGuide.desc.shrink_all':
     '場のすべての方團團を半径{radius}まで小さくします（大きくはなりません）。すでに小さい粒はそのまま、あとで合成された粒は元の大きさです。',
   'skillGuide.desc.square_core':
-    'このゲーム中は、合成の辺の判定を sprite の輪郭ではなく中心の正方形で行います。当たり判定そのものが正方形になり、場にある粒も今後落ちる粒も切り替わります。ゲーム中に一度だけ。',
+    'このゲーム中は、合成の辺の判定を輪郭ではなく中心の正方形で行います。当たり判定そのものが正方形になり、場にある粒も今後落ちる粒も切り替わります。ゲーム中に一度だけ。',
 
   'settings.title': '設定',
   'settings.close': '設定を閉じる',

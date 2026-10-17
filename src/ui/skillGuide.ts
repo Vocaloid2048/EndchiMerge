@@ -121,7 +121,7 @@ export function createSkillGuide(options: SkillGuideOptions): SkillGuideView {
   root.append(card);
   host.append(root);
 
-  /* 依消耗分組：0 點（免費）在最前，其餘按點數遞增，組內保持 `skills.json` 的次序。 */
+  /* 依消耗分組：0 點（特殊技能：不扣技力、靠累計解鎖）在最前，其餘按點數遞增。 */
   const groups = new Map<number, SkillDef[]>();
   for (const def of skills) {
     const bucket = groups.get(def.cost);
@@ -146,7 +146,7 @@ export function createSkillGuide(options: SkillGuideOptions): SkillGuideView {
       const heading = el(
         'p',
         'skill-guide__group',
-        cost > 0 ? t('skillGuide.groupPaid', { cost }) : t('skillGuide.groupFree'),
+        cost > 0 ? t('skillGuide.groupPaid', { cost }) : t('skillGuide.groupSpecial'),
       );
       menu.append(heading);
 
@@ -184,7 +184,8 @@ export function createSkillGuide(options: SkillGuideOptions): SkillGuideView {
     }
 
     name.textContent = nameFor(def);
-    const costLine = def.cost > 0 ? t('skillGuide.cost', { cost: def.cost }) : t('skillGuide.costFree');
+    const costLine =
+      def.cost > 0 ? t('skillGuide.cost', { cost: def.cost }) : t('skillGuide.costSpecial');
     meta.textContent = `${costLine}・${unlockLine(def)}`;
 
     const key = DESC_KEYS[def.id];

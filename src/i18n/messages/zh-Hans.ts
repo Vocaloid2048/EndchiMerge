@@ -95,9 +95,9 @@ export const zhHans: Messages = {
   'skillGuide.title': '技能说明',
   'skillGuide.close': '关闭技能说明',
   'skillGuide.groupPaid': '{cost} 点技力',
-  'skillGuide.groupFree': '免费技能',
+  'skillGuide.groupSpecial': '特殊技能',
   'skillGuide.cost': '消耗 {cost} 点技力',
-  'skillGuide.costFree': '免费',
+  'skillGuide.costSpecial': '特殊技能',
   'skillGuide.unlockSp': '技力足够就能发动，用掉即时上锁。',
   'skillGuide.unlockSpent': '本局累计消耗 {threshold} 点技力后解锁。',
   'skillGuide.unlockUses': '本局累计施放 {threshold} 次技能后解锁。',
@@ -119,9 +119,9 @@ export const zhHans: Messages = {
   'skillGuide.desc.fate_swap':
     '点选两颗方团团，交换它们的位置与速度，并轻轻推开压在新位置上的邻居。需要两个不同的目标。',
   'skillGuide.desc.shrink_all':
-    '把场上所有方团团缩到半径 {radius}（只缩不放）。已经更小的不受影响，之后合成出来的仍是原本尺寸。',
+    '把场上所有方团团缩到半径 {radius}。已经更小的不受影响，之后合成出来的仍是原本尺寸。',
   'skillGuide.desc.square_core':
-    '本局改用核心正方形判定边缘，取代 sprite 轮廓：碰撞体本身就是正方形，已经在场上与之后投放的都会换过去。本局只准用一次。',
+    '本局改用核心正方形判定边缘，取代轮廓：碰撞体本身就是正方形，已经在场上与之后投放的都会换过去。本局只准用一次。',
 
   'settings.title': '设置',
   'settings.close': '关闭设置',

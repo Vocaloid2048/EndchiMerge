@@ -2,7 +2,7 @@
  * 「命運互換」：依序點選兩顆方團團，互換位置並擾動周邊（點選 2 顆）。
  * "Fate Swap": pick two dumplings in order, swap their positions and disturb the neighbours (pick-two targeting).
  *
- * 免費技能，以「累計消耗滿 6 點技力」解鎖；扣費與解鎖都在 `GameSession`／`SpResource`，這裡只做交換。
+ * 特殊技能，以「累計消耗滿 6 點技力」解鎖；扣費與解鎖都在 `GameSession`／`SpResource`，這裡只做交換。
  * A free skill unlocked by 6 cumulative SP spent; charging and unlocking live in `GameSession`/`SpResource` — this class only swaps.
  */
 

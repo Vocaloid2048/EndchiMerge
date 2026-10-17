@@ -85,7 +85,7 @@
   --color-badge-3: #ff8f8f;
   /*
    * 累計施放次數（`n/m`）專用：淺藍，與「消耗點數」的三級色分開 —— 它數的是次數，不是技力。
-   * 使用者定案：這個徽章原本跟著免費技能用綠色，看起來像「1 點技力」，改成淺藍才讀得懂。
+   * 使用者定案：這個徽章原本跟著特殊技能用綠色，看起來像「1 點技力」，改成淺藍才讀得懂。
    * Reserved for the cast-count badge (`n/m`): light blue, kept apart from the three cost tiers —
    * it counts casts, not SP. The user's decision: it used to share the free skill's green and
    * read like "1 SP", so light blue is what makes it legible.

@@ -109,9 +109,9 @@ export const en: Messages = {
   'skillGuide.title': 'Skill guide',
   'skillGuide.close': 'Close the skill guide',
   'skillGuide.groupPaid': '{cost} SP',
-  'skillGuide.groupFree': 'Free skills',
+  'skillGuide.groupSpecial': 'Special skills',
   'skillGuide.cost': 'Costs {cost} SP',
-  'skillGuide.costFree': 'Free',
+  'skillGuide.costSpecial': 'Special skill',
   'skillGuide.unlockSp': 'Ready whenever you can afford it, locked again once spent.',
   'skillGuide.unlockSpent': 'Unlocks after {threshold} SP spent this run.',
   'skillGuide.unlockUses': 'Unlocks after {threshold} skills cast this run.',
@@ -129,13 +129,13 @@ export const en: Messages = {
   'skillGuide.desc.shake':
     'Shakes the container side to side to loosen the pile and let the bodies settle again. No dropping while it shakes.',
   'skillGuide.desc.reshuffle':
-    'Clears the container and drops {count} unlocked dumplings again, one at a time, so they neither nest in each other nor squeeze through the walls.',
+    'Clears the container and drops {count} unlocked dumplings again.',
   'skillGuide.desc.fate_swap':
     'Pick two dumplings and swap their positions and velocities, nudging whatever sits on the new spots. Needs two distinct targets.',
   'skillGuide.desc.shrink_all':
-    'Shrinks every dumpling on the board to radius {radius}; it never enlarges. Bodies already smaller are left alone, and anything merged later keeps its normal size.',
+    'Shrinks every dumpling on the board to radius {radius}. Bodies already smaller are left alone, and anything merged later keeps its normal size.',
   'skillGuide.desc.square_core':
-    'This run judges merge edges by the core square instead of the sprite outline: the collider itself becomes a square, for bodies already on the board and for later drops alike. Once per run.',
+    'This run judges merge edges by the core square instead of the outline: the collider itself becomes a square, for bodies already on the board and for later drops alike. Once per run.',
 
   'settings.title': 'Settings',
   'settings.close': 'Close settings',

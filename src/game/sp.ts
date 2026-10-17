@@ -135,7 +135,7 @@ export class SpResource {
   }
 
   /**
-   * 把累計消耗歸零（免費技能用完後重新上鎖）；**不動**目前值與臨時上限。
+   * 把累計消耗歸零（特殊技能用完後重新上鎖）；**不動**目前值與臨時上限。
    * Clear the cumulative-spend total; leaves the current value and any temporary cap alone.
    */
   resetSpent(): void {

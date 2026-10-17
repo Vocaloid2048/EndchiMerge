@@ -267,7 +267,7 @@ export interface SkillCardState {
   progress: number;
   /**
    * 這個技能靠什麼解鎖。`sp` ＝ 技力足夠；`cumulativeSpent` ＝ 累計消耗達標；
-   * `cumulativeUses` ＝ 本局累計施放次數達標。後兩者都是免費技能。
+   * `cumulativeUses` ＝ 本局累計施放次數達標。後兩者都是特殊技能。
    * What gates this skill: `sp` (enough SP), `cumulativeSpent` (a running spend total), or
    * `cumulativeUses` (a running cast count). The latter two are free skills.
    *
@@ -346,7 +346,7 @@ export class GameSession implements SkillBoard {
   /* ---------------------------------------------------------------- 技力與技能 */
   /** 技力資源（累積、扣費、臨時上限）。 */
   private readonly sp: SpResource;
-  /** 技能清單，順序由 `configLoader` 排好（前三個收費、免費技能殿後）。 */
+  /** 技能清單，順序由 `configLoader` 排好（收費技能在前、特殊技能殿後）。 */
   private readonly skills: readonly Skill[];
   private readonly skillsById: ReadonlyMap<string, Skill>;
   /**
@@ -412,7 +412,7 @@ export class GameSession implements SkillBoard {
    * How many times skills have been cast this run (the gate for `cumulativeUses`).
    *
    * 與 `SpResource.cumulativeSpent` 不同：那一支數的是花掉的技力點數，這一支數的是「按了幾次」，
-   * 所以免費技能也會計入。
+   * 所以特殊技能也會計入。
    * Unlike `SpResource.cumulativeSpent`, which counts SP points, this counts activations — so
    * free skills count too.
    */
@@ -1086,7 +1086,7 @@ export class GameSession implements SkillBoard {
     skill.apply(this, targets);
 
     /*
-     * 施放次數：每一次成功施放都算一次，包含免費技能（它們不扣技力，但仍然「用了技能」）。
+     * 施放次數：每一次成功施放都算一次，包含特殊技能（它們不扣技力，但仍然「用了技能」）。
      * 以次數解鎖的技能用掉之後歸零，於是重新上鎖 —— 與 `cumulativeSpent` 的節奏一致。
      * Cast count: every successful cast counts, free skills included (they cost no SP but are
      * still "used"). A uses-gated skill zeroes the count once used, so it locks again — the same
@@ -1099,7 +1099,7 @@ export class GameSession implements SkillBoard {
     if (skill.oncePerRun) this.spentOnce.add(skill.id);
 
     /*
-     * 以累計消耗解鎖的免費技能（命運互換）用掉之後，累計歸零 → 重新上鎖（使用者定案）。
+     * 以累計消耗解鎖的特殊技能（命運互換）用掉之後，累計歸零 → 重新上鎖（使用者定案）。
      * A free skill gated by cumulative spend (fate swap) resets the running total once used, so
      * it locks again (the user's decision).
      */

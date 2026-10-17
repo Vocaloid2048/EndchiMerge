@@ -123,9 +123,9 @@ export const zhHant = {
   'skillGuide.title': '技能說明',
   'skillGuide.close': '關閉技能說明',
   'skillGuide.groupPaid': '{cost} 點技力',
-  'skillGuide.groupFree': '免費技能',
+  'skillGuide.groupSpecial': '特殊技能',
   'skillGuide.cost': '消耗 {cost} 點技力',
-  'skillGuide.costFree': '免費',
+  'skillGuide.costSpecial': '特殊技能',
   'skillGuide.unlockSp': '技力足夠就能發動，用掉即時上鎖。',
   'skillGuide.unlockSpent': '本局累計消耗 {threshold} 點技力後解鎖。',
   'skillGuide.unlockUses': '本局累計施放 {threshold} 次技能後解鎖。',
@@ -143,13 +143,13 @@ export const zhHant = {
   'skillGuide.desc.shake':
     '容器左右搖晃，把堆疊搖散、讓顆粒重新落位。搖晃期間不能投放。',
   'skillGuide.desc.reshuffle':
-    '清空容器，再重新落下 {count} 顆已解鎖的方團團。逐顆落下，所以不會互相嵌入或擠穿牆壁。',
+    '清空容器，再重新落下 {count} 顆已解鎖的方團團。',
   'skillGuide.desc.fate_swap':
     '點選兩顆方團團，交換它們的位置與速度，並輕輕推開壓在新位置上的鄰居。需要兩個不同的目標。',
   'skillGuide.desc.shrink_all':
-    '把場上所有方團團縮到半徑 {radius}（只縮不放）。已經更小的不受影響，之後合成出來的仍是原本尺寸。',
+    '把場上所有方團團縮到半徑 {radius}。已經更小的不受影響，之後合成出來的仍是原本尺寸。',
   'skillGuide.desc.square_core':
-    '本局改用核心正方形判定邊緣，取代 sprite 輪廓：碰撞體本身就是正方形，已經在場上與之後投放的都會換過去。本局只准用一次。',
+    '本局改用核心正方形判定邊緣，取代輪廓：碰撞體本身就是正方形，已經在場上與之後投放的都會換過去。本局只准用一次。',
 
   /* ── 設定彈窗 / Settings popup ─────────────────────────────────── */
   'settings.title': '設定',

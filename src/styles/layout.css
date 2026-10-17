@@ -709,7 +709,7 @@
  * 累計施放次數型（`n/m` 是次數）：獨立一色，蓋過上面的消耗分級。
  * The cast-count badge (`n/m` counts casts): its own colour, overriding the cost tiers above.
  *
- * 它總是免費技能（`cost: 0`），若沿用免費的綠色，玩家會把 `0/8` 讀成「技力 0 點」。
+ * 它總是特殊技能（`cost: 0`），若沿用同為 `cost: 0` 的綠色，玩家會把 `0/8` 讀成「技力 0 點」。
  * It is always a free skill (`cost: 0`); reusing the free-tier green makes `0/8` read as
  * "0 SP" instead of "no casts yet".
  */
