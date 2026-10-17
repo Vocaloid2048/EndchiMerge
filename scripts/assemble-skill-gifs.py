@@ -35,7 +35,9 @@ BACKDROP = ROOT / "public" / "assets" / "ui" / "background.webp"
 WIDTHS = {
     "combo_grace": 560,
     "reshuffle": 500,
-    "square_core": 640,
+    # 以方代圓整塊畫布進圖，碰撞體那幾個點佔的比例很小，所以輸出寬一點。
+    # Square Rule shows the whole canvas and the collider dots are a tiny part of it, so it renders wider.
+    "square_core": 760,
 }
 DEFAULT_WIDTH = 560
 FPS = 12
@@ -158,7 +160,6 @@ def build(skill_id: str, directory: Path) -> tuple[int, int, int]:
         raise SystemExit(f"{skill_id}: no frames")
 
     meta = json.loads((directory / "meta.json").read_text(encoding="utf-8"))
-    crop = meta.get("crop")
     page_shot = meta.get("mode") == "page"
 
     width = WIDTHS.get(skill_id, DEFAULT_WIDTH)
@@ -166,17 +167,6 @@ def build(skill_id: str, directory: Path) -> tuple[int, int, int]:
 
     for file in files:
         image = Image.open(file)
-        if crop is not None:
-            pixels = image.size
-            image = image.crop(
-                (
-                    round(pixels[0] * crop["x"]),
-                    round(pixels[1] * crop["y"]),
-                    round(pixels[0] * (crop["x"] + crop["w"])),
-                    round(pixels[1] * (crop["y"] + crop["h"])),
-                )
-            )
-
         if page_shot:
             image = image.convert("RGB")
         else:

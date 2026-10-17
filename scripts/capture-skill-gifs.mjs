@@ -392,7 +392,6 @@ const SCENARIOS = [
     /* 先看盤面怎麼落成，再看到同一批顆粒的碰撞體被換掉 —— 否則「換了」沒有參照物。 */
     /* See the board settle first, then watch the same bodies swap colliders; otherwise "changed" has nothing to compare against. */
     lead: true,
-    crop: { x: 0.1, y: 0.62, w: 0.8, h: 0.38 },
     hold: 90,
     async setup() {
       for (const fx of [0.3, 0.44, 0.58, 0.72, 0.38]) await drop(fx);
@@ -411,18 +410,16 @@ for (const scenario of SCENARIOS) {
   if (only !== undefined && only !== scenario.id) continue;
 
   const context = await makePage(scenario.query ?? '');
-  const clip = await page.evaluate(({ region, crop }) => {
+  /*
+   * 取景一律是**整塊畫布**：GIF 要能完整裝進彈窗的媒體框（`object-fit: contain`），
+   * 任何預先裁掉的邊都會變成「有些東西永遠看不到」。
+   * Every clip is the **whole canvas**: the GIF has to fit inside the popup's media frame
+   * (`object-fit: contain`), and anything cropped away up front can never be seen.
+   */
+  const clip = await page.evaluate((region) => {
     const canvas = document.querySelector('canvas').getBoundingClientRect();
     if (region === null) {
-      if (crop === null) {
-        return { x: canvas.x, y: canvas.y, width: canvas.width, height: canvas.height };
-      }
-      return {
-        x: canvas.x + canvas.width * crop.x,
-        y: canvas.y + canvas.height * crop.y,
-        width: canvas.width * crop.w,
-        height: canvas.height * crop.h,
-      };
+      return { x: canvas.x, y: canvas.y, width: canvas.width, height: canvas.height };
     }
     const extra = document.querySelector(`[data-region="${region}"]`).getBoundingClientRect();
     const x = Math.min(canvas.x, extra.x);
@@ -433,7 +430,7 @@ for (const scenario of SCENARIOS) {
       width: Math.max(canvas.x + canvas.width, extra.x + extra.width) - x,
       height: Math.max(canvas.y + canvas.height, extra.y + extra.height) - y,
     };
-  }, { region: scenario.region ?? null, crop: scenario.crop ?? null });
+  }, scenario.region ?? null);
 
   const dir = path.join(OUT, scenario.id);
   fs.rmSync(dir, { recursive: true, force: true });
@@ -502,7 +499,6 @@ for (const scenario of SCENARIOS) {
       height: window.innerHeight,
     })),
     mode: scenario.mode ?? 'canvas',
-    crop: scenario.crop ?? null,
     count: { before: before.bodies.length, after: after.bodies.length },
     levels: { before: before.bodies.map((b) => b.levelId), after: after.bodies.map((b) => b.levelId) },
     radii: { before: before.bodies.map((b) => Math.round(b.radius)), after: after.bodies.map((b) => Math.round(b.radius)) },
