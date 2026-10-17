@@ -598,8 +598,16 @@ async function bootstrap(): Promise<void> {
        * `recordScore()` returns immediately when the score does not lead, so calling it
        * every frame is cheap; `updateHud()` must run *after* it so the HUD picks up the
        * new best within the same frame.
+       *
+       * 無盡局不記最高分（使用者定案）：開過無盡的那一局 `rankEligible` 永遠是 false，
+       * BEST TRY 就凍結在開局前的基準 —— 不被刷高、也不隱藏。與 `recordRun()` 用同一個旗標，
+       * 兩條路（本機最高分、上傳）才不會各說各話。
+       * An endless run never records a high score (the user's decision): `rankEligible` stays
+       * false for the whole run once endless opened, so BEST TRY freezes at the pre-run baseline —
+       * neither raised nor hidden. The same flag as `recordRun()`, keeping the two write paths
+       * (local high score, upload) in agreement.
        */
-      progress.recordScore(current.score);
+      if (session.rankEligible) progress.recordScore(current.score);
 
       /*
        * 本機紀錄邊玩邊更新（使用者定案）：只升不降，沒有刷新時立刻返回，所以每幀呼叫是便宜
