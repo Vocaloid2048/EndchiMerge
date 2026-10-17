@@ -90,12 +90,15 @@ export const en: Messages = {
 
   'skillHint.discard': 'Cast Off: pick the dumpling to remove',
   'skillHint.fate_swap': 'Fated Exchange: pick two dumplings to swap',
+  'skillHint.ascend': 'One Step Up: pick the dumpling to promote',
   'skillHint.generic': 'Pick a dumpling',
   'skillHint.counter': '{base} ({selected}/{total}) · click empty space to cancel',
 
   'skillBar.cumulative': 'SP spent this run',
+  'skillBar.uses': 'skills cast',
   'skillBar.free': 'Free',
   'skillBar.ariaCumulative': '{name} (SP spent this run {spent}/{threshold}, free)',
+  'skillBar.ariaCumulativeUses': '{name} ({uses}/{threshold} skills cast, free)',
   'skillBar.ariaCost': '{name} (costs {cost} SP)',
   'skillBar.ariaLocked': '{name} (locked)',
 

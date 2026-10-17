@@ -168,7 +168,7 @@ describe('loadConfig — 檔案層級的降級 / file-level fallback', () => {
     const config = await loadConfig({ ...OPTIONS, fetcher: throwing, onWarn: warn });
 
     expect(config.levels.levels).toHaveLength(10);
-    expect(config.skills.skills).toHaveLength(4);
+    expect(config.skills.skills).toHaveLength(10);
     expect(messages.some((message) => message.includes('could not be fetched'))).toBe(true);
   });
 });

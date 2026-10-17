@@ -76,12 +76,15 @@ export const zhHans: Messages = {
 
   'skillHint.discard': '当弃即弃：点选要弃掉的方团团',
   'skillHint.fate_swap': '命运互换：点选两颗方团团交换位置',
+  'skillHint.ascend': '一步登天：点选要升级的方团团',
   'skillHint.generic': '点选方团团',
   'skillHint.counter': '{base}（{selected}/{total}）· 点击空白处取消',
 
   'skillBar.cumulative': '累计使用技力',
+  'skillBar.uses': '累计使用技能',
   'skillBar.free': '免',
   'skillBar.ariaCumulative': '{name}（累计使用技力 {spent}/{threshold}，免费）',
+  'skillBar.ariaCumulativeUses': '{name}（累计使用技能 {uses}/{threshold}，免费）',
   'skillBar.ariaCost': '{name}（消耗 {cost} 技力）',
   'skillBar.ariaLocked': '{name}（未解锁）',
 

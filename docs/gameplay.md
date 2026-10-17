@@ -333,17 +333,21 @@ spawnY        = frame.y - dropAboveRim          // container.json，預設 40（
 
 ### 6.2 解鎖：看的是**當前值**，用掉即時上鎖
 
-| `unlock.kind`     | 條件                       | 用於              |
-| ----------------- | ------------------------ | --------------- |
-| `sp`              | 當前技力 ≥ 該技能的 `cost`       | 當棄即棄！／協議：浮動／搖晃！ |
-| `cumulativeSpent` | **本局累計消耗** ≥ `threshold` | 命運互換（免費，門檻 6）   |
+| `unlock.kind`     | 條件                       | 用於                        |
+| ----------------- | ------------------------ | ------------------------- |
+| `sp`              | 當前技力 ≥ 該技能的 `cost`       | 當棄即棄！／一步登天／浮動／乾坤挪移／連勢不墜／搖晃！／天翻地覆 |
+| `cumulativeSpent` | **本局累計消耗** ≥ `threshold` | 命運互換（免費，門檻 6）             |
+| `cumulativeUses`  | **本局累計施放技能次數** ≥ `threshold` | 縮地成寸（免費，8 次）／以方代圓（免費，12 次） |
 
 技力計本身就是解鎖器：看「當前值」而不是「歷史最高值」，花掉就上鎖。  
 未解鎖的技能卡被一層灰遮罩蓋住，遮罩上顯示**還差多少**（收費技能＝當前值佔比，  
-累計消耗型＝累計消耗佔比）。
+累計型＝累計值佔比）。
 
 `cumulativeSpent` 型的技能**用完之後累計歸零**（`SpResource.resetSpent()`），所以它會重新上鎖，  
 下一次要再存滿 6 點才能用。`resetSpent()` 只清累計，**不動**當前值與臨時上限。
+
+`cumulativeUses` 數的是**施放次數**而不是點數，所以免費技能也會計入；用掉之後次數歸零
+（`GameSession.skillUses`），同樣重新上鎖。它與 `cumulativeSpent` 的差別只在分子的來源。
 
 ### 6.3 扣費時機：效果成功執行才扣
 
@@ -430,11 +434,50 @@ spawnY        = frame.y - dropAboveRim          // container.json，預設 40（
 兩顆的**位置與速度一起**交換（只換位置會讓兩顆立刻沿舊慣性跑回去，看起來像沒換成功），  
 再對壓在新位置上的鄰居施加擾動（`disturbance` = 6）。需要**兩個相異目標**，否則不作用。
 
+**一步登天**（`ascend`，cost 1，點選 1 顆）  
+把選中的一顆升到 `mergeResult` 的下一級：移除舊剛體、以新等級重建、接回位置／角度／速度。  
+**只接受「下一級已在圖鑑解鎖」的目標** —— 過濾發生在**收下點擊之前**（`Skill.canPick()`），  
+所以點到不能升的顆粒時選取模式保持、技力一點都沒扣。已在鏈頂（`mergeResult` 為 `null`）亦不受理。  
+升級**不計分、不計連擊、不給技力** —— 它是購買，不是合成。
+
+> 被「縮地成寸」縮過的顆粒升完級仍然保持小尺寸：玩家買的是「這一顆變小」，不該因升級彈回原尺寸。
+
+**乾坤挪移**（`scramble`，cost 2，即時）  
+把所有顆粒的**既有位置**重新洗牌（Fisher–Yates），再把落點各自夾回空腔。洗的是位置的多重集合，  
+不是隨機新座標 —— 重疊量因此只來自大小差異，而不是「三顆大顆粒被丟到同一點」。  
+速度與角速度一律歸零，否則每顆會沿舊慣性滑回原位、看起來像沒生效。  
+重排後做**一次**兩兩拆解（圓形近似，位移上限 `SCRAMBLE_SEPARATION_MAX` = 24），再整體夾回空腔：  
+不讓求解器從「深度嵌入」開始解算，那正是整箱被彈飛的原因。
+
+**天翻地覆**（`reshuffle`，cost 3，即時）  
+清空棋盤，再降下 `params.count`（預設 30）顆。**逐顆**放出，間隔 `RAIN_INTERVAL_MS`（40ms），  
+且每顆比前一顆高 `RAIN_STAGGER`（8 單位）：三十顆同時生成會互相嵌進對方，求解器只能高速彈開、  
+甚至擠穿薄牆。等級按掉落權重從**已解鎖且可投放**的池子抽（`SpawnQueue.candidates`）。  
+降下的顆粒**照常碰撞與合成**，沒有額外限制。它是唯一可以在**空盤**上發動的技能。
+
+**連勢不墜**（`combo_grace`，cost 2，即時）  
+接下來 `params.drops`（預設 3）次投放即使零合成，也**不**把連擊串長歸零。  
+次數掛在 `GameSession.comboGraceDrops`，由 `drop()` 在讀完「上一顆有沒有合成」之後扣一次 ——  
+護盾的單位是**投放**而不是**失敗**，所以有合成的投放同樣消耗一次額度。  
+重複施放取較大值而非累加：「接下來 N 次投放」是覆寫語意。
+
+**縮地成寸**（`shrink_all`，免費，`cumulativeUses` 8）  
+把場上所有顆粒縮到 `params.radius`（預設 37.5），**只縮不放**：比目標小的不動。  
+縮小是重建剛體（輪廓按 `radius / level.radius` 等比縮放），並改寫 `Entry.radius` ——  
+繪製縮放、命中判定、溢位判定、合成推擠全部讀這個欄位，所以視覺與碰撞體一起變小。  
+等級不變，因此合成鏈、分數與圖鑑仍然照等級走。
+
+**以方代圓**（`square_core`，免費，`cumulativeUses` 12）  
+本局改用**核心正方形**判定合成邊緣，取代 sprite 輪廓。正方形邊長 `2r`（＝素材那塊方形身體的外框），  
+隨剛體角度旋轉，再交給原本那套「邊緣間隙 ≤ `MERGE_OUTLINE_GAP`」的幾何判定 —— 只是餵給它的  
+多邊形由輪廓換成四邊形。它是**本局**的規則改寫，`reset()` 會還原，不會跟著玩家跨局。
+
 ### 6.6 架構：技能透過窄介面作用於棋盤
 
-`src/game/skills/` 是 `Skill` 抽象基底 ＋ 四個子類別 ＋ `SKILL_CLASSES` registry；  
+`src/game/skills/` 是 `Skill` 抽象基底 ＋ 十個子類別 ＋ `SKILL_CLASSES` registry；  
 技能只透過 **`SkillBoard` 窄介面**（`targets` / `removeTarget` / `swapTargets` / `floatAll` /  
-`shakeContainer` / `overflowLineY` / `containerWidth`）作用，`GameSession` 是唯一實作者。
+`shakeContainer` / `upgradeTarget` / `scrambleTargets` / `reshuffle` / `protectCombo` /  
+`shrinkAll` / `useSquareMerge` / `overflowLineY` / `containerWidth`）作用，`GameSession` 是唯一實作者。
 
 好處是「新增技能 = 新增一個 class ＋ 登記 ＋ 一筆 JSON」，**核心迴圈與 Matter.js 都不用碰**；  
 技能也無法偷偷改到棋盤的其他狀態。`skills.json` 的 id 對不上任何 class 時**略過並警告**，  

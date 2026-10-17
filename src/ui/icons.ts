@@ -36,9 +36,15 @@ const ASSET_ICON_FILES: Record<AssetIconName, string> = {
  */
 export const ICON_NAMES = [
   'discard',
+  'ascend',
   'float',
+  'scramble',
+  'comboGrace',
   'shake',
+  'reshuffle',
   'fateSwap',
+  'shrink',
+  'squareCore',
   /**
    * 技能欄的備援字形：技能 id 對不上任何圖示時用說明鍵頂上。
    * The skill bar's fallback glyph: the help icon stands in when no id matches.
@@ -69,6 +75,26 @@ const ICON_PATHS: Record<IconName, string> = {
   /* Fate Swap: two arrows flowing in opposite directions. */
   fateSwap:
     '<path d="M6.5 8.5h11l-3-3"/><path d="M17.5 15.5h-11l3 3"/>',
+  /* 一步登天：拾級而上的階梯箭頭。 */
+  /* One Step Up: a staircase arrow. */
+  ascend: '<path d="M4 18.5h5v-5h5v-5h6"/><path d="M17 5.5l3 3M20 8.5l-3 3"/>',
+  /* 乾坤挪移：交錯的洗牌箭頭。 */
+  /* Shifting Ground: crossing shuffle arrows. */
+  scramble:
+    '<path d="M4 7h4l8 10h4"/><path d="M4 17h4l8-10h4"/><path d="M17.5 4.5l2.5 2.5-2.5 2.5"/><path d="M17.5 14.5l2.5 2.5-2.5 2.5"/>',
+  /* 連勢不墜：護盾。 */
+  /* Chain Ward: a shield. */
+  comboGrace: '<path d="M12 4l7 2.8v5.4c0 3.8-2.9 6.2-7 7.8-4.1-1.6-7-4-7-7.8V6.8z"/>',
+  /* 天翻地覆：循環重來的箭頭。 */
+  /* Clean Slate: a reset arrow. */
+  reshuffle: '<path d="M19.5 12a7.5 7.5 0 1 1-2.4-5.5"/><path d="M19.5 4.5V9h-4.5"/>',
+  /* 縮地成寸：向內收攏的四角。 */
+  /* Fold Space: four corners pulled inward. */
+  shrink:
+    '<path d="M9.5 9.5L4 4"/><path d="M4 9V4h5"/><path d="M14.5 14.5L20 20"/><path d="M20 15v5h-5"/>',
+  /* 以方代圓：圓中取方。 */
+  /* Square Rule: a square inside a circle. */
+  squareCore: '<circle cx="12" cy="12" r="8.5"/><rect x="8" y="8" width="8" height="8" rx="1.2"/>',
 };
 
 /**

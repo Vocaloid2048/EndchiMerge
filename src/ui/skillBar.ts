@@ -18,9 +18,15 @@ import { createIcon, type IconName } from './icons';
  */
 const SKILL_ICONS: Readonly<Record<string, IconName>> = {
   discard: 'discard',
+  ascend: 'ascend',
   protocol_float: 'float',
+  scramble: 'scramble',
+  combo_grace: 'comboGrace',
   shake: 'shake',
+  reshuffle: 'reshuffle',
   fate_swap: 'fateSwap',
+  shrink_all: 'shrink',
+  square_core: 'squareCore',
 };
 
 /**
@@ -74,12 +80,16 @@ interface CardNodes {
 }
 
 /**
- * 徽章文字：收費技能是消耗數字，累計消耗型是 `n/m`（累計值四捨五入到整數）。
- * The badge text: a paid skill shows its cost, a cumulative-spend skill shows `n/m` (the running total rounded to an integer).
+ * 徽章文字：收費技能是消耗數字；累計型是 `n/m`（累計消耗四捨五入到整數，累計次數本身已是整數）。
+ * The badge text: a paid skill shows its cost, a cumulative one shows `n/m` (the running spend
+ * rounded, the cast count already an integer).
  */
 function badgeTextFor(state: SkillCardState): string {
   if (state.unlockKind === 'cumulativeSpent') {
     return `${String(Math.round(state.cumulativeSpent))}/${String(state.unlockThreshold)}`;
+  }
+  if (state.unlockKind === 'cumulativeUses') {
+    return `${String(state.cumulativeUses)}/${String(state.unlockThreshold)}`;
   }
   if (state.cost > 0) return BADGE_GLYPHS[state.cost] ?? String(state.cost);
   return t('skillBar.free');
@@ -149,7 +159,12 @@ export function createSkillBar(options: SkillBarOptions): SkillBar {
        */
       const badgeText = badgeTextFor(state);
       const name = nameFor(state);
-      const captionText = state.unlockKind === 'cumulativeSpent' ? t('skillBar.cumulative') : '';
+      const captionText =
+        state.unlockKind === 'cumulativeSpent'
+          ? t('skillBar.cumulative')
+          : state.unlockKind === 'cumulativeUses'
+            ? t('skillBar.uses')
+            : '';
       const signature = [
         name,
         badgeText,
@@ -191,9 +206,15 @@ export function createSkillBar(options: SkillBarOptions): SkillBar {
               spent: Math.round(state.cumulativeSpent),
               threshold: state.unlockThreshold,
             })
-          : state.unlocked
-            ? t('skillBar.ariaCost', { name, cost: state.cost })
-            : t('skillBar.ariaLocked', { name });
+          : state.unlockKind === 'cumulativeUses'
+            ? t('skillBar.ariaCumulativeUses', {
+                name,
+                uses: state.cumulativeUses,
+                threshold: state.unlockThreshold,
+              })
+            : state.unlocked
+              ? t('skillBar.ariaCost', { name, cost: state.cost })
+              : t('skillBar.ariaLocked', { name });
       nodes.root.setAttribute('aria-label', label);
       nodes.root.title = label;
     }

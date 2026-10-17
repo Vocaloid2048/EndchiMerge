@@ -61,9 +61,15 @@ const DEFAULT_SP: SpSettings = {
 
 const DEFAULT_SKILLS: readonly SkillDef[] = [
   { id: 'discard', name: '當棄即棄！', cost: 1, targeting: 'user_pick', pickCount: 1, unlock: { kind: 'sp' }, params: {} },
+  { id: 'ascend', name: '一步登天', cost: 1, targeting: 'user_pick', pickCount: 1, unlock: { kind: 'sp' }, params: {} },
   { id: 'protocol_float', name: '協議：浮動', cost: 2, targeting: 'immediate', pickCount: 0, unlock: { kind: 'sp' }, params: { durationMs: 1500, liftFactor: 1.6 } },
+  { id: 'scramble', name: '乾坤挪移', cost: 2, targeting: 'immediate', pickCount: 0, unlock: { kind: 'sp' }, params: {} },
+  { id: 'combo_grace', name: '連勢不墜', cost: 2, targeting: 'immediate', pickCount: 0, unlock: { kind: 'sp' }, params: { drops: 3 } },
   { id: 'shake', name: '搖晃！', cost: 3, targeting: 'immediate', pickCount: 0, unlock: { kind: 'sp' }, params: { durationMs: 2000, revolutions: 5, radiusFactor: 0.12, axisTiltDeg: 15, upwardFactor: 0.1 } },
+  { id: 'reshuffle', name: '天翻地覆', cost: 3, targeting: 'immediate', pickCount: 0, unlock: { kind: 'sp' }, params: { count: 30 } },
   { id: 'fate_swap', name: '命運互換', cost: 0, targeting: 'user_pick', pickCount: 2, unlock: { kind: 'cumulativeSpent', threshold: 6 }, params: { disturbance: 6 } },
+  { id: 'shrink_all', name: '縮地成寸', cost: 0, targeting: 'immediate', pickCount: 0, unlock: { kind: 'cumulativeUses', threshold: 8 }, params: { radius: 37.5 } },
+  { id: 'square_core', name: '以方代圓', cost: 0, targeting: 'immediate', pickCount: 0, unlock: { kind: 'cumulativeUses', threshold: 12 }, params: {} },
 ];
 
 const DEFAULT_CONTAINER: ContainerConfig = {
@@ -352,11 +358,15 @@ function sanitizeParams(raw: unknown, fallback: SkillParams, section: string, wa
   return {
     durationMs: optional('durationMs', fallback.durationMs),
     liftFactor: optional('liftFactor', fallback.liftFactor),
+    catchupFactor: optional('catchupFactor', fallback.catchupFactor),
     revolutions: optional('revolutions', fallback.revolutions),
     radiusFactor: optional('radiusFactor', fallback.radiusFactor),
     axisTiltDeg: optional('axisTiltDeg', fallback.axisTiltDeg),
     upwardFactor: optional('upwardFactor', fallback.upwardFactor),
     disturbance: optional('disturbance', fallback.disturbance),
+    count: optional('count', fallback.count),
+    drops: optional('drops', fallback.drops),
+    radius: optional('radius', fallback.radius),
   };
 }
 
@@ -374,13 +384,17 @@ function sanitizeUnlock(raw: unknown, fallback: SkillUnlock | undefined, section
   const kind = raw['kind'];
   if (kind === 'sp') return { kind: 'sp' };
 
-  if (kind === 'cumulativeSpent') {
+  if (kind === 'cumulativeSpent' || kind === 'cumulativeUses') {
     const threshold = raw['threshold'];
     if (typeof threshold === 'number' && Number.isFinite(threshold) && threshold > 0) {
-      return { kind: 'cumulativeSpent', threshold };
+      return kind === 'cumulativeSpent'
+        ? { kind: 'cumulativeSpent', threshold }
+        : { kind: 'cumulativeUses', threshold };
     }
     warn(`${section}.unlock.threshold is invalid (${JSON.stringify(threshold)}); using 1.`);
-    return { kind: 'cumulativeSpent', threshold: 1 };
+    return kind === 'cumulativeSpent'
+      ? { kind: 'cumulativeSpent', threshold: 1 }
+      : { kind: 'cumulativeUses', threshold: 1 };
   }
 
   warn(`${section}.unlock.kind is invalid (${JSON.stringify(kind)}); using the default unlock.`);
@@ -556,9 +570,10 @@ function checkSkillUnlockability(skills: SkillsConfig, warn: ConfigWarning): voi
  */
 function checkFreeSkillCost(skills: SkillsConfig, warn: ConfigWarning): void {
   for (const skill of skills.skills) {
-    if (skill.unlock.kind === 'cumulativeSpent' && skill.cost > 0) {
+    if (skill.unlock.kind === 'sp') continue;
+    if (skill.cost > 0) {
       warn(
-        `skill "${skill.id}" is gated by cumulative spend but still costs ${skill.cost} SP; it is meant to be free.`,
+        `skill "${skill.id}" is gated by ${skill.unlock.kind} but still costs ${skill.cost} SP; it is meant to be free.`,
       );
     }
   }

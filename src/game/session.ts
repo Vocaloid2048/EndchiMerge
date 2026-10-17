@@ -49,6 +49,58 @@ import type { SilhouetteCache } from '../render/silhouetteLoader';
 const FALL_OUT_MARGIN = 400;
 
 /**
+ * 「天翻地覆」逐顆降下之間的間隔，毫秒。
+ * The gap between consecutive dumplings rained down by "Clean Slate", in ms.
+ *
+ * 三十顆同時出現在同一個高度會互相嵌進對方，求解器只能把它們高速彈開、甚至擠穿薄牆。逐顆
+ * 降下讓每顆都有機會先落在堆疊上，讀起來也才是「落雨」而不是「爆炸」。
+ * Thirty bodies spawned at one height interpenetrate, and the solver can only fling them apart
+ * or push them through the thin walls. Releasing them one at a time lets each land on the pile
+ * first, and reads as rain rather than an explosion.
+ */
+const RAIN_INTERVAL_MS = 40;
+
+/**
+ * 每一顆「天翻地覆」顆粒比前一顆高出的距離，虛擬單位。
+ * How much higher each successive "Clean Slate" dumpling starts, in virtual units.
+ *
+ * 三十顆乘起來仍然遠低於 `FALL_OUT_MARGIN`（400），所以最上面那顆不會一出生就被回收。
+ * Thirty of them stay well below `FALL_OUT_MARGIN` (400), so even the topmost one is not
+ * recycled the moment it appears.
+ */
+const RAIN_STAGGER = 8;
+
+/**
+ * 「乾坤挪移」重排後拆解重疊時，單顆的最大位移，虛擬單位。
+ * The largest displacement a single body may receive while resolving scrambles, in virtual units.
+ *
+ * 重排只是在既有位置之間換位，重疊深度本來就有限；設上限是為了讓「極端大小差」不會把顆粒
+ * 一次推到容器另一端。
+ * A scramble only permutes existing spots, so overlaps are bounded; the cap keeps an extreme
+ * size mismatch from launching a body across the container.
+ */
+const SCRAMBLE_SEPARATION_MAX = 24;
+
+/**
+ * 「核心正方形」的四個角（區域座標）：邊長 2r，正是 sprite 那塊方形身體的外框。
+ * The four corners of the "core square" (local space): side 2r, matching the sprite's square body box.
+ *
+ * 用正方形而不是內接正方形，因為素材的身體本來就是方的 —— 玩家看到的邊界就是這四條邊。
+ * A circumscribing square rather than an inscribed one, because the artwork's body is already
+ * square: these four edges are the boundary the player sees.
+ */
+function coreSquare(radius: number): { x: number; y: number }[] {
+  const r = Math.max(0, radius);
+
+  return [
+    { x: -r, y: -r },
+    { x: r, y: -r },
+    { x: r, y: r },
+    { x: -r, y: r },
+  ];
+}
+
+/**
  * 解鎖來源；`game/progress.ts` 的 `ProgressStore` 在結構上滿足這個介面。
  * The unlock source; `ProgressStore` from `game/progress.ts` satisfies it structurally.
  */
@@ -65,6 +117,17 @@ export interface UnlockSource {
 interface Entry {
   body: Matter.Body;
   level: LevelDef;
+  /**
+   * 這一顆**實際**的碰撞／繪製半徑，虛擬單位。
+   * The body's **effective** collision and drawing radius, in virtual units.
+   *
+   * 平常等於 `level.radius`；被「縮地成寸」縮小之後就小於它，而等級不變 —— 合成鏈、分數與
+   * 圖鑑都仍照等級走。任何「這顆多大」的判斷都應該讀這裡，不是 `level.radius`。
+   * Normally `level.radius`; after "Fold Space" it is smaller while the level stays the same, so
+   * the merge chain, scoring and collection all still follow the level. Every "how big is this
+   * body" question must read this field, never `level.radius`.
+   */
+  radius: number;
   /**
    * 出生時刻（模擬毫秒）。同時服務兩件事：合成的**冷卻**，以及彈跳動畫的**起點**。
    * Birth time in simulated ms; it serves both the merge cooldown and the pop animation.
@@ -176,39 +239,31 @@ export interface SkillCardState {
   targeting: 'user_pick' | 'immediate';
   /** 需要點選幾顆。 */
   pickCount: number;
-  /** 現在可不可以按（技力夠／累計消耗夠）。 */
+  /** 現在可不可以按（技力夠／累計消耗夠／累計施放次數夠）。 */
   unlocked: boolean;
   /** 解鎖進度 `0..1`，供遮罩顯示還差多少。 */
   progress: number;
   /**
-   * 這個技能靠什麼解鎖。`sp` ＝ 技力足夠；`cumulativeSpent` ＝ 累計消耗達標（免費技能）。
-   * What gates this skill: `sp` (enough SP) or `cumulativeSpent` (a free skill whose running
-   * total must reach a threshold).
+   * 這個技能靠什麼解鎖。`sp` ＝ 技力足夠；`cumulativeSpent` ＝ 累計消耗達標；
+   * `cumulativeUses` ＝ 本局累計施放次數達標。後兩者都是免費技能。
+   * What gates this skill: `sp` (enough SP), `cumulativeSpent` (a running spend total), or
+   * `cumulativeUses` (a running cast count). The latter two are free skills.
    *
    * UI 靠它決定徽章要顯示什麼：收費技能顯示消耗數字，累計型顯示 `n/m` 進度。
    * The UI uses it to decide the badge: a paid skill shows its cost, a cumulative one shows
    * `n/m` progress.
    */
-  unlockKind: 'sp' | 'cumulativeSpent';
+  unlockKind: 'sp' | 'cumulativeSpent' | 'cumulativeUses';
   /** 累計消耗型：當前累計值（分子 `n`）；其餘為 0。 */
   cumulativeSpent: number;
-  /** 累計消耗型：解鎖門檻（分母 `m`）；其餘為 0。 */
+  /** 累計施放型：本局已施放次數（分子 `n`）；其餘為 0。 */
+  cumulativeUses: number;
+  /** 累計型的解鎖門檻（分母 `m`）；其餘為 0。 */
   unlockThreshold: number;
   /** 這個技能是否正在選取中。 */
   active: boolean;
   /** 選取中已經點了幾顆。 */
   selectedCount: number;
-}
-
-/** 把內部項目轉成技能看得懂的目標（只暴露它需要的欄位）。 */
-function toBoardTarget(entry: Entry): BoardTarget {
-  return {
-    id: entry.body.id,
-    levelId: entry.level.id,
-    x: entry.body.position.x,
-    y: entry.body.position.y,
-    radius: entry.level.radius,
-  };
 }
 
 export interface GameSessionOptions {
@@ -244,6 +299,11 @@ export class GameSession implements SkillBoard {
   private readonly config: AllConfig;
   private readonly physics: Physics;
   private readonly spawnQueue: SpawnQueue;
+  /**
+   * 這一局共用的亂數來源；掉落佇列與技能（重排、降下）用同一條序列。
+   * The run's single random source; the spawn queue and skills (scramble, rain) share one sequence.
+   */
+  private readonly rng: Rng;
   private readonly levels: readonly LevelDef[];
   private readonly unlocks: UnlockSource | undefined;
   private readonly mergeCooldownMs: number;
@@ -304,6 +364,39 @@ export class GameSession implements SkillBoard {
   private appliedGravityY: number;
   /** 溢位暫停到這個時刻為止（浮動期間 ＋ 結束後緩衝）。 */
   private overflowPauseUntilMs = 0;
+
+  /**
+   * 連擊護盾剩餘的投放次數（「連勢不墜」）；0 ＝ 沒有護盾。
+   * Drops left on the combo shield ("Chain Ward"); 0 means no shield.
+   *
+   * 只影響「斷連」那一步：有護盾時，一顆零合成的投放不會把 `combo` 歸零，但次數照樣扣 ——
+   * 護盾保護的是「接下來 N 次投放」，不是「接下來 N 次失敗」。
+   * It only affects the break: with a shield, a drop that merged nothing leaves `combo` alone,
+   * yet the counter still ticks down — the shield covers "the next N drops", not "the next N failures".
+   */
+  private comboGraceDrops = 0;
+
+  /**
+   * 本局累計**施放**技能的次數（供 `cumulativeUses` 型技能解鎖）。
+   * How many times skills have been cast this run (the gate for `cumulativeUses`).
+   *
+   * 與 `SpResource.cumulativeSpent` 不同：那一支數的是花掉的技力點數，這一支數的是「按了幾次」，
+   * 所以免費技能也會計入。
+   * Unlike `SpResource.cumulativeSpent`, which counts SP points, this counts activations — so
+   * free skills count too.
+   */
+  private skillUsesValue = 0;
+
+  /**
+   * 合成邊緣判定是否已改用「核心正方形」（「以方代圓」，本局持續）。
+   * Whether merge-edge detection uses the core square for the rest of this run.
+   */
+  private squareMerge = false;
+
+  /** 「天翻地覆」還剩幾顆未降下、已降幾顆，以及累積的時間。 */
+  private rainRemaining = 0;
+  private rainSpawned = 0;
+  private rainAccumulatorMs = 0;
 
   private geometry: ContainerGeometry;
   private cavity: Rect;
@@ -414,9 +507,10 @@ export class GameSession implements SkillBoard {
     this.dropCooldownMs = Math.max(0, this.config.levels.settings.dropCooldownMs);
 
     this.physics = new Physics({ gravityY: this.config.levels.settings.gravityY });
+    this.rng = options.rng ?? createRng(options.seed ?? 1);
     this.spawnQueue = new SpawnQueue({
       levels: this.levels,
-      rng: options.rng ?? createRng(options.seed ?? 1),
+      rng: this.rng,
       unlocked: this.unlocks?.unlocked,
     });
     this.combo = new ComboTracker();
@@ -667,7 +761,7 @@ export class GameSession implements SkillBoard {
     if (this.config.levels.settings.lockRotation) lockRotation(body);
 
     this.physics.add(body);
-    this.addEntry({ body, level, bornAtMs: this.elapsedMs });
+    this.addEntry({ body, level, radius: level.radius, bornAtMs: this.elapsedMs });
 
     /*
      * 連勝（streak）：**上一顆什麼都沒合成才中斷**。
@@ -689,7 +783,21 @@ export class GameSession implements SkillBoard {
      * drop starts blank). Clearing first would let a drop break its own streak.
      */
     this.lastDropAtMs = this.elapsedMs;
-    if (this.dropMergeCountValue === 0) this.combo.reset();
+
+    /*
+     * 連擊護盾（「連勢不墜」）：有護盾時，一顆零合成的投放**不**歸零串長，但護盾次數照樣扣。
+     *
+     * 先讀護盾再扣，否則「最後一次」會變成沒保護到。護盾只在斷連那一步改變結果；一顆有合成
+     * 的投放本來就不會歸零，但仍消耗一次額度 —— 護盾的單位是「投放」而不是「失敗」。
+     * Combo shield ("Chain Ward"): with charges left, a drop that merged nothing does **not**
+     * zero the chain, but a charge is still spent. Read before decrementing, or the last covered
+     * drop would go unprotected. The shield changes only the break; a drop that merged still
+     * spends a charge, because its unit is the drop, not the failure.
+     */
+    const shielded = this.comboGraceDrops > 0;
+    if (this.dropMergeCountValue === 0 && !shielded) this.combo.reset();
+    if (shielded) this.comboGraceDrops -= 1;
+
     this.dropMergeCountValue = 0;
     this.dropScoreValue = 0;
     /* 累計投入量（見 `totalDropsValue`）：**只有真的投出去才加**，冷卻擋掉的呼叫走不到這裡。 */
@@ -781,7 +889,8 @@ export class GameSession implements SkillBoard {
       progress: this.unlockProgress(skill),
       unlockKind: skill.unlock.kind,
       cumulativeSpent: skill.unlock.kind === 'cumulativeSpent' ? this.sp.cumulativeSpent : 0,
-      unlockThreshold: skill.unlock.kind === 'cumulativeSpent' ? skill.unlock.threshold : 0,
+      cumulativeUses: skill.unlock.kind === 'cumulativeUses' ? this.skillUsesValue : 0,
+      unlockThreshold: skill.unlock.kind === 'sp' ? 0 : skill.unlock.threshold,
       active: this.activeSkill === skill,
       selectedCount: this.activeSkill === skill ? this.selectedIds.length : 0,
     }));
@@ -839,12 +948,13 @@ export class GameSession implements SkillBoard {
     if (!this.isUnlocked(skill)) return false;
 
     /*
-     * 場上沒有方團團時任何技能都沒有意義（浮動／搖晃沒有對象、當棄即棄沒有目標），
-     * 所以一律不受理 —— 免得白白扣掉技力。
-     * With an empty board no skill means anything (nothing to float, shake or discard), so every
-     * one of them is refused rather than silently charging SP for nothing.
+     * 場上沒有方團團時多數技能都沒有意義（浮動／搖晃沒有對象、當棄即棄沒有目標），所以一律不受理
+     * —— 免得白白扣掉技力。只有「先清空再補滿」的技能（天翻地覆）例外，它自己會造出對象。
+     * With an empty board most skills mean nothing (nothing to float, shake or discard), so they
+     * are refused rather than silently charging SP. Only a skill that clears and refills the board
+     * is exempt, because it creates its own targets.
      */
-    if (this.entries.length === 0) return false;
+    if (this.entries.length === 0 && !skill.allowsEmptyBoard) return false;
 
     if (skill.requiresTargets) {
       this.activeSkill = skill;
@@ -901,13 +1011,22 @@ export class GameSession implements SkillBoard {
       return;
     }
 
+    /*
+     * 不合格的目標直接忽略（例如「一步登天」點到已達頂級、或下一級未解鎖的顆粒）：
+     * 選取模式保持，玩家可以改點另一顆，而且因為還沒施放，技力一點都沒扣。
+     * An ineligible target is ignored (e.g. "One Step Up" on a maxed or locked dumpling): the
+     * selection stays open so the player can pick another, and since nothing was cast, no SP
+     * has been spent.
+     */
+    if (!skill.canPick(this.toBoardTarget(hit))) return;
+
     this.selectedIds.push(hit.body.id);
     if (this.selectedIds.length < skill.pickCount) return;
 
     const picks = this.selectedIds
       .map((id) => this.entryByBodyId(id))
       .filter((entry): entry is Entry => entry !== undefined)
-      .map((entry) => toBoardTarget(entry));
+      .map((entry) => this.toBoardTarget(entry));
 
     this.castSkill(skill, picks);
   }
@@ -921,6 +1040,16 @@ export class GameSession implements SkillBoard {
     if (!this.sp.spend(skill.cost)) return;
 
     skill.apply(this, targets);
+
+    /*
+     * 施放次數：每一次成功施放都算一次，包含免費技能（它們不扣技力，但仍然「用了技能」）。
+     * 以次數解鎖的技能用掉之後歸零，於是重新上鎖 —— 與 `cumulativeSpent` 的節奏一致。
+     * Cast count: every successful cast counts, free skills included (they cost no SP but are
+     * still "used"). A uses-gated skill zeroes the count once used, so it locks again — the same
+     * rhythm as `cumulativeSpent`.
+     */
+    this.skillUsesValue += 1;
+    if (skill.unlock.kind === 'cumulativeUses') this.skillUsesValue = 0;
 
     /*
      * 以累計消耗解鎖的免費技能（命運互換）用掉之後，累計歸零 → 重新上鎖（使用者定案）。
@@ -938,6 +1067,9 @@ export class GameSession implements SkillBoard {
     if (skill.unlock.kind === 'cumulativeSpent') {
       return this.sp.cumulativeSpent + 1e-9 >= skill.unlock.threshold;
     }
+    if (skill.unlock.kind === 'cumulativeUses') {
+      return this.skillUsesValue + 1e-9 >= skill.unlock.threshold;
+    }
     return this.sp.canAfford(skill.cost);
   }
 
@@ -947,6 +1079,11 @@ export class GameSession implements SkillBoard {
       const threshold = skill.unlock.threshold;
       if (threshold <= 0) return 1;
       return Math.min(1, this.sp.cumulativeSpent / threshold);
+    }
+    if (skill.unlock.kind === 'cumulativeUses') {
+      const threshold = skill.unlock.threshold;
+      if (threshold <= 0) return 1;
+      return Math.min(1, this.skillUsesValue / threshold);
     }
     if (skill.cost <= 0) return 1;
     return Math.min(1, this.sp.current / skill.cost);
@@ -970,7 +1107,7 @@ export class GameSession implements SkillBoard {
       const dx = entry.body.position.x - x;
       const dy = entry.body.position.y - y;
       const distance = Math.hypot(dx, dy);
-      const reach = entry.level.radius * HIT_SLACK;
+      const reach = entry.radius * HIT_SLACK;
 
       if (distance > reach) continue;
       if (distance >= bestDistance) continue;
@@ -990,12 +1127,48 @@ export class GameSession implements SkillBoard {
 
   /** 場上所有可被選取的方團團（`SkillBoard` 的視角）。 */
   get targets(): readonly BoardTarget[] {
-    return this.entries.map((entry) => toBoardTarget(entry));
+    return this.entries.map((entry) => this.toBoardTarget(entry));
   }
 
   /** 容器寬度（搖晃半徑的基準）。 */
   get containerWidth(): number {
     return this.geometry.frame.width;
+  }
+
+  /**
+   * 把內部項目轉成技能看得懂的目標（只暴露它需要的欄位）。
+   * Project an internal entry into the target shape a skill understands.
+   *
+   * `nextLevelUnlocked` 由這裡算：技能不認識圖鑑也不認識解鎖來源，它只需要知道「能不能升」。
+   * `nextLevelUnlocked` is computed here: a skill knows neither the collection nor the unlock
+   * source — it only needs to know whether promotion is allowed.
+   */
+  private toBoardTarget(entry: Entry): BoardTarget {
+    const nextLevelId = entry.level.mergeResult;
+
+    return {
+      id: entry.body.id,
+      levelId: entry.level.id,
+      x: entry.body.position.x,
+      y: entry.body.position.y,
+      radius: entry.radius,
+      nextLevelId,
+      nextLevelUnlocked: nextLevelId !== null && this.isLevelUnlocked(nextLevelId),
+    };
+  }
+
+  /**
+   * 某一級在圖鑑裡是否已解鎖；沒有解鎖來源時一律視為已解鎖（測試與無存檔場合）。
+   * Whether a level is unlocked in the collection; without an unlock source everything counts
+   * as unlocked (tests and runs without a save).
+   */
+  private isLevelUnlocked(levelId: number): boolean {
+    return this.unlocks === undefined || this.unlocks.has(levelId);
+  }
+
+  /** 場上目前有幾顆；技能用它在「空盤」時乾脆不發動。 */
+  get targetCount(): number {
+    return this.entries.length;
   }
 
   /** 移除一顆方團團（「當棄即棄！」）。 */
@@ -1076,11 +1249,11 @@ export class GameSession implements SkillBoard {
     /* 目的地各自按**抵達那顆**的半徑夾回空腔 —— 半徑不同時大顆不會被塞進貼牆的小位。 */
     Matter.Body.setPosition(
       first.body,
-      this.clampIntoCavity(first.level.radius, secondPosition),
+      this.clampIntoCavity(first.radius, secondPosition),
     );
     Matter.Body.setPosition(
       second.body,
-      this.clampIntoCavity(second.level.radius, firstPosition),
+      this.clampIntoCavity(second.radius, firstPosition),
     );
     Matter.Body.setVelocity(first.body, secondVelocity);
     Matter.Body.setVelocity(second.body, firstVelocity);
@@ -1112,7 +1285,7 @@ export class GameSession implements SkillBoard {
         const dx = entry.body.position.x - moved.body.position.x;
         const dy = entry.body.position.y - moved.body.position.y;
         const distance = Math.hypot(dx, dy);
-        const reach = entry.level.radius + moved.level.radius;
+        const reach = entry.radius + moved.radius;
 
         if (distance >= reach) continue;
 
@@ -1124,6 +1297,273 @@ export class GameSession implements SkillBoard {
         break;
       }
     }
+  }
+
+  /* ------------------------------------------------------------ 新技能動作 */
+
+  /**
+   * 把一顆方團團換成另一個等級（或同一等級的另一個半徑），位置、角度、速度原樣接過去。
+   * Rebuild a dumpling as another level (or the same level at another radius), carrying over
+   * position, angle and velocity.
+   *
+   * **必須重建而不能只改 `entry.level`**：碰撞體是由等級的半徑與輪廓建出來的，只換等級會留下
+   * 一個尺寸與外觀不符的剛體。重建時 `byBodyId` 也要換鍵 —— 舊 id 之後不會再有任何事件。
+   * **It must rebuild rather than only reassign `entry.level`**: the collider was built from that
+   * level's radius and outline, so a bare reassignment leaves a body whose size contradicts its
+   * artwork. The `byBodyId` key moves too, because the old id will never appear again.
+   */
+  private respawnEntry(entry: Entry, level: LevelDef, radius: number): void {
+    const x = entry.body.position.x;
+    const y = entry.body.position.y;
+    const angle = entry.body.angle;
+    const velocity = { x: entry.body.velocity.x, y: entry.body.velocity.y };
+
+    this.physics.remove(entry.body);
+    this.byBodyId.delete(entry.body.id);
+    this.pops.delete(entry.body.id);
+
+    const body = this.createBody(level, x, y, level.id, radius);
+    if (this.config.levels.settings.lockRotation) lockRotation(body);
+
+    Matter.Body.setAngle(body, angle);
+    Matter.Body.setVelocity(body, velocity);
+    this.physics.add(body);
+
+    entry.body = body;
+    entry.level = level;
+    entry.radius = radius;
+    /*
+     * 出生時刻重新起算：換了剛體就等於換了一顆，合成冷卻從現在開始 —— 否則「升級」的瞬間
+     * 就可能被判成可合成，變成一次免費連鎖。
+     * Birth time restarts: a new body is a new body, so the merge cooldown begins now; otherwise
+     * the instant of an upgrade could already read as mergeable and become a free chain.
+     */
+    entry.bornAtMs = this.elapsedMs;
+
+    this.byBodyId.set(body.id, entry);
+  }
+
+  /** 把一顆方團團升一級（「一步登天」）；已達頂級或下一級未解鎖時回傳 `false`。 */
+  upgradeTarget(id: number): boolean {
+    const entry = this.byBodyId.get(id);
+    if (entry === undefined) return false;
+
+    const nextId = entry.level.mergeResult;
+    if (nextId === null) return false;
+    if (!this.isLevelUnlocked(nextId)) return false;
+
+    const level = this.levelDef(nextId);
+    /*
+     * 半徑：沒被縮小過就採用新等級的自然大小；被「縮地成寸」縮過的維持那個小尺寸 ——
+     * 玩家買的是「這一顆變小」，不該因為升級而悄悄彈回原尺寸。
+     * Radius: an unshrunk body takes the new level's natural size; a shrunken one keeps its
+     * smaller size, because what was bought is this body being small.
+     */
+    const shrunk = entry.radius < entry.level.radius - 1e-6;
+    const radius = shrunk ? Math.min(level.radius, entry.radius) : level.radius;
+
+    this.respawnEntry(entry, level, radius);
+    this.wakeAll();
+
+    return true;
+  }
+
+  /**
+   * 隨機重排場上所有方團團的位置（「乾坤挪移」）。
+   * Randomly permute the positions of every dumpling ("Shifting Ground").
+   *
+   * **洗的是既有位置而不是隨機新座標**：位置的多重集合不變，重疊量就只來自「大小不同」，
+   * 而不是「三顆大顆粒被丟到同一個點」。速度與角速度一律歸零 —— 保留舊慣性會讓重排看起來
+   * 像沒生效（每顆都往原位滑回去）。
+   * **It shuffles the existing spots rather than drawing new coordinates**: the multiset of
+   * positions is preserved, so any overlap comes from size differences rather than three large
+   * bodies landing on one point. Velocities are zeroed: keeping the old momentum would make each
+   * body drift back and the scramble read as a no-op.
+   */
+  scrambleTargets(): void {
+    if (this.entries.length < 2) return;
+
+    const spots = this.entries.map((entry) => ({
+      x: entry.body.position.x,
+      y: entry.body.position.y,
+    }));
+
+    /* Fisher–Yates：原地洗牌，每個排列等概率。 */
+    for (let i = spots.length - 1; i > 0; i -= 1) {
+      const j = this.rng.int(i + 1);
+      const current = spots[i] as { x: number; y: number };
+      spots[i] = spots[j] as { x: number; y: number };
+      spots[j] = current;
+    }
+
+    this.entries.forEach((entry, index) => {
+      const spot = spots[index] as { x: number; y: number };
+
+      Matter.Body.setPosition(entry.body, this.clampIntoCavity(entry.radius, spot));
+      Matter.Body.setVelocity(entry.body, { x: 0, y: 0 });
+      Matter.Body.setAngularVelocity(entry.body, 0);
+    });
+
+    this.separateOverlaps();
+    this.wakeAll();
+  }
+
+  /**
+   * 一次性拆解重疊：把每一對互相嵌入的顆粒各推開一半的重疊深度。
+   * A one-off overlap resolution: every interpenetrating pair is pushed apart by half the depth.
+   *
+   * 只在重排之後跑一次，用圓形近似即可 —— 目的是讓求解器不必從「深度嵌入」開始解算，那正是
+   * 整箱被彈飛的原因。
+   * Runs once after a scramble; the circle approximation suffices, because the point is to keep
+   * the solver from starting inside a deep interpenetration — which is exactly what flings the box.
+   */
+  private separateOverlaps(): void {
+    const entries = this.entries;
+
+    for (let i = 0; i < entries.length; i += 1) {
+      const a = entries[i];
+      if (a === undefined) continue;
+
+      for (let j = i + 1; j < entries.length; j += 1) {
+        const b = entries[j];
+        if (b === undefined) continue;
+
+        const dx = b.body.position.x - a.body.position.x;
+        const dy = b.body.position.y - a.body.position.y;
+        const distance = Math.hypot(dx, dy);
+        const reach = a.radius + b.radius;
+
+        if (distance >= reach) continue;
+
+        const half = Math.min(reach - distance, SCRAMBLE_SEPARATION_MAX) / 2;
+        /* 同心時沒有連心線可用，挑一條固定方向分開。 */
+        const nx = distance > 1e-6 ? dx / distance : 1;
+        const ny = distance > 1e-6 ? dy / distance : 0;
+
+        Matter.Body.translate(a.body, { x: -nx * half, y: -ny * half });
+        Matter.Body.translate(b.body, { x: nx * half, y: ny * half });
+      }
+    }
+
+    /* 推開之後可能已經越界，最後統一夾回空腔。 */
+    for (const entry of this.entries) {
+      Matter.Body.setPosition(
+        entry.body,
+        this.clampIntoCavity(entry.radius, entry.body.position),
+      );
+    }
+  }
+
+  /**
+   * 清空棋盤再降下 `count` 顆（「天翻地覆」）；顆粒逐顆落下，見 `emitRain()`。
+   * Clear the board and rain down `count` dumplings ("Clean Slate"); they arrive one at a time,
+   * see `emitRain()`.
+   */
+  reshuffle(count: number): void {
+    this.physics.removeDynamicBodies();
+    this.entries = [];
+    this.byBodyId.clear();
+    this.pops.clear();
+    this.pendingMerges = [];
+    this.stepClaimed.clear();
+
+    this.rainRemaining = Math.max(0, Math.floor(count));
+    this.rainAccumulatorMs = 0;
+    this.rainSpawned = 0;
+  }
+
+  /**
+   * 依固定間隔把「天翻地覆」的顆粒一顆一顆放出來。
+   * Release the "Clean Slate" dumplings one at a time at a fixed interval.
+   *
+   * 逐顆而不是一次三十顆：同時生成會互相嵌入，求解器只能高速彈開、甚至擠穿薄牆。每一顆
+   * 也稍為高一點（`RAIN_STAGGER`），讓落下的隊列在畫面上看得出層次。
+   * One at a time rather than thirty at once: simultaneous spawning interpenetrates and the
+   * solver can only fling bodies apart or push them through the thin walls. Each spawns slightly
+   * higher (`RAIN_STAGGER`), so the falling column reads as a queue.
+   */
+  private emitRain(dt: number): void {
+    if (this.rainRemaining <= 0) return;
+
+    this.rainAccumulatorMs += dt;
+
+    while (this.rainRemaining > 0 && this.rainAccumulatorMs >= RAIN_INTERVAL_MS) {
+      this.rainAccumulatorMs -= RAIN_INTERVAL_MS;
+      this.spawnRainOne();
+      this.rainRemaining -= 1;
+      this.rainSpawned += 1;
+    }
+  }
+
+  /** 放出一顆「天翻地覆」的顆粒：等級按掉落權重抽，落點按瞄準範圍隨機。 */
+  private spawnRainOne(): void {
+    const candidates = this.spawnQueue.candidates;
+    if (candidates.length === 0) return;
+
+    const level = this.rng.pickWeighted(candidates, (item) => item.spawnWeight);
+    const minX = this.cavity.x + level.radius;
+    const maxX = this.cavity.x + this.cavity.width - level.radius;
+    const x = minX + this.rng.next() * Math.max(0, maxX - minX);
+
+    /*
+     * 越後面的顆粒起點越高，避免它們在同一高度互相生成。上限刻意遠小於
+     * `FALL_OUT_MARGIN`，否則最上面那幾顆一出生就被 `recycle()` 當成離場回收。
+     * Later bodies start higher so they do not spawn on top of each other. The offset stays far
+     * below `FALL_OUT_MARGIN`, or the topmost few would be recycled the instant they appear.
+     */
+    const y = this.spawnYValue - this.rainSpawned * RAIN_STAGGER;
+
+    const body = this.createBody(level, x, y, level.id);
+    if (this.config.levels.settings.lockRotation) lockRotation(body);
+
+    this.physics.add(body);
+    this.addEntry({ body, level, radius: level.radius, bornAtMs: this.elapsedMs });
+  }
+
+  /**
+   * 接下來 `drops` 次投放不會打斷連擊（「連勢不墜」）。
+   * Protect the combo chain for the next `drops` drops ("Chain Ward").
+   *
+   * 取較大值而非累加：按兩次不該變成六次，「接下來 N 次投放」是覆寫語意。
+   * Takes the larger value rather than adding: pressing twice must not mean six drops.
+   */
+  protectCombo(drops: number): void {
+    this.comboGraceDrops = Math.max(this.comboGraceDrops, Math.max(1, Math.floor(drops)));
+  }
+
+  /**
+   * 把場上所有方團團縮到 `radius`（只縮不放）。
+   * Shrink every dumpling on the board to `radius`, never enlarge.
+   */
+  shrinkAll(radius: number): void {
+    if (!Number.isFinite(radius) || radius <= 0) return;
+
+    for (const entry of this.entries) {
+      if (entry.radius <= radius + 1e-6) continue;
+      this.respawnEntry(entry, entry.level, radius);
+    }
+
+    this.wakeAll();
+  }
+
+  /** 本局改用核心正方形判定合成邊緣（「以方代圓」）；重複呼叫無副作用。 */
+  useSquareMerge(): void {
+    this.squareMerge = true;
+  }
+
+  /** 連擊護盾還剩幾次投放；供 HUD 或測試查詢。 */
+  get comboGrace(): number {
+    return this.comboGraceDrops;
+  }
+
+  /** 本局累計施放技能的次數。 */
+  get skillUses(): number {
+    return this.skillUsesValue;
+  }
+
+  /** 本局是否已改用核心正方形判定合成。 */
+  get squareMergeEnabled(): boolean {
+    return this.squareMerge;
   }
 
   /**
@@ -1392,7 +1832,7 @@ export class GameSession implements SkillBoard {
     for (const entry of this.entries) {
       const body = entry.body;
       /* 上緣仍低於帶底 ＝ 還沒抵達天花板，補一把最低上升速度。 */
-      if (body.position.y - entry.level.radius <= bandBottom) continue;
+      if (body.position.y - entry.radius <= bandBottom) continue;
 
       /* 叫醒：syncCeiling 每步已叫醒一次，這裡再補一道，確保這一步的速度會被積分。 */
       if (body.isSleeping) Matter.Sleeping.set(body, false);
@@ -1443,9 +1883,9 @@ export class GameSession implements SkillBoard {
     for (const entry of this.entries) {
       const body = entry.body;
       /* 上緣仍在餘裕內（或根本在平面下方）＝ 貼住或遠離，不動。 */
-      if (body.position.y - entry.level.radius >= ceilingY - CEILING_CONTAIN_SLACK) continue;
+      if (body.position.y - entry.radius >= ceilingY - CEILING_CONTAIN_SLACK) continue;
 
-      Matter.Body.setPosition(body, { x: body.position.x, y: ceilingY + entry.level.radius });
+      Matter.Body.setPosition(body, { x: body.position.x, y: ceilingY + entry.radius });
       Matter.Body.setVelocity(body, {
         x: body.velocity.x,
         y: Math.max(0, body.velocity.y),
@@ -1613,7 +2053,7 @@ export class GameSession implements SkillBoard {
     const ceilingY = this.ceilingY;
 
     for (const entry of this.entries) {
-      const ceiling = ceilingY + entry.level.radius;
+      const ceiling = ceilingY + entry.radius;
       const { y } = entry.body.position;
       if (y >= ceiling) continue;
 
@@ -1655,8 +2095,15 @@ export class GameSession implements SkillBoard {
    * rather than silently swapping in a different friction and restitution.
    *
    * @param labelBodyId 標籤用的等級編號（除錯時看得出這顆是哪一級）。
+   * @param radius 實際碰撞半徑；省略時用等級自己的半徑（被「縮地成寸」縮小的顆粒會傳小值）。
    */
-  private createBody(level: LevelDef, x: number, y: number, labelBodyId: number): Matter.Body {
+  private createBody(
+    level: LevelDef,
+    x: number,
+    y: number,
+    labelBodyId: number,
+    radius: number = level.radius,
+  ): Matter.Body {
     const material = {
       density: level.density,
       restitution: level.restitution,
@@ -1668,12 +2115,25 @@ export class GameSession implements SkillBoard {
 
     const polygon = this.silhouettes?.get(level.id);
     if (polygon !== undefined && polygon !== null) {
-      const body = createPolygonBody(x, y, polygon, material);
+      /*
+       * 輪廓快取是**按等級自己的半徑**描出來的（見 `buildSilhouetteCache`），所以半徑不同時
+       * 要按比例縮放，不能直接沿用 —— 否則縮小的顆粒會帶著原本大小的碰撞體。
+       * The cache is traced at the level's **own** radius (see `buildSilhouetteCache`), so a
+       * different radius must scale the polygon; reusing it would leave a shrunken body with a
+       * full-size collider.
+       */
+      const ratio = level.radius > 0 ? radius / level.radius : 1;
+      const shaped =
+        Math.abs(ratio - 1) < 1e-6
+          ? polygon
+          : polygon.map((point) => ({ x: point.x * ratio, y: point.y * ratio }));
+
+      const body = createPolygonBody(x, y, shaped, material);
       /* 分解失敗（退化輪廓、引擎拒絕）時退回圓形，而不是把壞剛體丟進世界。 */
       if (body !== null) return body;
     }
 
-    return createCircleBody(x, y, level.radius, material);
+    return createCircleBody(x, y, radius, material);
   }
 
   /* ------------------------------------------------------------------ 合成與入堆 */
@@ -1828,6 +2288,31 @@ export class GameSession implements SkillBoard {
    * angle, then handed to the pure-geometry test. A body with no outline takes the circle path.
    */
   private outlinesReach(a: Entry, b: Entry): boolean {
+    /*
+     * 「以方代圓」：把 sprite 輪廓換成核心正方形，仍然交給同一個「邊緣間隙」判定 —— 只是餵給
+     * 它的多邊形變成四邊形。共用同一組幾何等於共用一套已驗證的行為（間隙、尖角、退化處理），
+     * 不必為新模式再寫一份。
+     * "Square Rule": swap the sprite outline for the core square and feed it to the same edge-gap
+     * test, only with a four-sided polygon. Sharing the geometry routine reuses behaviour that is
+     * already verified (gap, corners, degenerate cases) instead of reimplementing it.
+     */
+    if (this.squareMerge) {
+      const squareA = toWorldPolygon(
+        coreSquare(a.radius),
+        a.body.position.x,
+        a.body.position.y,
+        a.body.angle,
+      );
+      const squareB = toWorldPolygon(
+        coreSquare(b.radius),
+        b.body.position.x,
+        b.body.position.y,
+        b.body.angle,
+      );
+
+      return outlinesWithinReach(squareA, squareB, MERGE_OUTLINE_GAP);
+    }
+
     const polyA = this.silhouettes?.get(a.level.id);
     const polyB = this.silhouettes?.get(b.level.id);
 
@@ -1860,7 +2345,7 @@ export class GameSession implements SkillBoard {
      */
     const dx = a.body.position.x - b.body.position.x;
     const dy = a.body.position.y - b.body.position.y;
-    const reach = a.level.radius + b.level.radius;
+    const reach = a.radius + b.radius;
 
     return dx * dx + dy * dy <= reach * reach;
   }
@@ -1927,7 +2412,7 @@ export class GameSession implements SkillBoard {
     if (this.config.levels.settings.lockRotation) lockRotation(body);
 
     this.physics.add(body);
-    this.addEntry({ body, level, bornAtMs: atMs });
+    this.addEntry({ body, level, radius: level.radius, bornAtMs: atMs });
 
     /*
      * 繼承動量（使用者定案：質心 ＋ 動量平均）。
@@ -1943,9 +2428,9 @@ export class GameSession implements SkillBoard {
      */
     const velocity = inheritMomentum(
       a.body.velocity,
-      circleMass(a.level.density, a.level.radius),
+      circleMass(a.level.density, a.radius),
       b.body.velocity,
-      circleMass(b.level.density, b.level.radius),
+      circleMass(b.level.density, b.radius),
     );
     Matter.Body.setVelocity(body, velocity);
 
@@ -2096,7 +2581,7 @@ export class GameSession implements SkillBoard {
         const dx = entry.body.position.x - body.position.x;
         const dy = entry.body.position.y - body.position.y;
         const distance = Math.hypot(dx, dy);
-        const radiiSum = level.radius + entry.level.radius;
+        const radiiSum = level.radius + entry.radius;
 
         if (distance === 0) {
           nx = 0;
@@ -2240,6 +2725,9 @@ export class GameSession implements SkillBoard {
     this.applyCeilingReleaseAssist();
     this.applyShakeImpulse(dt);
 
+    /* 「天翻地覆」的顆粒逐顆放出；放在物理之前，這一步就開始落。 */
+    this.emitRain(dt);
+
     /* 清空必須早於 `physics.step()` —— 碰撞回呼在那之中就會填它。 */
     this.stepClaimed.clear();
 
@@ -2332,7 +2820,7 @@ export class GameSession implements SkillBoard {
       id: entry.body.id,
       x: entry.body.position.x,
       y: entry.body.position.y,
-      radius: entry.level.radius,
+      radius: entry.radius,
       entered: entry.entered,
     }));
 
@@ -2368,6 +2856,18 @@ export class GameSession implements SkillBoard {
      * run may have ended mid-float, and without this the new run would start anti-gravity.
      */
     this.sp.reset();
+    this.skillUsesValue = 0;
+    this.comboGraceDrops = 0;
+    /*
+     * 「以方代圓」是**這一局**的規則改寫，不是跨局設定：新的一局回到 sprite 輪廓判定，
+     * 否則上一局買到的便利會靜靜跟著玩家。
+     * "Square Rule" is a rewrite of **this run's** rules, not a persisted setting: a new run goes
+     * back to the sprite outline, or the convenience bought last run would follow the player.
+     */
+    this.squareMerge = false;
+    this.rainRemaining = 0;
+    this.rainSpawned = 0;
+    this.rainAccumulatorMs = 0;
     this.activeSkill = null;
     this.selectedIds = [];
     this.floatStartedAtMs = 0;
@@ -2437,7 +2937,7 @@ export class GameSession implements SkillBoard {
         levelId: entry.level.id,
         x: entry.body.position.x,
         y: entry.body.position.y,
-        radius: entry.level.radius,
+        radius: entry.radius,
         angle: entry.body.angle,
         scale: this.popScale(entry.body.id),
         velocity: { x: entry.body.velocity.x, y: entry.body.velocity.y },

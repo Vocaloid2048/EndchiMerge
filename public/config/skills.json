@@ -11,7 +11,27 @@
       "id": "discard",
       "name": "當棄即棄！",
       "names": {
-        "en": "Cast Off"
+        "en": "Cast Off",
+        "ja": "當棄即棄！",
+        "zh-Hans": "当弃即弃！",
+        "yue": "當棄即棄！"
+      },
+      "cost": 1,
+      "targeting": "user_pick",
+      "pickCount": 1,
+      "unlock": {
+        "kind": "sp"
+      },
+      "params": {}
+    },
+    {
+      "id": "ascend",
+      "name": "一步登天",
+      "names": {
+        "en": "One Step Up",
+        "ja": "一歩登天",
+        "zh-Hans": "一步登天",
+        "yue": "一步登天"
       },
       "cost": 1,
       "targeting": "user_pick",
@@ -25,7 +45,10 @@
       "id": "protocol_float",
       "name": "協議：浮動",
       "names": {
-        "en": "Protocol: Levitate"
+        "en": "Protocol: Levitate",
+        "ja": "協議：浮動",
+        "zh-Hans": "协议：浮动",
+        "yue": "協議：浮動"
       },
       "cost": 2,
       "targeting": "immediate",
@@ -40,10 +63,49 @@
       }
     },
     {
+      "id": "scramble",
+      "name": "乾坤挪移",
+      "names": {
+        "en": "Shifting Ground",
+        "ja": "乾坤挪移",
+        "zh-Hans": "乾坤挪移",
+        "yue": "乾坤挪移"
+      },
+      "cost": 2,
+      "targeting": "immediate",
+      "pickCount": 0,
+      "unlock": {
+        "kind": "sp"
+      },
+      "params": {}
+    },
+    {
+      "id": "combo_grace",
+      "name": "連勢不墜",
+      "names": {
+        "en": "Chain Ward",
+        "ja": "連勢不墜",
+        "zh-Hans": "连势不坠",
+        "yue": "連勢不墜"
+      },
+      "cost": 2,
+      "targeting": "immediate",
+      "pickCount": 0,
+      "unlock": {
+        "kind": "sp"
+      },
+      "params": {
+        "drops": 3
+      }
+    },
+    {
       "id": "shake",
       "name": "搖晃！",
       "names": {
-        "en": "Shake Up!"
+        "en": "Shake Up!",
+        "ja": "揺さぶり！",
+        "zh-Hans": "摇晃！",
+        "yue": "搖晃！"
       },
       "cost": 3,
       "targeting": "immediate",
@@ -60,10 +122,32 @@
       }
     },
     {
+      "id": "reshuffle",
+      "name": "天翻地覆",
+      "names": {
+        "en": "Clean Slate",
+        "ja": "天地返し",
+        "zh-Hans": "天翻地覆",
+        "yue": "天翻地覆"
+      },
+      "cost": 3,
+      "targeting": "immediate",
+      "pickCount": 0,
+      "unlock": {
+        "kind": "sp"
+      },
+      "params": {
+        "count": 30
+      }
+    },
+    {
       "id": "fate_swap",
       "name": "命運互換",
       "names": {
-        "en": "Fated Exchange"
+        "en": "Fated Exchange",
+        "ja": "命運互換",
+        "zh-Hans": "命运互换",
+        "yue": "命運互換"
       },
       "cost": 0,
       "targeting": "user_pick",
@@ -75,6 +159,44 @@
       "params": {
         "disturbance": 6
       }
+    },
+    {
+      "id": "shrink_all",
+      "name": "縮地成寸",
+      "names": {
+        "en": "Fold Space",
+        "ja": "縮地成寸",
+        "zh-Hans": "缩地成寸",
+        "yue": "縮地成寸"
+      },
+      "cost": 0,
+      "targeting": "immediate",
+      "pickCount": 0,
+      "unlock": {
+        "kind": "cumulativeUses",
+        "threshold": 8
+      },
+      "params": {
+        "radius": 37.5
+      }
+    },
+    {
+      "id": "square_core",
+      "name": "以方代圓",
+      "names": {
+        "en": "Square Rule",
+        "ja": "以方代円",
+        "zh-Hans": "以方代圆",
+        "yue": "以方代圓"
+      },
+      "cost": 0,
+      "targeting": "immediate",
+      "pickCount": 0,
+      "unlock": {
+        "kind": "cumulativeSpent",
+        "threshold": 12
+      },
+      "params": {}
     }
   ]
 }

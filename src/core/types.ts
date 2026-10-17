@@ -178,11 +178,16 @@ export type SkillTargeting = 'user_pick' | 'immediate';
 
 /**
  * 技能的解鎖條件：`sp` ＝ 當前技力 ≥ 消耗（扣費後即時上鎖）；
- * `cumulativeSpent` ＝ 累計消耗滿 `threshold` 才解鎖且免費，用後累計歸零、重新上鎖。
- * A skill's unlock condition: `sp` unlocked while current SP ≥ cost (locked again once spent);
- * `cumulativeSpent` unlocked after `threshold` total spend and then free — using it resets the total, locking it again.
+ * `cumulativeSpent` ＝ 累計消耗滿 `threshold` 才解鎖且免費，用後累計歸零、重新上鎖；
+ * `cumulativeUses` ＝ 本局施放技能滿 `threshold` 次才解鎖且免費，用後次數歸零、重新上鎖。
+ * A skill's unlock condition: `sp` while current SP ≥ cost (locked again once spent);
+ * `cumulativeSpent` after `threshold` total spend, then free and the total resets on use;
+ * `cumulativeUses` after `threshold` casts this run, then free and the cast count resets on use.
  */
-export type SkillUnlock = { kind: 'sp' } | { kind: 'cumulativeSpent'; threshold: number };
+export type SkillUnlock =
+  | { kind: 'sp' }
+  | { kind: 'cumulativeSpent'; threshold: number }
+  | { kind: 'cumulativeUses'; threshold: number };
 
 /**
  * 技能行為參數；不同技能使用的欄位不同，未使用的欄位留空。
@@ -230,6 +235,21 @@ export interface SkillParams {
    * The disturbance impulse on neighbours during a fate swap, in world units per step.
    */
   disturbance?: number;
+  /**
+   * 重新洗牌要降下幾顆方團團。
+   * How many dumplings a reshuffle rains down.
+   */
+  count?: number;
+  /**
+   * 連擊護盾要保護幾次投放。
+   * How many drops a combo shield covers.
+   */
+  drops?: number;
+  /**
+   * 縮小技能的目標半徑，虛擬單位。
+   * The target radius of the shrink skill, in virtual units.
+   */
+  radius?: number;
 }
 
 /**

@@ -4,11 +4,17 @@
  */
 
 import type { SkillDef } from '../../core/types';
+import { AscendSkill } from './AscendSkill';
+import { ComboGraceSkill } from './ComboGraceSkill';
 import { DiscardSkill } from './DiscardSkill';
 import { FateSwapSkill } from './FateSwapSkill';
 import { FloatSkill } from './FloatSkill';
+import { ReshuffleSkill } from './ReshuffleSkill';
+import { ScrambleSkill } from './ScrambleSkill';
 import { ShakeSkill } from './ShakeSkill';
+import { ShrinkAllSkill } from './ShrinkAllSkill';
 import { Skill } from './Skill';
+import { SquareCoreSkill } from './SquareCoreSkill';
 
 /**
  * 一個技能 class 的建構子形狀。
@@ -22,9 +28,15 @@ export type SkillClass = new (definition: SkillDef) => Skill;
  */
 const SKILL_CLASSES: ReadonlyMap<string, SkillClass> = new Map<string, SkillClass>([
   ['discard', DiscardSkill],
+  ['ascend', AscendSkill],
   ['protocol_float', FloatSkill],
+  ['scramble', ScrambleSkill],
+  ['combo_grace', ComboGraceSkill],
   ['shake', ShakeSkill],
+  ['reshuffle', ReshuffleSkill],
   ['fate_swap', FateSwapSkill],
+  ['shrink_all', ShrinkAllSkill],
+  ['square_core', SquareCoreSkill],
 ]);
 
 /**
@@ -63,7 +75,13 @@ export function createSkills(definitions: readonly SkillDef[]): Skill[] {
 
 export { Skill } from './Skill';
 export { DiscardSkill } from './DiscardSkill';
+export { AscendSkill } from './AscendSkill';
 export { FloatSkill } from './FloatSkill';
+export { ScrambleSkill } from './ScrambleSkill';
+export { ComboGraceSkill } from './ComboGraceSkill';
 export { ShakeSkill } from './ShakeSkill';
+export { ReshuffleSkill } from './ReshuffleSkill';
 export { FateSwapSkill } from './FateSwapSkill';
+export { ShrinkAllSkill } from './ShrinkAllSkill';
+export { SquareCoreSkill } from './SquareCoreSkill';
 export type { BoardTarget, FloatRequest, ShakeRequest, SkillBoard } from './board';

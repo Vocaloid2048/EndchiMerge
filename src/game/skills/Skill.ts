@@ -70,6 +70,28 @@ export abstract class Skill {
   }
 
   /**
+   * 這個目標能不能被點選。預設全部可選；收窄條件（例如「下一級必須已解鎖」）由子類別覆寫。
+   * Whether a target may be picked. Everything is pickable by default; subclasses narrow it.
+   *
+   * 呼叫端在**收下點擊之前**問這個問題，所以不合格的目標不會進入選取名單，也不會扣費。
+   * The caller asks this **before accepting a tap**, so an ineligible target never enters the
+   * selection and nothing is charged.
+   */
+  canPick(_target: BoardTarget): boolean {
+    return true;
+  }
+
+  /**
+   * 空盤時能不能發動。預設不行 —— 浮動、搖晃、捨棄、互換都需要場上有東西；只有「先清空再
+   * 補滿」的技能（天翻地覆）例外。
+   * Whether this skill may fire on an empty board. Not by default: float, shake, discard and
+   * swap all need bodies; only a skill that clears and refills the board is exempt.
+   */
+  get allowsEmptyBoard(): boolean {
+    return false;
+  }
+
+  /**
    * 執行效果；`targets` 依玩家點選順序排列（`immediate` 為空陣列）。
    * Runs the effect; `targets` is in pick order (empty for `immediate` skills).
    */

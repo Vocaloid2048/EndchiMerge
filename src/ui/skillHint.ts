@@ -19,6 +19,7 @@ import { el } from './dom';
  */
 const HINT_KEYS: Readonly<Record<string, MessageKey>> = {
   discard: 'skillHint.discard',
+  ascend: 'skillHint.ascend',
   fate_swap: 'skillHint.fate_swap',
 };
 

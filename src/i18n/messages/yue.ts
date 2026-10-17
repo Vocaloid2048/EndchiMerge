@@ -85,12 +85,15 @@ export const yue: Messages = {
 
   'skillHint.discard': '當棄即棄：揀隻唔要嘅方團團',
   'skillHint.fate_swap': '命運互換：揀兩隻方團團交換位置',
+  'skillHint.ascend': '一步登天：揀隻要升級嘅方團團',
   'skillHint.generic': '揀方團團',
   'skillHint.counter': '{base}（{selected}/{total}）・撳空白地方取消',
 
   'skillBar.cumulative': '累計用咗技力',
+  'skillBar.uses': '累計用咗技能',
   'skillBar.free': '免',
   'skillBar.ariaCumulative': '{name}（累計用咗技力 {spent}/{threshold}，免費）',
+  'skillBar.ariaCumulativeUses': '{name}（累計用咗技能 {uses}/{threshold}，免費）',
   'skillBar.ariaCost': '{name}（要 {cost} 技力）',
   'skillBar.ariaLocked': '{name}（未解鎖）',
 

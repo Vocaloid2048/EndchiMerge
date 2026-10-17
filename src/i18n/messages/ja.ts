@@ -90,12 +90,15 @@ export const ja: Messages = {
 
   'skillHint.discard': '當棄即棄：捨てる方團團を選んでください',
   'skillHint.fate_swap': '命運互換：入れ替える方團團を 2 つ選んでください',
+  'skillHint.ascend': '一歩登天：強化する方團團を選んでください',
   'skillHint.generic': '方團團を選んでください',
   'skillHint.counter': '{base}（{selected}/{total}）・空白をクリックでキャンセル',
 
   'skillBar.cumulative': '累計消費技力',
+  'skillBar.uses': 'スキル使用回数',
   'skillBar.free': '無料',
   'skillBar.ariaCumulative': '{name}（累計消費技力 {spent}/{threshold}、無料）',
+  'skillBar.ariaCumulativeUses': '{name}（スキル使用 {uses}/{threshold}、無料）',
   'skillBar.ariaCost': '{name}（{cost} 技力消費）',
   'skillBar.ariaLocked': '{name}（ロック中）',
 

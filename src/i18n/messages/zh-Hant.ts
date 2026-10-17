@@ -103,13 +103,16 @@ export const zhHant = {
   /* ── 技能提示 / Skill hint ─────────────────────────────────────── */
   'skillHint.discard': '當棄即棄：點選要棄掉的方團團',
   'skillHint.fate_swap': '命運互換：點選兩顆方團團交換位置',
+  'skillHint.ascend': '一步登天：點選要升級的方團團',
   'skillHint.generic': '點選方團團',
   'skillHint.counter': '{base}（{selected}/{total}）・點空白處取消',
 
   /* ── 技能欄 / Skill bar ────────────────────────────────────────── */
   'skillBar.cumulative': '累計使用技力',
+  'skillBar.uses': '累計使用技能',
   'skillBar.free': '免',
   'skillBar.ariaCumulative': '{name}（累計使用技力 {spent}/{threshold}，免費）',
+  'skillBar.ariaCumulativeUses': '{name}（累計使用技能 {uses}/{threshold}，免費）',
   'skillBar.ariaCost': '{name}（消耗 {cost} 技力）',
   'skillBar.ariaLocked': '{name}（未解鎖）',
 

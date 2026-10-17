@@ -17,6 +17,16 @@ export interface BoardTarget {
   x: number;
   y: number;
   radius: number;
+  /**
+   * 升一級之後的等級編號；已在合成鏈頂端時為 `null`。
+   * The level id one step up; `null` at the top of the merge chain.
+   */
+  nextLevelId: number | null;
+  /**
+   * 下一級是否已解鎖（圖鑑）。升級技能只接受 `true` 的目標。
+   * Whether the next level is unlocked in the collection; the upgrade skill only accepts `true`.
+   */
+  nextLevelUnlocked: boolean;
 }
 
 /**
@@ -79,6 +89,36 @@ export interface SkillBoard {
    */
   floatAll(request: FloatRequest): void;
   shakeContainer(request: ShakeRequest): void;
+  /**
+   * 把一顆方團團升一級（「一步登天」）；下一級未解鎖或已達頂級時回傳 `false`。
+   * Upgrade one dumpling by a level ("One Step Up"); `false` when capped or the next level is locked.
+   */
+  upgradeTarget(id: number): boolean;
+  /**
+   * 隨機重排場上所有方團團的位置（「乾坤挪移」）。
+   * Randomly permute the positions of every dumpling ("Shifting Ground").
+   */
+  scrambleTargets(): void;
+  /**
+   * 清空棋盤，再降下 `count` 顆（「天翻地覆」）。
+   * Clear the board and rain down `count` dumplings ("Clean Slate").
+   */
+  reshuffle(count: number): void;
+  /**
+   * 接下來 `drops` 次投放即使沒有合成，也不會打斷連擊（「連勢不墜」）。
+   * The next `drops` drops keep the combo chain alive even without a merge ("Chain Ward").
+   */
+  protectCombo(drops: number): void;
+  /**
+   * 把場上所有方團團縮到 `radius`（只縮不放）（「縮地成寸」）。
+   * Shrink every dumpling on the board to `radius`, never enlarge ("Fold Space").
+   */
+  shrinkAll(radius: number): void;
+  /**
+   * 本局改用「核心正方形」判定合成邊緣（「以方代圓」）；重複呼叫無副作用。
+   * Switch this run's merge-edge test to the core square ("Square Rule"); idempotent.
+   */
+  useSquareMerge(): void;
   /**
    * 溢位線的 Y（浮動的天花板），虛擬單位。
    * The overflow line's Y (the float ceiling), in virtual units.
