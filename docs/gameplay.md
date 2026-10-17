@@ -21,6 +21,7 @@
 | `src/game/session.ts`          | 把上面幾個接起來（含 `SkillBoard` 的實作），並投影成畫面資料                    |
 | `src/ui/skillBar.ts`           | 技能欄（可不可以按由 session 決定，這裡只畫與回報 id）                        |
 | `src/ui/skillGuide.ts`         | 技能說明彈窗（左邊按技力需求分類、右邊說明；只讀 `SkillDef`，沒有規則）           |
+| `src/ui/mobileGate.ts`         | 手機把關：直向時全螢幕提示、橫向時嘗試全螢幕；掛在畫布**之外**，用真實像素         |
 | `public/assets/skills/*.gif`   | 每個技能一張示意 GIF（12fps、差分幀），由 `scripts/capture-skill-gifs.mjs` ＋ `assemble-skill-gifs.py` 產生 |
 | `src/ui/spMeter.ts`            | 技力條（一點一條，段數由 `sp.max` 決定）                                |
 | `src/ui/gameOver.ts`           | 結算覆蓋層（只呈現，不算分）                                           |

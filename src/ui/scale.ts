@@ -58,12 +58,33 @@ export function stageTransform(scale: number): string {
 }
 
 /**
+ * 低於這個倍率就把畫布標成 `data-scale="small"`。
+ * Below this factor the canvas is marked `data-scale="small"`.
+ *
+ * 手機與小平板上 1920 寬只剩三成多，22 設計像素的字在螢幕上不到 8px。需要「放大才有意義」的
+ * 元件（目前只有技能說明彈窗）靠這個標記換一套字級，其餘介面照舊 —— 版面幾何仍然是設計稿的。
+ * On a phone or a small tablet the 1920 canvas is barely a third of its size, so 22 design pixels
+ * render under 8px. Components that only work when enlarged (today just the skill guide) switch to
+ * a bigger type scale on this mark; everything else keeps the design geometry.
+ */
+export const SMALL_STAGE_SCALE = 0.6;
+
+/**
+ * 這個倍率是不是小到需要另一套字級（手機、小平板、小視窗）。
+ * Whether this factor is small enough to need the other type scale (phone, small tablet, small window).
+ */
+export function isSmallStage(scale: number): boolean {
+  return scale < SMALL_STAGE_SCALE;
+}
+
+/**
  * 把縮放倍率套到畫布上。
  * Applies the scale factor to the canvas.
  */
 function applyScale(stage: HTMLElement, scale: number): void {
   stage.style.setProperty('--stage-scale', String(scale));
   stage.style.transform = stageTransform(scale);
+  stage.dataset['scale'] = isSmallStage(scale) ? 'small' : 'normal';
 }
 
 export interface StageScaleOptions {

@@ -181,4 +181,7 @@ export const yue: Messages = {
     '請注意：本專案與鷹角網絡（Hypergryph）及 Gryphline 無關。《方團團大作戰》僅為一款由粉絲自行開發之網頁遊戲，本遊戲中使用的素材均由 夜芷冰 及 社群協作者 製作，所有角色名稱與相關美術版權歸原權利人所有。本專案原始碼版權歸夜芷冰擁有。',
   'help.copyright.body2':
     '本專案完全免費、不含內購與廣告，亦不以任何形式營利。未經夜芷冰同意，「方團團」素材不得用作商業盈利或其他有損害任一方聲譽的用途（由其他社群協作者提供的素材，請先自行徵得其同意再使用）。',
+  'mobile.rotateTitle': '唔該將部機打橫',
+  'mobile.rotateBody': '容器同技能列打橫先擺得落；打橫之後會自動入 full screen。',
+  'mobile.landscape': '打橫 + full screen',
 };

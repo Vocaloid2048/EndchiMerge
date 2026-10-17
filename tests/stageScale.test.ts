@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { computeStageScale, stageTransform } from '../src/ui/scale';
+import { computeStageScale, isSmallStage, SMALL_STAGE_SCALE, stageTransform } from '../src/ui/scale';
 import { DESIGN_HEIGHT, DESIGN_WIDTH, MELTING } from '../src/core/design';
 
 describe('computeStageScale — 等比縮放 / uniform scaling', () => {
@@ -110,5 +110,24 @@ describe('stageTransform — 置中寫進 transform / centring baked into the tr
     for (const scale of [0.25, 1, 2.5, 5]) {
       expect(stageTransform(scale)).toMatch(/^translate\(-50%, -50%\) scale\(/);
     }
+  });
+});
+
+describe('isSmallStage — 大字級門檻 / the enlarged type scale', () => {
+  it('switches below the threshold, and not at it', () => {
+    /*
+     * 門檻是「小於」而不是「小於等於」：0.6 剛好還讀得動，換成 40px 的字反而擠爆卡片。
+     * The threshold is strict: 0.6 is still legible, and switching there would blow the card apart.
+     */
+    expect(isSmallStage(SMALL_STAGE_SCALE - 0.01)).toBe(true);
+    expect(isSmallStage(SMALL_STAGE_SCALE)).toBe(false);
+    expect(isSmallStage(1)).toBe(false);
+  });
+
+  it('is on for a phone in landscape and off for a 1280x900 laptop', () => {
+    /* 844×390 是 iPhone 13 橫放；1280×900 是常見的桌面視窗。 */
+    /* 844x390 is an iPhone 13 on its side; 1280x900 is an ordinary desktop window. */
+    expect(isSmallStage(computeStageScale(844, 390))).toBe(true);
+    expect(isSmallStage(computeStageScale(1280, 900))).toBe(false);
   });
 });

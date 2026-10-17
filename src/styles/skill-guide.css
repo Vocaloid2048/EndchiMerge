@@ -37,13 +37,19 @@
   width: 1060px;
   /*
    * 固定高度（而不是隨內容長高）：左欄有 10 個技能，內容自然高度會把卡片撐得比右欄的說明高，
-   * 於是選單自己在滑，右欄卻留一堆空白。給死高度，兩欄就對齊，選單也夠位放完。
+   * 於是選單自己在滑，右欄卻留一堆空白。給死高度，兩欄就對齊。
    * A fixed height rather than one that grows with the content: the left menu holds ten skills, and
    * its natural height would outgrow the right column's copy, leaving the menu scrolling while the
-   * detail sits in whitespace. Fixing the height aligns both columns and gives the menu room.
+   * detail sits in whitespace. Fixing the height aligns both columns.
+   *
+   * 880 而不是 820：字級升到 22–24 之後，十個技能 ＋ 四個分類標題在 820 裝不下，最後一項
+   * 會被切掉。880 讓整份選單一次看得完，也還在 1080 的畫布之內。
+   * 880 rather than 820: once the type scale reaches 22–24, ten skills plus four group headings no
+   * longer fit in 820 and the last entry gets cut. 880 shows the whole menu at once and still sits
+   * inside the 1080-tall canvas.
    */
-  height: 820px;
-  max-height: 820px;
+  height: 880px;
+  max-height: 880px;
   padding: 40px 48px 44px;
   border-radius: 32px;
   background: var(--glass-fill);
@@ -62,7 +68,7 @@
 
 .skill-guide__title {
   margin: 0;
-  font-size: 34px;
+  font-size: 36px;
   font-weight: 700;
   color: var(--color-fg);
 }
@@ -119,9 +125,9 @@
 .skill-guide__group {
   margin: 10px 0 2px;
   color: var(--color-fg-dim);
-  font-size: 15px;
+  font-size: 22px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
 }
 
 .skill-guide__group:first-child {
@@ -129,13 +135,13 @@
 }
 
 .skill-guide__item {
-  padding: 10px 16px;
+  padding: 8px 16px;
   border: 1px solid transparent;
   border-radius: 16px;
   background: transparent;
   color: var(--color-fg-muted);
   font: inherit;
-  font-size: 19px;
+  font-size: 24px;
   text-align: left;
   cursor: pointer;
   transition:
@@ -176,14 +182,14 @@
 .skill-guide__name {
   margin: 0;
   color: var(--color-fg);
-  font-size: 30px;
+  font-size: 36px;
   font-weight: 700;
 }
 
 .skill-guide__meta {
   margin: 0;
   color: var(--color-fg-dim);
-  font-size: 17px;
+  font-size: 22px;
   line-height: 1.5;
 }
 
@@ -242,13 +248,85 @@
 
 .skill-guide__media-hint {
   color: var(--color-fg-dim);
-  font-size: 16px;
+  font-size: 22px;
   letter-spacing: 0.04em;
 }
 
 .skill-guide__desc {
   margin: 0;
   color: var(--color-fg-muted);
-  font-size: 19px;
+  font-size: 23px;
   line-height: 1.7;
+}
+
+/* ── 小畫布：手機與小平板 ─────────────────────────────────────────────── */
+
+/*
+ * `data-scale="small"`（縮放倍率 < `SMALL_STAGE_SCALE`）時整套字級換掉。
+ * A whole different type scale under `data-scale="small"` (a factor below `SMALL_STAGE_SCALE`).
+ *
+ * 設計稿字級是為 1920 寬準備的：手機橫放時畫布只剩三成多，22px 落到螢幕上不到 8px，比連擊卡
+ * 那行括號還難讀。這裡不把字級「再加大一點」，而是按倍率補回來 —— 卡片、欄寬、內距一起放大，
+ * 版面比例才不會歪。
+ * The design type scale assumes 1920: on a phone in landscape the canvas is barely a third of that,
+ * so 22px lands under 8px on screen — harder to read than the combo card's bracket line. Rather than
+ * nudging sizes up, this multiplies them back: the card, the columns and the padding grow together so
+ * the proportions survive.
+ */
+.stage-scale[data-scale='small'] .skill-guide__card {
+  width: 1680px;
+  height: 980px;
+  max-height: 980px;
+  padding: 44px 52px 48px;
+  border-radius: 40px;
+}
+
+.stage-scale[data-scale='small'] .skill-guide__body {
+  grid-template-columns: 470px minmax(0, 1fr);
+  gap: 40px;
+}
+
+.stage-scale[data-scale='small'] .skill-guide__title {
+  font-size: 54px;
+}
+
+.stage-scale[data-scale='small'] .skill-guide__close {
+  width: 76px;
+  height: 76px;
+  font-size: 44px;
+}
+
+.stage-scale[data-scale='small'] .skill-guide__group {
+  margin: 14px 0 4px;
+  font-size: 30px;
+  letter-spacing: 0.02em;
+}
+
+.stage-scale[data-scale='small'] .skill-guide__item {
+  padding: 12px 22px;
+  border-radius: 22px;
+  font-size: 40px;
+}
+
+.stage-scale[data-scale='small'] .skill-guide__detail {
+  gap: 20px;
+  padding: 32px 36px;
+  border-radius: 30px;
+}
+
+.stage-scale[data-scale='small'] .skill-guide__name {
+  font-size: 60px;
+}
+
+.stage-scale[data-scale='small'] .skill-guide__meta {
+  font-size: 34px;
+}
+
+.stage-scale[data-scale='small'] .skill-guide__desc {
+  font-size: 40px;
+  line-height: 1.6;
+}
+
+.stage-scale[data-scale='small'] .skill-guide__media-hint {
+  font-size: 34px;
 }

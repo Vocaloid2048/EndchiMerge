@@ -186,4 +186,8 @@ export const en: Messages = {
     'Please note: this project has no connection to Hypergryph or Gryphline. “EndchiMerge” is simply a web game developed by a fan; the assets used in it were made by 夜芷冰 and community contributors, and all character names and related artwork remain the property of their respective rights holders. The copyright of this project’s source code belongs to 夜芷冰.',
   'help.copyright.body2':
     'The project is entirely free — no in-app purchases, no ads — and is not monetised in any form. Without 夜芷冰’s permission, “EndchiMerge” assets may not be used for commercial profit or for any purpose that damages the reputation of any party. (For assets contributed by other community members, please obtain their permission first.)',
+  'mobile.rotateTitle': 'Rotate your device',
+  'mobile.rotateBody':
+    'The container and the skill list only fit in landscape. Turning the device also goes fullscreen.',
+  'mobile.landscape': 'Landscape + fullscreen',
 };

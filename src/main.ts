@@ -21,6 +21,7 @@ import { Hud } from './ui/hud';
 import { createLayout, type Layout } from './ui/layout';
 import { createLeaderboard, type LeaderboardView } from './ui/leaderboard';
 import { createMeltingList, type MeltingList } from './ui/meltingList';
+import { createMobileGate, type MobileGate } from './ui/mobileGate';
 import { createNotice } from './ui/notice';
 import { createPublishPrompt, type PublishPromptView } from './ui/publishPrompt';
 import { attachRestartConfirm } from './ui/restartButton';
@@ -65,6 +66,7 @@ export interface AppContext {
   detachScale: () => void;
   detachI18n: () => void;
   detachPreferences: () => void;
+  mobileGate: MobileGate;
 }
 
 async function bootstrap(): Promise<void> {
@@ -94,6 +96,13 @@ async function bootstrap(): Promise<void> {
      Build the layout first: even if all config/assets fail, the player still sees the skeleton and
      the notice. */
   const layout = createLayout(host);
+
+  /*
+   * 手機把關要掛在**畫布外**：它得用真實像素蓋滿整個視窗，而不是跟著 1920×1080 一起縮到三成。
+   * The mobile gate mounts **outside the canvas**: it has to fill the viewport in real pixels rather
+   * than shrink to a third along with the 1920×1080 stage.
+   */
+  const mobileGate = createMobileGate({ host });
 
   /*
    * 語系一換就把整個版面重寫一遍：`applyTo()` 走 `[data-i18n]` 等標記，連之後才掛上的彈窗一併換掉。
@@ -635,6 +644,7 @@ async function bootstrap(): Promise<void> {
     detachScale,
     detachI18n,
     detachPreferences,
+    mobileGate,
   };
   exposeForDebugging(context);
 }
