@@ -367,6 +367,7 @@ function sanitizeParams(raw: unknown, fallback: SkillParams, section: string, wa
     count: optional('count', fallback.count),
     drops: optional('drops', fallback.drops),
     radius: optional('radius', fallback.radius),
+    sizeFactor: optional('sizeFactor', fallback.sizeFactor),
   };
 }
 

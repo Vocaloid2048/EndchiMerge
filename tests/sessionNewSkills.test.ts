@@ -273,6 +273,37 @@ describe('縮地成寸 / shrink all', () => {
 });
 
 describe('以方代圓 / square core', () => {
+  /**
+   * 半邊 `r` 的正方形輪廓。
+   * A square outline with half-side `r`.
+   */
+  function box(r: number): { x: number; y: number }[] {
+    return [
+      { x: -r, y: -r },
+      { x: r, y: -r },
+      { x: r, y: r },
+      { x: -r, y: r },
+    ];
+  }
+
+  /**
+   * 「身體 ＋ 兩側翅膀」的輪廓：高度 `r`、半寬 `1.5r`，底邊平放所以不會滾。
+   * A body-plus-wings outline: `r` tall and `1.5r` half-wide, with a flat base so it never rolls.
+   *
+   * 兩顆並排時**實體**剛好相接（相隔 `3r`），而核心正方形（邊長 `2r`）仍差 `r` 才碰得到 ——
+   * 這正是「按輪廓合成、不按方形」的分辨點。
+   * Side by side their **colliders** just touch (`3r` apart) while the core squares (`2r` across)
+   * are still `r` short of each other — the case that tells the two rules apart.
+   */
+  function wings(r: number): { x: number; y: number }[] {
+    return [
+      { x: -1.5 * r, y: -0.5 * r },
+      { x: 1.5 * r, y: -0.5 * r },
+      { x: 1.5 * r, y: 0.5 * r },
+      { x: -1.5 * r, y: 0.5 * r },
+    ];
+  }
+
   it('is off at the start, stays on for the run, and resets with the run', () => {
     const session = new GameSession({
       config: buildConfig(CHAIN, [skill({ id: 'square_core', cost: 0 })]),
@@ -287,6 +318,75 @@ describe('以方代圓 / square core', () => {
 
     session.reset();
     expect(session.squareMergeEnabled).toBe(false);
+  });
+
+  it('stops merges that happen only because a decoration touches', () => {
+    /*
+     * 翅膀伸出核心方形之外：兩顆並排時**實體**已經接觸，方形還差 `r`。碰撞路徑若不看方形，
+     * 就會照輪廓合成 —— 這正是「用了以方代圓但仍然按輪廓判定」的來源。
+     * The wings reach past the core square: side by side the **colliders** already touch while the
+     * squares are still `r` short. A collision path that ignores the square merges by outline —
+     * exactly the reported "square rule still behaves like outline".
+     */
+    const levels = [levelDef(1, 40, 2), levelDef(2, 50, null)];
+    const silhouettes = new Map<number, { x: number; y: number }[] | null>([
+      [1, wings(40)],
+      [2, wings(50)],
+    ]);
+
+    const build = (): GameSession =>
+      new GameSession({
+        config: buildConfig(levels, []),
+        rng: createRng(2),
+        virtualWidth: 700,
+        silhouettes,
+      });
+
+    /*
+     * 兩顆落在相隔 100 的位置（實體各半寬 60，因此必定互相擠壓）；它們會被推到 120 才並排，
+     * 那一刻碰撞事件已經發生過 —— 要測的正是「碰撞已發生，但方形還未相接」。
+     * Dropped 100 apart (each 60 half-wide), so they must collide; the solver then separates them
+     * to 120. The collision has already fired by then — exactly "collided, but squares not yet".
+     */
+    const plain = build();
+    dropAt(plain, 200, 150);
+    dropAt(plain, 300, 150);
+    expect(plain.mergedCount).toBe(1);
+
+    const square = build();
+    /* 先買技能再落第二顆：兩顆相遇的那一刻起就該按方形判，而不是先按輪廓合成再說。 */
+    square.useSquareMerge();
+    dropAt(square, 200, 150);
+    dropAt(square, 300, 150);
+    runFrames(square, 90);
+
+    expect(square.mergedCount).toBe(0);
+    expect(square.targets.length).toBe(2);
+  });
+
+  it('merges on square contact even when the colliders never meet', () => {
+    /* 極小的碰撞體（半邊 8），兩顆相距 45：方形（半邊 30）重疊，實體卻離得遠遠的。 */
+    const levels = [levelDef(1, 30, 2), levelDef(2, 40, null)];
+    const silhouettes = new Map<number, { x: number; y: number }[] | null>([
+      [1, box(8)],
+      [2, box(10)],
+    ]);
+
+    const session = new GameSession({
+      config: buildConfig(levels, []),
+      rng: createRng(2),
+      virtualWidth: 700,
+      silhouettes,
+    });
+
+    dropAt(session, 200, 120);
+    dropAt(session, 245, 120);
+    expect(session.mergedCount).toBe(0);
+
+    session.useSquareMerge();
+    runFrames(session, 60);
+
+    expect(session.mergedCount).toBe(1);
   });
 });
 

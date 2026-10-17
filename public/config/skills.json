@@ -193,10 +193,12 @@
       "targeting": "immediate",
       "pickCount": 0,
       "unlock": {
-        "kind": "cumulativeSpent",
+        "kind": "cumulativeUses",
         "threshold": 12
       },
-      "params": {}
+      "params": {
+        "sizeFactor": 1
+      }
     }
   ]
 }

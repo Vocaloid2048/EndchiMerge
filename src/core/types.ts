@@ -250,6 +250,11 @@ export interface SkillParams {
    * The target radius of the shrink skill, in virtual units.
    */
   radius?: number;
+  /**
+   * 「以方代圓」的核心正方形倍率；1 ＝ 邊長 `2r`。
+   * The core square's scale for "Square Rule"; 1 means a side of `2r`.
+   */
+  sizeFactor?: number;
 }
 
 /**

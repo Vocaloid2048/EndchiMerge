@@ -82,15 +82,16 @@ const RAIN_STAGGER = 8;
 const SCRAMBLE_SEPARATION_MAX = 24;
 
 /**
- * 「核心正方形」的四個角（區域座標）：邊長 2r，正是 sprite 那塊方形身體的外框。
- * The four corners of the "core square" (local space): side 2r, matching the sprite's square body box.
+ * 「核心正方形」的四個角（區域座標），邊長 `2r × sizeFactor`。
+ * The four corners of the "core square" (local space), `2r × sizeFactor` across.
  *
- * 用正方形而不是內接正方形，因為素材的身體本來就是方的 —— 玩家看到的邊界就是這四條邊。
- * A circumscribing square rather than an inscribed one, because the artwork's body is already
- * square: these four edges are the boundary the player sees.
+ * `sizeFactor = 1` 時邊長剛好是 `2r`，對應 sprite 那塊方形身體的外框；大於 1 會往外放寬，
+ * 小於 1 則收窄。它只是同一個正方形的縮放，不是另一種形狀。
+ * At `sizeFactor = 1` the side is exactly `2r`, matching the sprite's square body box; above 1
+ * it widens, below 1 it narrows. It is a scale of the same square, not another shape.
  */
-function coreSquare(radius: number): { x: number; y: number }[] {
-  const r = Math.max(0, radius);
+function coreSquare(radius: number, sizeFactor = 1): { x: number; y: number }[] {
+  const r = Math.max(0, radius * sizeFactor);
 
   return [
     { x: -r, y: -r },
@@ -392,6 +393,12 @@ export class GameSession implements SkillBoard {
    * Whether merge-edge detection uses the core square for the rest of this run.
    */
   private squareMerge = false;
+
+  /**
+   * 核心正方形的放大倍率；1 ＝ 邊長 `2r`。
+   * The core square's scale; 1 means a side of `2r`.
+   */
+  private squareScale = 1;
 
   /** 「天翻地覆」還剩幾顆未降下、已降幾顆，以及累積的時間。 */
   private rainRemaining = 0;
@@ -1546,9 +1553,18 @@ export class GameSession implements SkillBoard {
     this.wakeAll();
   }
 
-  /** 本局改用核心正方形判定合成邊緣（「以方代圓」）；重複呼叫無副作用。 */
-  useSquareMerge(): void {
+  /**
+   * 本局改用核心正方形判定合成邊緣（「以方代圓」）；重複呼叫只更新倍率。
+   * Switch this run's merge-edge test to the core square ("Square Rule"); repeat calls only
+   * update the scale.
+   *
+   * @param sizeFactor 正方形邊長相對 `2r` 的倍率；夾在 `[0.5, 2]`。
+   */
+  useSquareMerge(sizeFactor = 1): void {
+    const scale = Number.isFinite(sizeFactor) ? sizeFactor : 1;
+
     this.squareMerge = true;
+    this.squareScale = Math.min(Math.max(scale, 0.5), 2);
   }
 
   /** 連擊護盾還剩幾次投放；供 HUD 或測試查詢。 */
@@ -2201,6 +2217,22 @@ export class GameSession implements SkillBoard {
       if (atMs - a.bornAtMs < this.mergeCooldownMs) continue;
       if (atMs - b.bornAtMs < this.mergeCooldownMs) continue;
 
+      /*
+       * 「以方代圓」：碰撞路徑也要過方形這一關。
+       *
+       * 碰撞事件說的是「兩個**碰撞體**碰到了」，而碰撞體是 sprite 輪廓 —— 翅膀、手腳會伸出
+       * 核心方形之外。只看碰撞就排合成，等於玩家買了方形判定卻仍在用輪廓判定（近接掃描再嚴格
+       * 也蓋不過碰撞這一邊）。所以方形模式下，碰到不等於可合成，還要方形相接。
+       * "Square Rule" applies to the collision path too.
+       *
+       * A collision event says "the two **colliders** touched", and a collider is the sprite
+       * outline — wings and hands reach past the core square. Queuing a merge on the collision
+       * alone would leave the player on the outline rule they just paid to leave; a stricter
+       * proximity sweep cannot override that. Under square mode, touching is not enough: the
+       * squares must meet as well.
+       */
+      if (this.squareMerge && !this.squaresReach(a, b)) continue;
+
       this.stepClaimed.add(a.body.id);
       this.stepClaimed.add(b.body.id);
       this.pendingMerges.push({ a, b, atMs });
@@ -2279,6 +2311,35 @@ export class GameSession implements SkillBoard {
   }
 
   /**
+   * 兩顆方團團的核心正方形是否相接（或幾乎相接）到足以合成。
+   * Whether two dumplings' core squares meet — or nearly meet — closely enough to merge.
+   *
+   * 「以方代圓」之下**兩條合成路徑都走這裡**：碰撞事件與近接掃描都必須過方形這一關。少了碰撞
+   * 那一邊，翅膀、手腳之類伸出核心方形之外的裝飾會先碰到鄰居，合成於是仍然按輪廓發生 ——
+   * 玩家看到的仍然是舊判定，方形等於沒生效。
+   * Under "Square Rule" **both merge paths come through here**: the collision event and the
+   * proximity sweep must both pass the square test. Without the collision side, decorations that
+   * stick out past the core square (wings, hands) touch a neighbour first and the merge still
+   * follows the outline — the player sees the old rule, and the square never takes effect.
+   */
+  private squaresReach(a: Entry, b: Entry): boolean {
+    const squareA = toWorldPolygon(
+      coreSquare(a.radius, this.squareScale),
+      a.body.position.x,
+      a.body.position.y,
+      a.body.angle,
+    );
+    const squareB = toWorldPolygon(
+      coreSquare(b.radius, this.squareScale),
+      b.body.position.x,
+      b.body.position.y,
+      b.body.angle,
+    );
+
+    return outlinesWithinReach(squareA, squareB, MERGE_OUTLINE_GAP);
+  }
+
+  /**
    * 兩顆方團團的輪廓是否相接（或幾乎相接）到足以合成。
    * Whether two dumplings' outlines meet — or nearly meet — closely enough to merge.
    *
@@ -2296,22 +2357,7 @@ export class GameSession implements SkillBoard {
      * test, only with a four-sided polygon. Sharing the geometry routine reuses behaviour that is
      * already verified (gap, corners, degenerate cases) instead of reimplementing it.
      */
-    if (this.squareMerge) {
-      const squareA = toWorldPolygon(
-        coreSquare(a.radius),
-        a.body.position.x,
-        a.body.position.y,
-        a.body.angle,
-      );
-      const squareB = toWorldPolygon(
-        coreSquare(b.radius),
-        b.body.position.x,
-        b.body.position.y,
-        b.body.angle,
-      );
-
-      return outlinesWithinReach(squareA, squareB, MERGE_OUTLINE_GAP);
-    }
+    if (this.squareMerge) return this.squaresReach(a, b);
 
     const polyA = this.silhouettes?.get(a.level.id);
     const polyB = this.silhouettes?.get(b.level.id);
@@ -2865,6 +2911,7 @@ export class GameSession implements SkillBoard {
      * back to the sprite outline, or the convenience bought last run would follow the player.
      */
     this.squareMerge = false;
+    this.squareScale = 1;
     this.rainRemaining = 0;
     this.rainSpawned = 0;
     this.rainAccumulatorMs = 0;

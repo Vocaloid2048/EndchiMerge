@@ -115,10 +115,13 @@ export interface SkillBoard {
    */
   shrinkAll(radius: number): void;
   /**
-   * 本局改用「核心正方形」判定合成邊緣（「以方代圓」）；重複呼叫無副作用。
-   * Switch this run's merge-edge test to the core square ("Square Rule"); idempotent.
+   * 本局改用「核心正方形」判定合成邊緣（「以方代圓」）；重複呼叫只更新倍率。
+   * Switch this run's merge-edge test to the core square ("Square Rule"); repeat calls only
+   * update the scale.
+   *
+   * @param sizeFactor 邊長相對 `2r` 的倍率，1 為預設。
    */
-  useSquareMerge(): void;
+  useSquareMerge(sizeFactor?: number): void;
   /**
    * 溢位線的 Y（浮動的天花板），虛擬單位。
    * The overflow line's Y (the float ceiling), in virtual units.
