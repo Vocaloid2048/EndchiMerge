@@ -255,6 +255,12 @@ export function createRemoteLeaderboard(
    */
   let latestRun: LeaderboardRun | null = null;
   let improved = false;
+  /**
+   * 每真正刷新一次就 +1；上載完成時靠它判斷「送出之後有沒有又刷新過」。
+   * Bumped on every real improvement; settling compares it to tell "something improved while the
+   * upload was in flight".
+   */
+  let improvementSeq = 0;
 
   let uploading = false;
 
@@ -378,6 +384,11 @@ export function createRemoteLeaderboard(
     const pending = token;
     if (pending === null) return;
 
+    /* 送出的是「此刻」的數字；完成時拿這個序號判斷期間有沒有更新的刷新。
+     * The numbers sent are the ones at this moment; settling uses this sequence to see whether a
+     * newer improvement arrived while the request was in flight. */
+    const seq = improvementSeq;
+
     const merges = Math.max(0, Math.trunc(run.merges));
     const body = {
       runId: pending.runId,
@@ -410,7 +421,7 @@ export function createRemoteLeaderboard(
             console.warn(`[leaderboard] submission was not counted (${String(verdict['reason'] ?? 'unknown')})`);
           }
 
-          settled();
+          settled(seq);
           refresh();
 
           return;
@@ -422,7 +433,7 @@ export function createRemoteLeaderboard(
          */
         if (status >= 400 && status < 500 && status !== 429) {
           console.warn(`[leaderboard] submission refused (${String(status)})`, data);
-          settled();
+          settled(seq);
 
           return;
         }
@@ -441,8 +452,20 @@ export function createRemoteLeaderboard(
   /**
    * 伺服器已經對這一筆表態了（不論接受或拒絕）：標記清掉，狀態同步一次。
    * The server has ruled on this submission (accepted or not): clear the marker and sync state once.
+   *
+   * `seq` 與送出的那一刻比對：期間又刷新過就**留著** `improved`，否則那筆新分數會卡在「旗標被誤清」
+   * 的縫隙裡，直到下一次刷新才有機會送出 —— 而最後一次刷新之後就沒有「下一次」了。
+   * Compares `seq` with the moment of submission: if something improved in the meantime, `improved`
+   * **stays set**, otherwise that newer score would sit in the gap left by a wrongly cleared flag
+   * until the next improvement — and after the last improvement there is no next one.
    */
-  function settled(): void {
+  function settled(seq: number): void {
+    if (improvementSeq !== seq) {
+      notify();
+
+      return;
+    }
+
     improved = false;
     player.markUploaded();
     notify();
@@ -529,6 +552,7 @@ export function createRemoteLeaderboard(
       if (!advanced) return false;
 
       improved = true;
+      improvementSeq += 1;
       /* 與本機版同一條規則：刷新了本機紀錄就通知。 */
       notify();
 

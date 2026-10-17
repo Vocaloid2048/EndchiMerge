@@ -349,9 +349,7 @@ async function bootstrap(): Promise<void> {
    * pending. Call sites: the run's end, a restart, page close/backgrounding, the next visit, and
    * live on each improvement (see `scheduleLiveSync`, debounced).
    */
-  const syncRun = (): void => {
-    leaderboardSource.sync();
-  };
+  const syncRun = (): boolean => leaderboardSource.sync();
 
   /*
    * 即時上載（使用者定案「成績刷新即同步」）：成績每刷新一次就排一次短延遲的推播，遊戲進行中榜
@@ -372,27 +370,38 @@ async function bootstrap(): Promise<void> {
     const now = Date.now();
     const since = now - liveSyncLastFired;
 
-    /* 距上次推播已夠久 → 立刻推（leading），並清掉可能還掛著的尾部計時器。 */
+    /*
+     * 距上次推播已夠久 → 立刻試推（leading）。只有真的送出去才記時間；上一次還在路上時
+     * `sync()` 會回 `false`，那就交給尾部計時器，不讓這次刷新白白被「用掉」。
+     * Far enough from the last push → try at once (leading). Only a real submission resets the
+     * clock; when the previous upload is still in flight `sync()` returns `false`, and the trailing
+     * timer covers this improvement instead of letting it be spent for nothing.
+     */
     if (since >= LIVE_SYNC_INTERVAL_MS) {
       if (liveSyncTimer !== null) {
         clearTimeout(liveSyncTimer);
         liveSyncTimer = null;
       }
 
-      liveSyncLastFired = now;
-      syncRun();
+      if (syncRun()) {
+        liveSyncLastFired = now;
 
-      return;
+        return;
+      }
     }
 
-    /* 還沒到間隔、且已排了尾部計時器 → 什麼都不做。 */
+    /* 還沒到間隔、或上一次仍在路上 → 排一次尾部（只排一個）。
+     * Not yet due, or the previous upload is still in flight → schedule one trailing push. */
     if (liveSyncTimer !== null) return;
+
+    const delay =
+      since >= LIVE_SYNC_INTERVAL_MS ? LIVE_SYNC_INTERVAL_MS : LIVE_SYNC_INTERVAL_MS - since;
 
     liveSyncTimer = setTimeout((): void => {
       liveSyncTimer = null;
-      liveSyncLastFired = Date.now();
-      syncRun();
-    }, LIVE_SYNC_INTERVAL_MS - since);
+
+      if (syncRun()) liveSyncLastFired = Date.now();
+    }, delay);
   };
 
   /*

@@ -315,6 +315,29 @@ describe('createRemoteLeaderboard — 提交哪一局 / which run is submitted',
     await settle();
     expect(submissions()).toHaveLength(1);
   });
+
+  /**
+   * 送出途中又刷新：`settled()` 不可以把這次刷新清掉，否則最後一次刷新會永遠送不出去。
+   * An improvement arriving mid-flight must survive `settled()`, or the last improvement is never sent.
+   */
+  it('still uploads an improvement that arrives while the previous upload is in flight', async () => {
+    const { board, submissions } = makeHarness();
+
+    board.setSharing(true);
+    await settle();
+    await startRun(board);
+
+    board.record({ score: 300, maxCombo: 3, merges: 10, drops: 15, durationMs: 60_000 });
+    expect(board.sync()).toBe(true);
+
+    board.record({ score: 900, maxCombo: 6, merges: 30, drops: 40, durationMs: 90_000 });
+
+    await settle();
+
+    expect(board.sync()).toBe(true);
+    expect(submissions()).toHaveLength(2);
+    expect(submissions()[1]?.body).toMatchObject({ score: 900, durationMs: 90_000 });
+  });
 });
 
 describe('createRemoteLeaderboard — 送不出去的時候 / when it cannot get through', () => {
