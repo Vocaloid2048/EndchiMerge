@@ -9,7 +9,8 @@ import { isConnectionError, isBoardCategory, type BoardCategory } from './db/dia
 import type { Config } from './env.js';
 import { MAX_RUN_MS } from './env.js';
 import { checkClaimedDuration, checkRationality } from './limits.js';
-import type { Store } from './store.js';
+import { isBoardFilter, isRunMode, RUN_MODES, DEFAULT_RUN_MODE, filterMode, type RunMode } from './modes.js';
+import type { ProfileRow, Store } from './store.js';
 import { isValidDeviceId, newRunId, newUserTag, signRunToken, tokenFingerprint, verifyRunToken } from './tokens.js';
 
 export interface Deps {
@@ -67,6 +68,52 @@ function readId(body: JsonObject, key: string): string | null {
   const value = readString(body, key, 64);
 
   return value !== null && isValidDeviceId(value) ? value : null;
+}
+
+/**
+ * 提交的模式；沒送或形狀不對就是新玩法 —— 舊客戶端不認識這個欄位，牠們的成績本來就是新玩法。
+ * The submitted mode; absent or malformed means the new mode — a client that predates the field has
+ * only ever played the new mode.
+ */
+function readMode(body: JsonObject): RunMode {
+  const value = readString(body, 'mode', 16);
+
+  return isRunMode(value) ? value : DEFAULT_RUN_MODE;
+}
+
+/** 一列在某個分類上的數值；只在「所有模式」時用來挑玩家自己最好的那一列。 */
+function categoryValue(row: ProfileRow, category: BoardCategory): number {
+  switch (category) {
+    case 'score':
+      return row.bestScore;
+    case 'combo':
+      return row.bestMaxCombo;
+    case 'merges':
+      return row.bestMerges;
+  }
+}
+
+/**
+ * 玩家自己那一列。指定模式時就是那一列；「所有模式」時取該分類最高的一列 —— 同一人可能有兩列。
+ * The player's own row: the named mode's row, or under "all modes" whichever mode leads that category.
+ */
+async function selfRow(
+  store: Store,
+  deviceId: string,
+  mode: RunMode | null,
+  category: BoardCategory,
+): Promise<ProfileRow | null> {
+  if (mode !== null) return store.getProfile(deviceId, mode);
+
+  let best: ProfileRow | null = null;
+
+  for (const candidate of RUN_MODES) {
+    const row = await store.getProfile(deviceId, candidate);
+    if (row === null || row.bestScore <= 0) continue;
+    if (best === null || categoryValue(row, category) > categoryValue(best, category)) best = row;
+  }
+
+  return best;
 }
 
 /** 把一次提交的裁決寫成回應；重試也走這裡，所以兩次回應一模一樣。
@@ -193,6 +240,7 @@ export const handleScore: CoreHandler = async (request, deps) => {
 
   const displayName = sanitiseName(readString(body, 'displayName', 256) ?? '');
   const version = readString(body, 'version', VERSION_MAX) ?? '';
+  const mode = readMode(body);
   const now = deps.now();
 
   /* ① 速率限制：這個裝置上一小時內的**所有**提交，含被退回的那些。
@@ -266,6 +314,7 @@ export const handleScore: CoreHandler = async (request, deps) => {
         runId,
         deviceId,
         displayName,
+        mode,
         /* 只是一個提議；profile 已經有號就沿用（見下方 `saveScore` 的同一條規則）。 */
         userTag: newUserTag(),
         score,
@@ -284,7 +333,7 @@ export const handleScore: CoreHandler = async (request, deps) => {
       );
     }
 
-    const profile = await deps.store.getProfile(deviceId);
+    const profile = await deps.store.getProfile(deviceId, mode);
 
     return {
       response: verdictResponse({
@@ -332,6 +381,7 @@ export const handleScore: CoreHandler = async (request, deps) => {
     runId,
     deviceId,
     displayName,
+    mode,
     /*
      * 只是一個**提議**：profile 已經有號就沿用（改名不動號），撞到別人的「名字＋號」才會被換掉。
      * Only a **proposal**: an existing profile keeps its tag (a rename does not change it), and it is
@@ -349,19 +399,21 @@ export const handleScore: CoreHandler = async (request, deps) => {
     atMs: now,
   });
 
-  const profile = await deps.store.getProfile(deviceId);
+  const profile = await deps.store.getProfile(deviceId, mode);
   const rank =
     profile === null || profile.bestScore <= 0
       ? null
       : await deps.store.rankOf(
           {
             deviceId,
+            mode,
             score: profile.bestScore,
             maxCombo: profile.bestMaxCombo,
             merges: profile.bestMerges,
             atMs: profile.bestAtMs ?? now,
           },
           'score',
+          mode,
         );
 
   return {
@@ -400,15 +452,22 @@ export const handleLeaderboard: CoreHandler = async (request, deps) => {
   const provided = request.query.get('deviceId');
   const deviceId = provided !== null && isValidDeviceId(provided) ? provided : null;
 
+  /* 模式篩選：預設「所有模式」；一位玩家在每個模式各有一列，所以「所有」會看到同一人兩列。 */
+  /* The mode filter, "all" by default; one row per player per mode, so "all" shows a player twice. */
+  const rawMode = request.query.get('mode');
+  const filter = isBoardFilter(rawMode) ? rawMode : 'all';
+  const mode = filterMode(filter);
+
   const [rows, total] = await Promise.all([
-    deps.store.topProfiles(category, limit),
-    deps.store.countProfiles(),
+    deps.store.topProfiles(category, limit, mode),
+    deps.store.countProfiles(mode),
   ]);
 
   const entries = rows.map((row, index) => ({
     rank: index + 1,
     name: row.displayName,
     tag: row.userTag,
+    mode: row.mode,
     score: row.bestScore,
     durationMs: row.bestDurationMs,
     maxCombo: row.bestMaxCombo,
@@ -419,24 +478,27 @@ export const handleLeaderboard: CoreHandler = async (request, deps) => {
   let self: (typeof entries)[number] | null = null;
 
   if (deviceId !== null) {
-    const profile = await deps.store.getProfile(deviceId);
+    const profile = await selfRow(deps.store, deviceId, mode, category);
 
     if (profile !== null && profile.bestScore > 0) {
       const rank = await deps.store.rankOf(
         {
           deviceId,
+          mode: profile.mode,
           score: profile.bestScore,
           maxCombo: profile.bestMaxCombo,
           merges: profile.bestMerges,
           atMs: profile.bestAtMs ?? 0,
         },
         category,
+        mode,
       );
 
       self = {
         rank,
         name: profile.displayName,
         tag: profile.userTag,
+        mode: profile.mode,
         score: profile.bestScore,
         durationMs: profile.bestDurationMs,
         maxCombo: profile.bestMaxCombo,
@@ -446,7 +508,7 @@ export const handleLeaderboard: CoreHandler = async (request, deps) => {
     }
   }
 
-  return { response: ok({ ok: true, category, total, entries, self }), deviceId, runId: null };
+  return { response: ok({ ok: true, category, mode: filter, total, entries, self }), deviceId, runId: null };
 };
 
 /* ── GET /api/health ──────────────────────────────────────────────────────── */
@@ -462,7 +524,7 @@ export const handleHealth: CoreHandler = async (request, deps) => {
   }
 
   try {
-    const players = await deps.store.countProfiles();
+    const players = await deps.store.countPlayers();
 
     return {
       response: ok({

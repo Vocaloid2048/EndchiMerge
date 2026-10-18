@@ -59,6 +59,7 @@ function makeScore(overrides: Partial<ScoreRow>): ScoreRow {
     rejected: null,
     atMs: 1_700_000_000_000,
     ...overrides,
+    mode: overrides.mode ?? 'new',
   };
 }
 
@@ -127,6 +128,55 @@ describe('KvStore — 歷史最大值 / historical maxima', () => {
     expect(profile?.bestMaxCombo).toBe(9);
     expect(profile?.bestMerges).toBe(5);
     expect(profile?.bestDurationMs).toBe(40_000);
+  });
+});
+
+describe('KvStore — 模式 / modes', () => {
+  let kv: MockKV;
+  let store: KvStore;
+
+  beforeEach(() => {
+    kv = new MockKV();
+    globalThis.ENDCHI_KV = kv;
+    store = new KvStore();
+  });
+
+  afterEach(() => {
+    globalThis.ENDCHI_KV = undefined;
+  });
+
+  it('keeps one row per mode', async () => {
+    await store.saveScore(makeScore({ runId: 'r1', deviceId: 'd', mode: 'new', score: 100 }));
+    await store.saveScore(makeScore({ runId: 'r2', deviceId: 'd', mode: 'traditional', score: 40 }));
+
+    expect((await store.getProfile('d', 'new'))?.bestScore).toBe(100);
+    expect((await store.getProfile('d', 'traditional'))?.bestScore).toBe(40);
+    expect(await store.countProfiles()).toBe(2);
+    expect(await store.countProfiles('traditional')).toBe(1);
+    expect(await store.countPlayers()).toBe(1);
+  });
+
+  it('moves a legacy profile key to the new one instead of duplicating the player', async () => {
+    await kv.put(
+      'profile:legacy',
+      JSON.stringify({
+        deviceId: 'legacy',
+        displayName: '舊玩家',
+        userTag: '0001',
+        bestScore: 500,
+        bestDurationMs: 0,
+        bestMaxCombo: 1,
+        bestMerges: 2,
+        bestAtMs: 1,
+      }),
+    );
+
+    expect((await store.getProfile('legacy'))?.bestScore).toBe(500);
+    expect(await kv.get('profile:legacy')).toBeNull();
+
+    await store.saveScore(makeScore({ runId: 'r9', deviceId: 'legacy', score: 600 }));
+    expect(await store.countPlayers()).toBe(1);
+    expect((await store.getProfile('legacy'))?.bestScore).toBe(600);
   });
 });
 

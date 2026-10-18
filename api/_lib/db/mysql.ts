@@ -221,8 +221,8 @@ export const mysqlDialect: Dialect = {
    */
   insertScore: () => `insert into scores (
        run_id, device_id, display_name, score, duration_ms, merges, drops, max_combo,
-       version, verified, rejected, created_at
-     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       version, verified, rejected, created_at, mode
+     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      on duplicate key update run_id = run_id`,
 
   /*
@@ -231,23 +231,32 @@ export const mysqlDialect: Dialect = {
    */
   insertScoreSignal: 'affected',
 
+  /* 身份與成績分開：改名只碰 `profiles`，模式成績只碰 `profile_modes`。 */
+  /* Identity is separate from the scores: a rename touches `profiles`, a mode's best touches `profile_modes`. */
+  upsertIdentity: () => `insert into \`profiles\` (device_id, display_name, user_tag)
+     values (?, ?, ?)
+     on duplicate key update
+       display_name = if(values(display_name) = '', profiles.display_name, values(display_name)),
+       user_tag = values(user_tag),
+       updated_at = utc_timestamp(3)`,
+
   /*
    * ⚠️ 欄位順序是**正確性**的一部分：`best_duration_ms` 與 `best_at` 必須排在 `best_score` 之前，因為它們要拿**舊的** `best_score` 比較（見 `Dialect.upsertProfile`）。
    * ⚠️ Column order is part of **correctness**: `best_duration_ms` and `best_at` must come before `best_score`, since they compare against the **old** `best_score` (see `Dialect.upsertProfile`).
    */
-  upsertProfile: () => `insert into profiles (
-       device_id, display_name, user_tag, best_score, best_duration_ms, best_max_combo, best_merges,
-       best_at, created_at, updated_at
-     ) values (?, ?, ?, ?, ?, ?, ?, ?, utc_timestamp(3), utc_timestamp(3))
+  upsertProfile: () => `insert into \`profile_modes\` (
+       device_id, mode, display_name, user_tag, best_score, best_duration_ms, best_max_combo,
+       best_merges, best_at, created_at, updated_at
+     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, utc_timestamp(3), utc_timestamp(3))
      on duplicate key update
-       display_name = if(values(display_name) = '', profiles.display_name, values(display_name)),
+       display_name = if(values(display_name) = '', profile_modes.display_name, values(display_name)),
        user_tag = values(user_tag),
-       best_duration_ms = if(values(best_score) > profiles.best_score,
-                               values(best_duration_ms), profiles.best_duration_ms),
-       best_at = if(values(best_score) > profiles.best_score, values(best_at), profiles.best_at),
-       best_score = greatest(profiles.best_score, values(best_score)),
-       best_max_combo = greatest(profiles.best_max_combo, values(best_max_combo)),
-       best_merges = greatest(profiles.best_merges, values(best_merges)),
+       best_duration_ms = if(values(best_score) > profile_modes.best_score,
+                               values(best_duration_ms), profile_modes.best_duration_ms),
+       best_at = if(values(best_score) > profile_modes.best_score, values(best_at), profile_modes.best_at),
+       best_score = greatest(profile_modes.best_score, values(best_score)),
+       best_max_combo = greatest(profile_modes.best_max_combo, values(best_max_combo)),
+       best_merges = greatest(profile_modes.best_merges, values(best_merges)),
        updated_at = utc_timestamp(3)`,
 
   /*
@@ -273,6 +282,27 @@ export const mysqlDialect: Dialect = {
        primary key (\`device_id\`),
        key \`profiles_best_score_idx\` (\`best_score\` desc, \`best_at\` asc)
      ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_bin`,
+    /*
+     * 模式化的成績表：一位玩家在每個模式各一列。身份留在 `profiles`，舊版的 `profiles.best_*`
+     * 由下面的回填搬過來，之後不再寫入。
+     * The per-mode score table: one row per player per mode. Identity stays in `profiles`; the old
+     * `profiles.best_*` columns are moved here by the backfill below and never written again.
+     */
+    `create table if not exists \`profile_modes\` (
+       \`device_id\`        varchar(64)  not null,
+       \`mode\`             varchar(16)  not null default 'new',
+       \`display_name\`     varchar(64)  not null default '',
+       \`user_tag\`         varchar(4)   not null default '',
+       \`best_score\`       int          not null default 0,
+       \`best_max_combo\`   int          not null default 0,
+       \`best_merges\`      int          not null default 0,
+       \`best_duration_ms\` int          not null default 0,
+       \`best_at\`          datetime(3)  null,
+       \`created_at\`       datetime(3)  not null default utc_timestamp(3),
+       \`updated_at\`       datetime(3)  not null default utc_timestamp(3),
+       primary key (\`device_id\`, \`mode\`),
+       key \`profile_modes_board_idx\` (\`mode\`, \`best_score\` desc, \`best_at\` asc)
+     ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_bin`,
     `create table if not exists \`scores\` (
        \`run_id\`       char(36)     not null,
        \`device_id\`    varchar(64)  not null,
@@ -285,6 +315,7 @@ export const mysqlDialect: Dialect = {
        \`version\`      varchar(32)  not null default '',
        \`verified\`     tinyint(1)   not null default 1,
        \`rejected\`     varchar(64)  null,
+       \`mode\`         varchar(16)  not null default 'new',
        \`created_at\`   datetime(3)  not null default utc_timestamp(3),
        primary key (\`run_id\`),
        key \`scores_device_idx\` (\`device_id\`, \`created_at\` desc),
@@ -330,6 +361,20 @@ export const mysqlDialect: Dialect = {
      * old database that already has the column raises 1060 and counts as done. */
     `alter table \`profiles\` add column \`user_tag\` varchar(4) not null default ''`,
     `update \`profiles\` set \`user_tag\` = lpad(floor(rand() * 9999) + 1, 4, '0') where \`user_tag\` = ''`,
+
+    /* 模式：`scores` 補欄位；舊庫的成績回填成「新玩法」一列。`on duplicate key update` 讓重跑無害。
+     * Mode: `scores` gains the column, and an old database's scores are backfilled as the new mode.
+     * `on duplicate key update` makes a re-run harmless. */
+    `alter table \`scores\` add column \`mode\` varchar(16) not null default 'new'`,
+    `insert into \`profile_modes\` (
+       \`device_id\`, \`mode\`, \`display_name\`, \`user_tag\`, \`best_score\`, \`best_duration_ms\`,
+       \`best_max_combo\`, \`best_merges\`, \`best_at\`
+     )
+     select p.\`device_id\`, 'new', p.\`display_name\`, p.\`user_tag\`, p.\`best_score\`,
+            p.\`best_duration_ms\`, p.\`best_max_combo\`, p.\`best_merges\`, p.\`best_at\`
+     from \`profiles\` p
+     where p.\`best_score\` > 0
+     on duplicate key update \`device_id\` = \`device_id\``,
   ],
 
   /*

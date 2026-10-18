@@ -826,6 +826,25 @@
   height: var(--melting-content-h);
 }
 
+/*
+ * 標題與格網之間的那行提示：只講一件事 —— 想玩不同模式就到設定切換。
+ * 位置在標題（y=23）與內容區（y=104）之間的空隙，不佔格網任何一格。
+ * The hint between the title and the grid, saying exactly one thing: another mode is one
+ * settings trip away. It sits in the gap between the title (y=23) and the content box (y=104),
+ * taking no cell of the grid.
+ */
+.melting__hint {
+  position: absolute;
+  top: 68px;
+  left: 0;
+  width: 100%;
+  margin: 0;
+  color: var(--color-fg-dim);
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+
 /* ── 非官方聲明 / Unofficial notice ──────────────────────────────────── */
 
 /*

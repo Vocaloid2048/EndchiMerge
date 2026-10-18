@@ -100,6 +100,7 @@ function scoreRow(overrides: Partial<ScoreRow> = {}): ScoreRow {
     rejected: null,
     atMs: AT,
     ...overrides,
+    mode: overrides.mode ?? 'new',
   };
 }
 
@@ -250,9 +251,10 @@ describe('SqlStore.saveScore — 冪等 / idempotency', () => {
     expect(inserted).toBe(true);
 
     const writes = driver.calls.filter((call) => call.sql.toLowerCase().startsWith('insert'));
-    expect(writes).toHaveLength(2);
+    expect(writes).toHaveLength(3);
     expect(writes[0]?.sql.toLowerCase()).toContain('insert into scores');
     expect(writes[1]?.sql.toLowerCase()).toContain('insert into profiles');
+    expect(writes[2]?.sql.toLowerCase()).toContain('insert into profile_modes');
   });
 
   it('does not touch the profile for a rejected run', async () => {
@@ -308,6 +310,7 @@ describe('SqlStore — 列的轉換 / mapping rows', () => {
 
     expect(profile).toEqual({
       deviceId: 'device-1',
+      mode: 'new',
       displayName: '阿爺',
       userTag: '0001',
       bestScore: 900,

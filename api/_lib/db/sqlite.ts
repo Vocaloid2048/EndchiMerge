@@ -185,12 +185,22 @@ export const sqliteDialect: Dialect = {
    */
   insertScore: () => `insert into scores (
        run_id, device_id, display_name, score, duration_ms, merges, drops, max_combo,
-       version, verified, rejected, created_at
-     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       version, verified, rejected, created_at, mode
+     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      on conflict (run_id) do nothing
      returning run_id`,
 
   insertScoreSignal: 'rows',
+
+  /* 身份與成績分開：改名只碰 `profiles`，模式成績只碰 `profile_modes`。 */
+  /* Identity is separate from the scores: a rename touches `profiles`, a mode's best touches `profile_modes`. */
+  upsertIdentity: () => `insert into profiles (device_id, display_name, user_tag)
+     values (?, ?, ?)
+     on conflict (device_id) do update set
+       display_name = case when excluded.display_name = ''
+                           then profiles.display_name else excluded.display_name end,
+       user_tag = excluded.user_tag,
+       updated_at = ${NOW_MS}`,
 
   /*
    * 形狀與 Postgres 相同，只差兩個函式名（`greatest` → `max`、`now()` → `NOW_MS`）；`excluded` 永遠是
@@ -199,21 +209,21 @@ export const sqliteDialect: Dialect = {
    * `now()` → `NOW_MS`); `excluded` is always "the row about to be inserted", independent of
    * assignment order — MySQL's column-order trap does not exist here.
    */
-  upsertProfile: () => `insert into profiles (
-       device_id, display_name, user_tag, best_score, best_duration_ms, best_max_combo, best_merges,
-       best_at, created_at, updated_at
-     ) values (?, ?, ?, ?, ?, ?, ?, ?, ${NOW_MS}, ${NOW_MS})
-     on conflict (device_id) do update set
+  upsertProfile: () => `insert into profile_modes (
+       device_id, mode, display_name, user_tag, best_score, best_duration_ms, best_max_combo,
+       best_merges, best_at, created_at, updated_at
+     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ${NOW_MS}, ${NOW_MS})
+     on conflict (device_id, mode) do update set
        display_name = case when excluded.display_name = ''
-                           then profiles.display_name else excluded.display_name end,
+                           then profile_modes.display_name else excluded.display_name end,
        user_tag = excluded.user_tag,
-       best_duration_ms = case when excluded.best_score > profiles.best_score
-                               then excluded.best_duration_ms else profiles.best_duration_ms end,
-       best_at = case when excluded.best_score > profiles.best_score
-                      then excluded.best_at else profiles.best_at end,
-       best_score = max(profiles.best_score, excluded.best_score),
-       best_max_combo = max(profiles.best_max_combo, excluded.best_max_combo),
-       best_merges = max(profiles.best_merges, excluded.best_merges),
+       best_duration_ms = case when excluded.best_score > profile_modes.best_score
+                               then excluded.best_duration_ms else profile_modes.best_duration_ms end,
+       best_at = case when excluded.best_score > profile_modes.best_score
+                      then excluded.best_at else profile_modes.best_at end,
+       best_score = max(profile_modes.best_score, excluded.best_score),
+       best_max_combo = max(profile_modes.best_max_combo, excluded.best_max_combo),
+       best_merges = max(profile_modes.best_merges, excluded.best_merges),
        updated_at = ${NOW_MS}`,
 
   /*
@@ -238,6 +248,27 @@ export const sqliteDialect: Dialect = {
        updated_at       integer not null default (${NOW_MS})
      )`,
     `create index if not exists profiles_best_score_idx on profiles (best_score desc, best_at asc)`,
+    /*
+     * 模式化的成績表：一位玩家在每個模式各一列。身份留在 `profiles`，舊版的 `profiles.best_*`
+     * 由下面的回填搬過來，之後不再寫入。
+     * The per-mode score table: one row per player per mode. Identity stays in `profiles`; the old
+     * `profiles.best_*` columns are moved here by the backfill below and never written again.
+     */
+    `create table if not exists profile_modes (
+       device_id        text    not null,
+       mode             text    not null default 'new',
+       display_name     text    not null default '',
+       user_tag         text    not null default '',
+       best_score       integer not null default 0,
+       best_max_combo   integer not null default 0,
+       best_merges      integer not null default 0,
+       best_duration_ms integer not null default 0,
+       best_at          integer,
+       created_at       integer not null default (${NOW_MS}),
+       updated_at       integer not null default (${NOW_MS}),
+       primary key (device_id, mode)
+     )`,
+    `create index if not exists profile_modes_board_idx on profile_modes (mode, best_score desc, best_at asc)`,
     `create table if not exists scores (
        run_id       text    primary key,
        device_id    text    not null,
@@ -250,6 +281,7 @@ export const sqliteDialect: Dialect = {
        version      text    not null default '',
        verified     integer not null default 1,
        rejected     text,
+       mode         text    not null default 'new',
        created_at   integer not null default (${NOW_MS})
      )`,
     `create index if not exists scores_device_idx on scores (device_id, created_at desc)`,
@@ -292,6 +324,19 @@ export const sqliteDialect: Dialect = {
      * old database that already has the column raises "duplicate column name" and counts as done. */
     `alter table profiles add column user_tag text not null default ''`,
     `update profiles set user_tag = printf('%04d', abs(random()) % 9999 + 1) where user_tag = ''`,
+
+    /* 模式：`scores` 補欄位；舊庫的成績回填成「新玩法」一列。`insert or ignore` 讓重跑無害。
+     * Mode: `scores` gains the column, and an old database's scores are backfilled as the new mode.
+     * `insert or ignore` makes a re-run harmless. */
+    `alter table scores add column mode text not null default 'new'`,
+    `insert or ignore into profile_modes (
+       device_id, mode, display_name, user_tag, best_score, best_duration_ms, best_max_combo,
+       best_merges, best_at
+     )
+     select p.device_id, 'new', p.display_name, p.user_tag, p.best_score, p.best_duration_ms,
+            p.best_max_combo, p.best_merges, p.best_at
+     from profiles p
+     where p.best_score > 0`,
   ],
 
   /*

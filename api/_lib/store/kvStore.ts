@@ -9,6 +9,7 @@
  */
 
 import type { BoardCategory } from '../db/dialect.js';
+import { DEFAULT_RUN_MODE, isRunMode, type RunMode } from '../modes.js';
 import { newRunId } from '../tokens.js';
 import {
   applyProfileUpdate,
@@ -58,6 +59,26 @@ const RUN_PREFIX = 'run:';
 const SCORE_PREFIX = 'score:';
 const PROFILE_PREFIX = 'profile:';
 const REQUEST_PREFIX = 'req:';
+
+/** 一位玩家在一個模式下一列：`profile:<裝置>:<模式>`。 */
+function profileKey(deviceId: string, mode: RunMode): string {
+  return `${PROFILE_PREFIX}${deviceId}:${mode}`;
+}
+
+function matchesMode(row: ProfileRow, mode: RunMode | null): boolean {
+  return mode === null || row.mode === mode;
+}
+
+/**
+ * 舊列的 `mode` 可能不存在（這個欄位是後加的）；讀回來時補成新玩法，榜的篩選才不會漏掉它。
+ * Old rows may lack `mode` (the field was added later); reading them as the new mode keeps them on
+ * that filter instead of vanishing from every board.
+ */
+function normaliseProfile(row: ProfileRow | null): ProfileRow | null {
+  if (row === null) return null;
+
+  return isRunMode(row.mode) ? row : { ...row, mode: DEFAULT_RUN_MODE };
+}
 
 export class KvStore implements Store {
   async putRunToken(row: RunTokenRow): Promise<void> {
@@ -130,7 +151,7 @@ export class KvStore implements Store {
   }
 
   private async mergeProfile(row: ScoreRow): Promise<void> {
-    const previous = await this.getProfile(row.deviceId);
+    const previous = await this.getProfile(row.deviceId, row.mode);
     const userTag = await resolveUserTag({
       displayName: row.displayName,
       current: previous?.userTag ?? '',
@@ -140,34 +161,69 @@ export class KvStore implements Store {
     });
     const updated = applyProfileUpdate(previous, row, userTag);
 
-    await kv().put(PROFILE_PREFIX + row.deviceId, JSON.stringify(updated));
+    await kv().put(profileKey(row.deviceId, row.mode), JSON.stringify(updated));
   }
 
-  async getProfile(deviceId: string): Promise<ProfileRow | null> {
-    const value = await kv().get(PROFILE_PREFIX + deviceId, 'json');
-    return (value as ProfileRow | null) ?? null;
+  async getProfile(deviceId: string, mode: RunMode = DEFAULT_RUN_MODE): Promise<ProfileRow | null> {
+    const value = await kv().get(profileKey(deviceId, mode), 'json');
+    if (value !== null) return normaliseProfile(value as ProfileRow | null);
+
+    /*
+     * 升級前的鍵是 `profile:<裝置>`（沒有模式）。它只可能屬於新玩法，所以在新玩法下讀到就順手
+     * 搬到新鍵再刪掉舊鍵 —— 不搬的話，這次提交會寫出第二列，榜上同一個人就出現兩次。
+     * The pre-upgrade key was `profile:<device>` (no mode). It can only be the new mode, so reading
+     * it under that mode moves it to the new key and deletes the old one — leaving it would make the
+     * next submission write a second row and put the same player on the board twice.
+     */
+    if (mode !== DEFAULT_RUN_MODE) return null;
+
+    const legacy = await kv().get(PROFILE_PREFIX + deviceId, 'json');
+    const row = normaliseProfile(legacy as ProfileRow | null);
+    if (row === null) return null;
+
+    await kv().put(profileKey(deviceId, mode), JSON.stringify(row));
+    await kv().delete(PROFILE_PREFIX + deviceId);
+
+    return row;
   }
 
-  async topProfiles(category: BoardCategory, limit: number): Promise<ProfileRow[]> {
+  async topProfiles(
+    category: BoardCategory,
+    limit: number,
+    mode: RunMode | null = null,
+  ): Promise<ProfileRow[]> {
     const rows: ProfileRow[] = [];
     for await (const row of this.eachProfile()) {
-      if (row.bestScore > 0) rows.push(row);
+      if (row.bestScore > 0 && matchesMode(row, mode)) rows.push(row);
     }
     rows.sort((a, b) => compareProfiles(category, a, b));
     return rows.slice(0, Math.max(0, limit));
   }
 
-  async countProfiles(): Promise<number> {
+  async countProfiles(mode: RunMode | null = null): Promise<number> {
     let count = 0;
     for await (const row of this.eachProfile()) {
-      if (row.bestScore > 0) count += 1;
+      if (row.bestScore > 0 && matchesMode(row, mode)) count += 1;
     }
     return count;
   }
 
-  async rankOf(probe: RankProbe, category: BoardCategory): Promise<number> {
+  async countPlayers(): Promise<number> {
+    const devices = new Set<string>();
+    for await (const row of this.eachProfile()) {
+      if (row.bestScore > 0) devices.add(row.deviceId);
+    }
+    return devices.size;
+  }
+
+  async rankOf(
+    probe: RankProbe,
+    category: BoardCategory,
+    mode: RunMode | null = null,
+  ): Promise<number> {
     const probeRow: ProfileRow = {
       deviceId: probe.deviceId,
+      mode: probe.mode ?? DEFAULT_RUN_MODE,
       displayName: '',
       userTag: '',
       bestScore: probe.score,
@@ -180,6 +236,7 @@ export class KvStore implements Store {
     let ahead = 0;
     for await (const row of this.eachProfile()) {
       if (row.bestScore <= 0) continue;
+      if (!matchesMode(row, mode)) continue;
       if (compareProfiles(category, row, probeRow) < 0) ahead += 1;
     }
     return ahead + 1;
@@ -210,7 +267,10 @@ export class KvStore implements Store {
   }
 
   private async *eachProfile(): AsyncGenerator<ProfileRow> {
-    yield* this.each<ProfileRow>(PROFILE_PREFIX);
+    for await (const row of this.each<ProfileRow>(PROFILE_PREFIX)) {
+      const normalised = normaliseProfile(row);
+      if (normalised !== null) yield normalised;
+    }
   }
 
   private async *each<T>(prefix: string): AsyncGenerator<T> {

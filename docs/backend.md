@@ -14,7 +14,7 @@
 | ------ | ------------------- | -------------------------------------------------------- |
 | `POST` | `/api/run/start`    | 開一局：伺服器鑄一張短期憑證（T2 的關鍵）                                   |
 | `POST` | `/api/score`        | 提交成績：驗憑證 → 驗時間 → 驗合理性 → 寫榜                                |
-| `GET`  | `/api/leaderboard`  | 取榜（`?category=score\|combo\|merges`、`?limit=N`，預設 100、上限 200），附查詢者的自身名次   |
+| `GET`  | `/api/leaderboard`  | 取榜（`?category=score\|combo\|merges`、`?limit=N`，預設 100、上限 200、`?mode=all\|new\|traditional` 預設 `all`），附查詢者的自身名次   |
 | `GET`  | `/api/health`       | 自我檢查：**真的問一次資料庫**，回方言名稱與玩家數                                |
 
 **資料庫支援 Postgres、MySQL 與 SQLite 三種方言**，共用同一份業務邏輯 —— 見 §5。前兩者是**部署**選項
@@ -122,17 +122,17 @@ T2 的價值在**頒發時刻**：伺服器在開局時記下時間，於是提�
 
 ### 合理性上界是**從遊戲配置推導**的
 
-`limits.ts` 的三個常數不是隨手填的，是從 `public/config/levels.json` 與 `src/game/combo.ts` 算
-出來的：
+`limits.ts` 的三個常數不是隨手填的，是從 `public/config/levels*.json` 與 `src/game/combo.ts` 算
+出來的（兩個模式的等級表各有一份，上界取兩邊最高的那一級 —— 寧可寬也不要誤退正常高分）：
 
-| 常數                | 值     | 來源                                       |
-| ----------------- | ----- | ---------------------------------------- |
-| `DROP_COOLDOWN_MS` | 500   | `levels.json` 的 `settings.dropCooldownMs` |
-| `MAX_LEVEL_SCORE`  | 256   | 第 10 級的 `score`                           |
-| `MAX_MULTIPLIER`  | 10    | `COMBO_CURVE.cap (9) + base (1)`           |
+| 常數                | 值     | 來源                                                |
+| ----------------- | ----- | ------------------------------------------------- |
+| `DROP_COOLDOWN_MS` | 500   | `levels*.json` 的 `settings.dropCooldownMs`        |
+| `MAX_LEVEL_SCORE`  | 262144 | 最高級的 `score`：傳統表到 512，新玩法表到 262144（取較寬的）          |
+| `MAX_MULTIPLIER`  | 10    | `COMBO_CURVE.cap (9) + base (1)`                   |
 
 於是推得：投放 ≤ `⌊時長/500⌋ + 2`（+2 給不受冷卻限制的開場第一顆）、合成 ≤ 投放、分數 ≤
-合成 × 256 × 10。
+合成 × 262144 × 10。
 
 > **`tests/api.test.ts` 有一條測試專門讀回那兩個檔案來比對**。上界一旦跟配置脫節就會變成**錯的
 > 上界**，而錯的上界比沒有上界更糟：它會安靜地放過作弊，或誤傷誠實玩家。所以這條測試是整份檔案
@@ -171,7 +171,7 @@ T2 的價值在**頒發時刻**：伺服器在開局時記下時間，於是提�
 
 | | 是什麼 | 會不會變 |
 | --- | --- | --- |
-| `device_id` | **身分**：`profiles` 的主鍵、憑證綁定、速率限制的鍵、榜的決勝鍵 | 不變（改名、改號都不動） |
+| `device_id` | **身分**：`profiles` 的主鍵、`profile_modes` 複合鍵的一半、憑證綁定、速率限制的鍵、榜的決勝鍵 | 不變（改名、改號、換模式都不動） |
 | `display_name` | 顯示名，**允許重名**（沒有任何唯一約束） | 隨時可改 |
 | `user_tag` | 顯示用的四位數號（`0001`–`9999`），拿來把同名的人分開 | 指派一次後不變；**只有**撞到別的裝置的「同名字＋同號」才重抽 |
 
@@ -185,6 +185,30 @@ T2 的價值在**頒發時刻**：伺服器在開局時記下時間，於是提�
 「欄位已經在那裡」判為已完成，與 `isMissingColumnError`（drop 那一側）對稱。既有玩家的號由一條
 `update … where user_tag = ''` 回填 —— 冪等來自它**自己的 `where`**，所以每次部署重跑都不會把已經
 有號的人換掉。
+
+### 玩法模式：`profile_modes` 一位玩家一列**每個模式**
+
+兩個模式（`new` ＝ 新玩法、`traditional` ＝ 傳統模式）的分數尺度不同，所以榜不能把兩者混成一列：
+
+| 表 | 存什麼 | 主鍵 |
+| --- | --- | --- |
+| `profiles` | 身份：`display_name`、`user_tag`（跨模式一份） | `device_id` |
+| `profile_modes` | 該模式的歷史最大值：分數／時長／連擊／合成 | `(device_id, mode)` |
+
+`profiles.best_*` 是**舊版留下的欄位**：升級時由 `insert … select … on conflict do nothing` 回填
+到 `profile_modes`（`mode = 'new'`），之後程式不再讀寫它們。刻意**不 drop** —— 遷移失敗時留一條
+回頭路，而且那幾欄本來就不再被查詢。
+
+`Store` 的三個查詢都帶模式：`getProfile(deviceId, mode)`、`topProfiles(category, limit, mode)`／
+`countProfiles(mode)`／`rankOf(probe, category, mode)`，`mode = null` 代表「兩個模式一起列」。
+`/api/leaderboard?mode=all|new|traditional` 直接把這一層傳下去（預設 `all`）。
+
+提交的模式由客戶端在 `POST /api/score` 帶 `mode`（舊客戶端沒帶就當 `new`）。它**沒有**綁進憑證：
+憑證只證明「這一局什麼時候開始」，而分模式與否不影響任何上界檢查。
+
+榜序在 `device_id` 之後多一個 `mode asc` 決勝鍵：一併列出兩個模式時，同一裝置的兩列才有一致的
+次序（`compareProfiles`、`boardOrder()` 與 `aheadOf()` 三處必須逐鍵一致，`tests/api.test.ts` 與
+`tests/db.integration.test.ts` 釘住這件事）。
 
 ### 私隱硬規則：IP 與標頭**不落庫**
 
@@ -426,7 +450,7 @@ export const { onRequestGet, onRequestPost, onRequestOptions } =
 | --- | --- |
 | `run:` | `run_tokens`（憑證） |
 | `score:` | `scores`（一局一列，冪等鍵） |
-| `profile:` | `profiles`（榜，一裝置一列） |
+| `profile:` | `profile_modes`（榜，`profile:<裝置>:<模式>`，一裝置一模式一列） |
 | `req:` | `requests`（接收日誌，不進榜掃描） |
 
 與 `MemoryStore`／`SqlStore` 共用 `store.ts` 的 `compareProfiles`／`resolveUserTag`／
@@ -588,7 +612,7 @@ npm run dev:web    # 只有 Vite（純 UI 改動，打不到 API）
 | 每一幀 | `record({ score, maxCombo, merges, drops, durationMs })` | —（只寫本機） |
 | 遊戲中成績刷新 | `scheduleLiveSync()` → `sync()`（2 秒節流 ＋ 尾部） | `POST /api/score`（同一局，更新） |
 | 局末／重新開始／切到背景／關分頁 | `sync()` | `POST /api/score` |
-| 開榜、同意分享、提交成功之後 | `refresh()` | `GET /api/leaderboard?category=…` |
+| 開榜、同意分享、提交成功之後 | `refresh()` | `GET /api/leaderboard?category=…&mode=…` |
 
 `beginRun()` 與 `refresh()` 是介面的**選填**成員：本機實作不需要它們，所以 UI 呼叫時用的是 `?.`。
 

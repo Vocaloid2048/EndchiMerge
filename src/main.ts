@@ -6,6 +6,7 @@ import type { AllConfig } from './core/types';
 import { FrameLoop } from './game/loop';
 import type { LeaderboardSource } from './game/leaderboard';
 import { createLocalStore } from './game/localStore';
+import { modeDefinition, modeKeys, type ModeId } from './game/mode';
 import { createPreferencesStore, type PreferencesStore } from './game/preferences';
 import { createProgressStore, type ProgressStore } from './game/progress';
 import { createRemoteLeaderboard } from './game/remoteLeaderboard';
@@ -137,7 +138,11 @@ async function bootstrap(): Promise<void> {
      1920×1080 canvas overflows the window in the meantime. */
   const detachScale = attachStageScale({ stage: layout.stage });
 
-  const config = await loadConfig();
+  /* 模式在開站時定案：等級表與技能名單都只抓一次，切換要走一次重新載入（見設定彈窗）。 */
+  /* The mode is settled at boot: the level table and skill roster are fetched once, and switching
+     goes through a reload (see the settings popup). */
+  const mode = preferences.mode;
+  const config = await loadConfig({ levelsFile: modeDefinition(mode).levelsFile });
 
   document.title = `${config.branding.gameName} ${config.branding.gameNameZh}`;
   layout.notice.append(createNotice({ zh: config.branding.noticeZh, en: config.branding.notice }));
@@ -176,7 +181,19 @@ async function bootstrap(): Promise<void> {
    * is always unlocked, or nothing could ever be dropped.
    */
   const baselineId = Math.min(...config.levels.levels.map((level) => level.id));
-  const progress = createProgressStore({ baseline: [baselineId], store: localStore });
+  /*
+   * 最高分與圖鑑解鎖都按模式分開存放：兩個模式的等級鏈與分數尺度不同，共用一份會讓切換後的
+   * BEST TRY 顯示另一個模式的數字，圖鑑進度也會互相污染（兩條鏈的長度連 20 對 11 都不一樣）。
+   * Both the high score and the compendium unlocks are stored per mode: the two modes differ in chain
+   * length (20 vs 11) and score scale, so a shared pair would show the other mode's BEST TRY and let
+   * one mode's unlocks leak into the other.
+   */
+  const modeStores = modeKeys(mode);
+  const progress = createProgressStore({
+    baseline: [baselineId],
+    store: localStore,
+    keys: { unlocks: modeStores.unlocks, highScore: modeStores.highScore },
+  });
 
   /* 名冊稍後才建立，但解鎖事件可能更早觸發；用可變參考承接。
      The roster is built later but unlock events may fire first, so a mutable reference bridges the gap. */
@@ -291,6 +308,11 @@ async function bootstrap(): Promise<void> {
     store: localStore,
     baseUrl: import.meta.env.VITE_API_BASE_URL ?? '',
     version: __APP_VERSION__,
+    /* 回報的模式就是這一頁開局的那一個；本機紀錄也按模式分開，兩邊才對得上。 */
+    /* The reported mode is the one this page started with; the local record is per mode too, so
+       the two agree. */
+    mode,
+    keys: { profile: modeStores.profile },
   });
 
   /*
@@ -580,6 +602,19 @@ async function bootstrap(): Promise<void> {
     host: layout.root,
     preferences,
     leaderboard: leaderboardSource,
+    /*
+     * 切換模式要重新載入：等級表與技能名單在開站時只抓一次並寫進 `GameSession`，
+     * 換一個模式等於換一局、也等於換一份配置。先記帳並上載，才寫偏好，最後重新載入。
+     * A mode switch reloads: the level table and skill roster are fetched once at boot and baked into
+     * `GameSession`, so switching means a new run and a new config. Record and upload first, then
+     * write the preference, then reload.
+     */
+    onModeSwitch: (next: ModeId): void => {
+      recordRun();
+      syncRun();
+      preferences.setMode(next);
+      window.location.reload();
+    },
   });
 
   const settingsButton = layout.regions.toolbar.querySelector<HTMLButtonElement>(

@@ -7,6 +7,7 @@
  */
 
 import type { LeaderboardSource } from '../game/leaderboard';
+import { MODE_IDS, modeDefinition, type ModeId } from '../game/mode';
 import type { PreferencesStore } from '../game/preferences';
 import { i18n, i18nAriaLabel, i18nText, LOCALE_LABELS, LOCALES, t, type Locale, type MessageKey } from '../i18n';
 import { createConfirmDialog, type ConfirmDialogTexts } from './confirmDialog';
@@ -20,8 +21,8 @@ export interface SettingsOptions {
    */
   host: HTMLElement;
   /**
-   * 偏好來源（語言、規則總開關、無盡模式）。
-   * The preferences source (locale, the rules master gate, endless mode).
+   * 偏好來源（語言、玩法模式、規則總開關、無盡模式）。
+   * The preferences source (locale, play mode, the rules master gate, endless mode).
    */
   preferences: PreferencesStore;
   /**
@@ -29,6 +30,11 @@ export interface SettingsOptions {
    * The leaderboard source (display name and sharing consent).
    */
   leaderboard: LeaderboardSource;
+  /**
+   * 切換玩法模式：由呼叫端負責上載這一局並重新載入，偏好已在此之前寫好。
+   * Switches the play mode; the caller uploads the current run and reloads, the preference written beforehand.
+   */
+  onModeSwitch(mode: ModeId): void;
 }
 
 /**
@@ -53,6 +59,29 @@ function endlessTexts(): ConfirmDialogTexts {
     message: t('endlessConfirm.message'),
     confirmLabel: t('endlessConfirm.confirm'),
     holdLabel: t('endlessConfirm.confirmHold'),
+  };
+}
+
+/**
+ * 切換模式前，確認鈕要鎖住多久（毫秒）。
+ * How long the confirm button stays locked before a mode switch.
+ *
+ * 切換會結束目前這一局並重新載入，所以它與無盡模式一樣值得那五秒 —— 玩家多半是在劣勢時才想換模式。
+ * A switch ends the current run and reloads, so it earns the same five seconds as endless mode:
+ * players usually think of it while they are losing.
+ */
+const MODE_SWITCH_HOLD_MS = 5000;
+
+/**
+ * 切換模式的警告文案；內文帶上要切換過去的模式名。
+ * The mode-switch warning; the message names the mode being switched to.
+ */
+function modeTexts(mode: ModeId): ConfirmDialogTexts {
+  return {
+    title: t('modeConfirm.title'),
+    message: t('modeConfirm.message', { mode: t(modeDefinition(mode).labelKey) }),
+    confirmLabel: t('modeConfirm.confirm'),
+    holdLabel: t('modeConfirm.confirmHold'),
   };
 }
 
@@ -151,7 +180,74 @@ export function createSettings(options: SettingsOptions): SettingsView {
 
   const body = el('div', 'settings__body');
 
-  /* ── ① 遊戲玩法 / 規則更改 ────────────────────────────────────────── */
+  /* ── ① 玩法模式 ──────────────────────────────────────────────────── */
+
+  /** 正在等待確認的模式；`null` ＝ 沒有切換在進行。 */
+  let pendingMode: ModeId | null = null;
+
+  const modeDialog = createConfirmDialog({
+    host: options.host,
+    ...modeTexts(preferences.mode),
+    tone: 'accent',
+    holdMs: MODE_SWITCH_HOLD_MS,
+    onConfirm: (): void => {
+      const next = pendingMode;
+      pendingMode = null;
+
+      if (next !== null) options.onModeSwitch(next);
+    },
+    /* 取消：把選取撥回目前的偏好。偏好沒有變，所以不會有通知替我們重畫。 */
+    /* Cancel: put the selection back on the current preference. The preference never changed, so no notification redraws it. */
+    onCancel: (): void => {
+      pendingMode = null;
+      sync();
+    },
+  });
+
+  const modeList = el('div', 'settings__modes');
+  modeList.setAttribute('role', 'radiogroup');
+  i18nAriaLabel(modeList, 'settings.modes.heading');
+
+  const modeInputs = new Map<ModeId, HTMLInputElement>();
+
+  for (const id of MODE_IDS) {
+    const input = el('input', 'settings__language-input');
+    input.type = 'radio';
+    input.name = 'settings-mode';
+    input.value = id;
+
+    const name = el('span', 'settings__mode-name');
+    i18nText(name, modeDefinition(id).labelKey);
+
+    const note = el('span', 'settings__mode-note');
+    i18nText(note, id === 'new' ? 'settings.modes.newNote' : 'settings.modes.traditionalNote');
+
+    const text = el('span', 'settings__mode-body');
+    appendChildren(text, name, note);
+
+    const option = el('label', 'settings__mode');
+    appendChildren(option, input, text);
+
+    input.addEventListener('change', (): void => {
+      if (!input.checked || id === preferences.mode) return;
+
+      pendingMode = id;
+      modeDialog.setTexts(modeTexts(id));
+      modeDialog.open();
+    });
+
+    modeInputs.set(id, input);
+    modeList.append(option);
+  }
+
+  const modesPanel = el('div', 'settings__panel');
+  const modesSubtitle = el('p', 'settings__subtitle');
+  i18nText(modesSubtitle, 'settings.modes.subtitle');
+  const modesNote = el('p', 'settings__note');
+  i18nText(modesNote, 'settings.modes.note');
+  appendChildren(modesPanel, modesSubtitle, modeList, modesNote);
+
+  /* ── ② 遊戲玩法 / 規則更改 ────────────────────────────────────────── */
 
   /*
    * 無盡模式的警告：先講清楚「這一局不記榜」，確認鈕鎖五秒才可按。
@@ -196,7 +292,7 @@ export function createSettings(options: SettingsOptions): SettingsView {
   i18nText(rulesSubtitle, 'settings.rules.subtitle');
   appendChildren(rulesPanel, rulesSubtitle, masterSwitch.root, endlessSwitch.root, more);
 
-  /* ── ② 語言 ──────────────────────────────────────────────────────── */
+  /* ── ③ 語言 ──────────────────────────────────────────────────────── */
 
   const languagePanel = el('div', 'settings__panel');
   const languageSubtitle = el('p', 'settings__subtitle');
@@ -235,7 +331,7 @@ export function createSettings(options: SettingsOptions): SettingsView {
 
   appendChildren(languagePanel, languageSubtitle, languageList, languageNote);
 
-  /* ── ③ 排行榜 ────────────────────────────────────────────────────── */
+  /* ── ④ 排行榜 ────────────────────────────────────────────────────── */
 
   const fields: PublishFields = createPublishFields({ source: leaderboard });
 
@@ -261,6 +357,7 @@ export function createSettings(options: SettingsOptions): SettingsView {
 
   appendChildren(
     body,
+    category('settings.modes.heading', modesPanel),
     category('settings.rules.heading', rulesPanel),
     category('settings.language.heading', languagePanel),
     category('settings.leaderboard.heading', leaderboardPanel),
@@ -287,6 +384,8 @@ export function createSettings(options: SettingsOptions): SettingsView {
     /* 總開關關著時無盡模式不可調（閘門語意；資料層也會擋，這裡只是讓它看起來就該如此）。 */
     endlessSwitch.setDisabled(!preferences.rulesEnabled);
 
+    for (const [mode, input] of modeInputs) input.checked = mode === preferences.mode;
+
     for (const [locale, input] of languageInputs) input.checked = locale === preferences.locale;
 
     fields.sync();
@@ -306,6 +405,7 @@ export function createSettings(options: SettingsOptions): SettingsView {
    */
   const unsubscribeLocale = i18n.subscribe((): void => {
     endlessDialog.setTexts(endlessTexts());
+    modeDialog.setTexts(modeTexts(pendingMode ?? preferences.mode));
     if (!root.hidden) sync();
   });
 
@@ -366,6 +466,7 @@ export function createSettings(options: SettingsOptions): SettingsView {
       unsubscribeLocale();
       closeButton.removeEventListener('click', onCloseClick);
       endlessDialog.dispose();
+      modeDialog.dispose();
       fields.dispose();
       close();
       document.removeEventListener('keydown', onKeyDown, true);

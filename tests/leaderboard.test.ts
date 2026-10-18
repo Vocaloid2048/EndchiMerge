@@ -128,6 +128,63 @@ function makeBoard(limit = LEADERBOARD_LIMIT, seed?: readonly LeaderboardEntry[]
   return { storage, board };
 }
 
+describe('createLocalLeaderboard — 模式 / modes', () => {
+  function openMode(storage: FakeStorage, mode: 'new' | 'traditional') {
+    return createLocalLeaderboard({
+      storage,
+      mode,
+      playerId: 'me',
+      salt: TEST_SALT,
+      now: (): number => 1_700_000_000_000,
+      keys: {
+        entries: 'e',
+        name: 'n',
+        sharing: 's',
+        prompt: 'p',
+        profile: `pr-${mode}`,
+        device: 'd',
+      },
+    });
+  }
+
+  it('keeps one row per mode and filters the board', () => {
+    const storage = new FakeStorage();
+
+    const classic = openMode(storage, 'traditional');
+    classic.setSharing(true);
+    classic.record({ score: 300, maxCombo: 2, merges: 5, mode: 'traditional' });
+    classic.sync();
+
+    const modern = openMode(storage, 'new');
+    modern.record({ score: 900, maxCombo: 5, merges: 20, mode: 'new' });
+    modern.sync();
+
+    const all = openMode(storage, 'new').snapshot('score', undefined, 'all');
+    expect(all.entries).toHaveLength(2);
+    expect(all.entries.map((entry) => entry.mode)).toEqual(['new', 'traditional']);
+
+    const onlyClassic = openMode(storage, 'new').snapshot('score', undefined, 'traditional');
+    expect(onlyClassic.entries).toHaveLength(1);
+    expect(onlyClassic.entries[0]).toMatchObject({ mode: 'traditional', score: 300 });
+  });
+
+  it('reports "self" for the mode being viewed', () => {
+    const storage = new FakeStorage();
+
+    const classic = openMode(storage, 'traditional');
+    classic.setSharing(true);
+    classic.record({ score: 300, maxCombo: 2, merges: 5, mode: 'traditional' });
+    classic.sync();
+
+    const modern = openMode(storage, 'new');
+    modern.record({ score: 900, maxCombo: 5, merges: 20, mode: 'new' });
+    modern.sync();
+
+    expect(openMode(storage, 'traditional').snapshot('score').self?.entry.score).toBe(300);
+    expect(openMode(storage, 'new').snapshot('score').self?.entry.score).toBe(900);
+  });
+});
+
 describe('createLocalLeaderboard — 一位玩家一筆 / one row per player', () => {
   it('starts empty: nothing is on the board before the first run', () => {
     const { board } = makeBoard();

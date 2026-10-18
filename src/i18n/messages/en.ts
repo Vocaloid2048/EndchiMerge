@@ -31,6 +31,9 @@ export const en: Messages = {
    * This label follows the meaning of 圖鑑 in English (`MELTING` survives as an internal identifier — only the displayed text changed).
    */
   'label.meltingList': 'COMPENDIUM',
+  'label.meltingHint': 'Want another mode? Switch it in Settings.',
+  'mode.new': 'New mode',
+  'mode.traditional': 'Classic mode',
   'label.gameOver': 'GAME OVER',
   'label.newBest': 'NEW BEST',
   'label.best': 'BEST',
@@ -75,6 +78,10 @@ export const en: Messages = {
   'leaderboard.tab.score': 'Best score',
   'leaderboard.tab.combo': 'COMBO',
   'leaderboard.tab.merges': 'Merges',
+  'leaderboard.modeFilter': 'Mode filter',
+  'leaderboard.mode.all': 'All modes',
+  'leaderboard.mode.new': 'New mode',
+  'leaderboard.mode.traditional': 'Classic mode',
 
   'publish.name': 'Display name',
   'publish.namePlaceholder': 'Enter your name',
@@ -141,6 +148,16 @@ export const en: Messages = {
 
   'settings.title': 'Settings',
   'settings.close': 'Close settings',
+  'settings.modes.heading': 'Play mode',
+  'settings.modes.subtitle': 'A switch takes effect on a new run',
+  'settings.modes.newNote': 'The new lineup with every skill; the score ceiling is higher.',
+  'settings.modes.traditionalNote': 'Official sizes, keeping only the original 4 skills.',
+  'settings.modes.note':
+    'Switching ends the current run and reloads at once; scores and compendium progress are kept per mode, so switching back resumes where you left off.',
+  'modeConfirm.title': 'Switch play mode?',
+  'modeConfirm.message': '“{mode}” needs a new run to apply: the current run ends and the page reloads now.',
+  'modeConfirm.confirm': 'Switch and restart',
+  'modeConfirm.confirmHold': 'Switch ({seconds})',
   'settings.rules.heading': 'Gameplay',
   'settings.rules.subtitle': 'With rules changed, scores are not recorded on the leaderboard',
   'settings.rules.master': 'Allow changing game rules',

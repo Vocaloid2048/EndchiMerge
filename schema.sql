@@ -6,38 +6,41 @@
 -- Run against any Postgres (Neon, Supabase, a self-hosted NAS):
 --   psql "$DATABASE_URL" -f schema.sql
 --
+-- 這份檔案必須與 `api/_lib/db/postgres.ts` 的 `schema()` 逐條一致（`tests/dialect.test.ts` 會比對）。
+-- This file must match `postgresDialect.schema()` statement for statement (`tests/dialect.test.ts` checks it).
+--
 -- 設計前提（design.md §6）：
 --   1. **伺服器為準**。本機存檔只是快取，榜上的數字一律由這裡算出來。
---   2. **一位玩家一筆**：身份是 `device_id`，改名只改一個欄位，不會多一筆。
+--   2. **一位玩家一個模式一筆**：身份是 `device_id`，名字與號留在 `profiles`，成績留在 `profile_modes`。
 --   3. **合成數／分數／連擊各自取歷史最大**，由 `max()` 聚合得出，不靠客戶端宣稱。
 --   4. 榜期只有**單一全時段**（使用者定案 2026-10-12），所以不需要 `period` 欄位。
 -- Design premises (design.md §6):
 --   1. **The server is authoritative.** The local save is a cache; every number on the board is
 --      computed here.
---   2. **One row per player**: identity is `device_id`, so renaming edits a field rather than
---      adding a row.
+--   2. **One row per player per mode**: identity is `device_id`, the name and tag stay in `profiles`,
+--      and the bests live in `profile_modes`.
 --   3. **Merges / score / combo each take their own historical maximum**, via `max()` — never
 --      taken on the client's word.
 --   4. The board is **all-time only** (the user's decision, 2026-10-12), so there is no `period`
 --      column.
 
--- ── 玩家 ────────────────────────────────────────────────────────────────────
--- 一位玩家一列。`device_id` 由伺服器在第一次 `/api/run/start` 時頒發（見 handlers.ts），
+-- ── 玩家身份 ────────────────────────────────────────────────────────────────
+-- 一位玩家一列：名字與號。`device_id` 由伺服器在第一次 `/api/run/start` 時頒發（見 handlers.ts），
 -- 不由客戶端自產 —— 自產的話「換個 id 重來」就等於換一個 profile。
--- One row per player. `device_id` is issued by the server on the first `/api/run/start` (see
--- handlers.ts) rather than minted by the client: a client-minted id would let "start over with a
--- new id" mean "become a different player".
+-- 下面的 `best_*` 是舊版留下的欄位，成績已搬到 `profile_modes`，程式不再讀寫它們。
+-- One row per player: name and tag. `device_id` is issued by the server on the first
+-- `/api/run/start` (see handlers.ts) rather than minted by the client: a client-minted id would let
+-- "start over with a new id" mean "become a different player". The `best_*` columns below are the
+-- previous shape; the bests moved to `profile_modes` and nothing reads or writes them any more.
 create table if not exists profiles (
   device_id         text primary key,
   display_name      text        not null default '',
   -- 顯示用的四位數玩家號（`0001`–`9999`）。**不是身分** —— 身分是 `device_id`，所以改名不動號、
   -- 也永遠不會因為撞名而換人；同名的人靠這個號分開。
   user_tag          varchar(4)  not null default '',
-  -- 這三個是**各自**的歷史最大，可能來自不同的局（與客戶端資料層同一個模型）。
   best_score        integer     not null default 0,
   best_max_combo    integer     not null default 0,
   best_merges       integer     not null default 0,
-  -- 綁在 `best_score` 上：創下最高分的**那一局**打了多久（使用者定案：時長顯示在分數旁邊）。
   best_duration_ms  integer     not null default 0,
   best_at           timestamptz,
   name_changed_at   timestamptz,
@@ -45,9 +48,34 @@ create table if not exists profiles (
   updated_at        timestamptz not null default now()
 );
 
--- 榜的排序鍵：分數降冪，同分時早達成的排前面（先到先得，且是穩定的決勝鍵）。
 create index if not exists profiles_best_score_idx
   on profiles (best_score desc, best_at asc);
+
+-- ── 每個模式的歷史最大值 ────────────────────────────────────────────────────
+-- 一位玩家在每個模式各一列（`primary key (device_id, mode)`）：兩個模式的分數尺度不同，合成一列
+-- 會讓傳統模式的成績永遠被新玩法蓋住。`mode` 目前是 `new` 或 `traditional`。
+-- One row per player per mode (`primary key (device_id, mode)`): the two modes score on different
+-- scales, and folding them into one row would bury the traditional numbers forever. `mode` is
+-- currently `new` or `traditional`.
+create table if not exists profile_modes (
+  device_id        text        not null,
+  mode             text        not null default 'new',
+  display_name     text        not null default '',
+  user_tag         varchar(4)  not null default '',
+  -- 這三個是**各自**的歷史最大，可能來自不同的局（與客戶端資料層同一個模型）。
+  best_score       integer     not null default 0,
+  best_max_combo   integer     not null default 0,
+  best_merges      integer     not null default 0,
+  -- 綁在 `best_score` 上：創下最高分的**那一局**打了多久（使用者定案：時長顯示在分數旁邊）。
+  best_duration_ms integer     not null default 0,
+  best_at          timestamptz,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+  primary key (device_id, mode)
+);
+
+create index if not exists profile_modes_board_idx
+  on profile_modes (mode, best_score desc, best_at asc);
 
 -- ── 每一局 ──────────────────────────────────────────────────────────────────
 -- 一次提交一列。`run_id` 唯一 —— 這是**冪等**的來源：網路重試送同一局不會重複計分，
@@ -60,7 +88,7 @@ create index if not exists profiles_best_score_idx
 -- 那條外鍵會擋掉兩個完全正常的寫入：
 --   1. **新裝置的第一次提交**。`saveScore` 先寫 `scores` 再寫 `profiles`，順序不能反 ——
 --      「這一局是不是新的」是由 `scores` 那一句的結果決定的。所以寫入的那一刻還沒有父列。
---   2. **被退回的提交**。`verified = false` 的局故意不建 profile（見下方註解與 design.md §6.7），
+--   2. **被退回的提交**。`verified = false` 的局故意不建 profile（見 design.md §6.7），
 --      於是它永遠沒有父列；有外鍵就等於「拒絕留審計痕跡」，而那正是要留的東西。
 -- 反過來說那條外鍵買不到任何東西：沒有任何地方刪除 profile，`on delete cascade` 是裝飾品。所以這裡
 -- 不再宣告它，三個方言（Postgres／MySQL／SQLite）也就此一致。
@@ -86,6 +114,8 @@ create table if not exists scores (
   -- 未通過合理性檢查者仍然寫入（留審計痕跡），但 `verified = false`，榜單一律排除。
   verified     boolean     not null default true,
   rejected     text,
+  -- 這一局是哪個模式；榜與 profile 都按它分開。
+  mode         text        not null default 'new',
   created_at   timestamptz not null default now()
 );
 
@@ -146,3 +176,18 @@ alter table requests drop column if exists user_agent,
 -- its own `where`, so re-running it on every deploy touches no row that already has a tag.
 alter table profiles add column if not exists user_tag varchar(4) not null default '';
 update profiles set user_tag = lpad((floor(random() * 9999) + 1)::int::text, 4, '0') where user_tag = '';
+
+-- 模式：`scores` 補欄位；舊庫的成績回填成「新玩法」一列。`on conflict do nothing` 讓重跑無害。
+-- Mode: `scores` gains the column, and an old database's scores are backfilled as the new mode.
+-- `on conflict do nothing` makes a re-run harmless.
+alter table scores add column if not exists mode text not null default 'new';
+
+insert into profile_modes (
+  device_id, mode, display_name, user_tag, best_score, best_duration_ms, best_max_combo,
+  best_merges, best_at
+)
+select p.device_id, 'new', p.display_name, p.user_tag, p.best_score, p.best_duration_ms,
+       p.best_max_combo, p.best_merges, p.best_at
+from profiles p
+where p.best_score > 0
+on conflict (device_id, mode) do nothing;

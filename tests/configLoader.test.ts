@@ -3,6 +3,7 @@
  * Unit tests for `configLoader`: fallback behaviour via an injected fake fetcher.
  */
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { loadConfig, type FetchLike } from '../src/core/configLoader';
 
@@ -73,7 +74,7 @@ const VALID_BRANDING = JSON.stringify({ gameName: 'X', gameNameZh: '叉', versio
 
 function allValid(extra: FileMap = {}): FileMap {
   return {
-    'levels.json': VALID_LEVELS,
+    'levels_new.json': VALID_LEVELS,
     'skills.json': VALID_SKILLS,
     'container.json': VALID_CONTAINER,
     'branding.json': VALID_BRANDING,
@@ -96,7 +97,7 @@ describe('loadConfig — 正常路徑 / happy path', () => {
 
   it('keeps an explicit gravity, including zero', async () => {
     const files = allValid({
-      'levels.json': JSON.stringify({ settings: { gravityY: 0 }, levels: JSON.parse(VALID_LEVELS).levels }),
+      'levels_new.json': JSON.stringify({ settings: { gravityY: 0 }, levels: JSON.parse(VALID_LEVELS).levels }),
     });
     const config = await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files) });
 
@@ -125,7 +126,7 @@ describe('loadConfig — 正常路徑 / happy path', () => {
 
   it('falls back to a 500ms drop cooldown, the shipped value', async () => {
     const files = allValid({
-      'levels.json': JSON.stringify({ levels: JSON.parse(VALID_LEVELS).levels }),
+      'levels_new.json': JSON.stringify({ levels: JSON.parse(VALID_LEVELS).levels }),
     });
     const config = await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files) });
 
@@ -144,7 +145,7 @@ describe('loadConfig — 檔案層級的降級 / file-level fallback', () => {
 
   it('rejects an HTML body (SPA fallback) instead of parsing it', async () => {
     const { warn, messages } = collectWarnings();
-    const files = allValid({ 'levels.json': '<!doctype html><html></html>' });
+    const files = allValid({ 'levels_new.json': '<!doctype html><html></html>' });
     const config = await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files), onWarn: warn });
 
     expect(config.levels.levels).toHaveLength(10);
@@ -153,7 +154,7 @@ describe('loadConfig — 檔案層級的降級 / file-level fallback', () => {
 
   it('falls back when the body is not valid JSON', async () => {
     const { warn, messages } = collectWarnings();
-    const files = allValid({ 'levels.json': '{ "levels": [ }' });
+    const files = allValid({ 'levels_new.json': '{ "levels": [ }' });
     const config = await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files), onWarn: warn });
 
     expect(config.levels.levels).toHaveLength(10);
@@ -178,7 +179,7 @@ describe('loadConfig — 欄位層級的降級 / field-level fallback', () => {
     const { warn, messages } = collectWarnings();
     const broken = JSON.parse(VALID_LEVELS) as { levels: Array<Record<string, unknown>> };
     broken.levels[0]!.radius = -5;
-    const files = allValid({ 'levels.json': JSON.stringify(broken) });
+    const files = allValid({ 'levels_new.json': JSON.stringify(broken) });
     const config = await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files), onWarn: warn });
 
     expect(config.levels.levels[0]?.radius).toBe(13.5);
@@ -280,6 +281,70 @@ describe('loadConfig — 欄位層級的降級 / field-level fallback', () => {
   });
 });
 
+describe('loadConfig — 玩法模式 / play modes', () => {
+  it('defaults to levels_new.json', async () => {
+    const files = allValid({
+      'levels_new.json': JSON.stringify({ settings: { maxBodies: 77 }, levels: JSON.parse(VALID_LEVELS).levels }),
+    });
+    const config = await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files) });
+
+    expect(config.levels.settings.maxBodies).toBe(77);
+  });
+
+  it('reads the table named by levelsFile instead', async () => {
+    const files = allValid({
+      'levels.json': JSON.stringify({ settings: { maxBodies: 33 }, levels: JSON.parse(VALID_LEVELS).levels }),
+    });
+    const config = await loadConfig({
+      ...OPTIONS,
+      levelsFile: 'config/levels.json',
+      fetcher: makeFetcher(files),
+    });
+
+    expect(config.levels.settings.maxBodies).toBe(33);
+  });
+
+  it('narrows the skill roster to skillIds, keeping the loader order', async () => {
+    const files = allValid({
+      'levels_new.json': JSON.stringify({
+        skillIds: ['early'],
+        levels: JSON.parse(VALID_LEVELS).levels,
+      }),
+    });
+    const config = await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files) });
+
+    expect(config.skills.skills.map((skill) => skill.id)).toEqual(['early']);
+  });
+
+  it('ignores unknown ids and keeps every skill when none match', async () => {
+    const { warn, messages } = collectWarnings();
+    const files = allValid({
+      'levels_new.json': JSON.stringify({
+        skillIds: ['ghost'],
+        levels: JSON.parse(VALID_LEVELS).levels,
+      }),
+    });
+    const config = await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files), onWarn: warn });
+
+    expect(config.skills.skills).toHaveLength(2);
+    expect(messages.some((message) => message.includes('unknown skill "ghost"'))).toBe(true);
+    expect(messages.some((message) => message.includes('matched no skill'))).toBe(true);
+  });
+
+  it('keeps every skill when the roster is malformed', async () => {
+    const { warn } = collectWarnings();
+    const files = allValid({
+      'levels_new.json': JSON.stringify({
+        skillIds: 'early',
+        levels: JSON.parse(VALID_LEVELS).levels,
+      }),
+    });
+    const config = await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files), onWarn: warn });
+
+    expect(config.skills.skills).toHaveLength(2);
+  });
+});
+
 describe('loadConfig — 載入期語意檢查 / load-time semantics', () => {
   it('warns when a skill costs more SP than the cap allows', async () => {
     const { warn, messages } = collectWarnings();
@@ -292,5 +357,44 @@ describe('loadConfig — 載入期語意檢查 / load-time semantics', () => {
     await loadConfig({ ...OPTIONS, fetcher: makeFetcher(files), onWarn: warn });
 
     expect(messages.some((message) => message.includes('never be unlocked'))).toBe(true);
+  });
+});
+
+describe('public/config — 兩個模式的技能名單 / each mode’s skill roster', () => {
+  /** 讀真正的配置檔；這些是隨附檔案，不會被假 fetcher 影響。 */
+  const read = (file: string): Record<string, unknown> =>
+    JSON.parse(readFileSync(new URL(`../public/config/${file}`, import.meta.url), 'utf8')) as Record<
+      string,
+      unknown
+    >;
+
+  /*
+   * 名單是「這個模式有哪幾個技能」的唯一來源：新玩法不寫＝全部，傳統模式寫死最初四個。
+   * 兩邊一旦對調（曾經發生過），切換模式後看到的仍是上一個模式的技能欄。
+   * The roster is the single source of "which skills this mode has": omitting it in the new mode
+   * means every skill, while the traditional mode pins the original four. Swapping the two (which
+   * has happened) leaves the skill bar showing the previous mode's set after a switch.
+   */
+  it('leaves the new mode unrestricted so every skill stays available', () => {
+    expect(read('levels_new.json')['skillIds']).toBeUndefined();
+  });
+
+  it('gives the traditional mode the original four, by id', () => {
+    expect(read('levels.json')['skillIds']).toEqual([
+      'discard',
+      'protocol_float',
+      'shake',
+      'fate_swap',
+    ]);
+  });
+
+  it('only names skills that exist in skills.json', () => {
+    const known = new Set(
+      (read('skills.json')['skills'] as { id: string }[]).map((skill) => skill.id),
+    );
+
+    for (const id of read('levels.json')['skillIds'] as string[]) {
+      expect(known.has(id), id).toBe(true);
+    }
   });
 });

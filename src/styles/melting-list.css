@@ -28,27 +28,21 @@
 }
 
 /*
- * 蛇形走線：鋪滿內容區、永遠在素材之下（DOM 順序在格子之前）。
- * The serpentine track: spans the content box and always sits under the art (its DOM order
- * puts it before the cells).
- *
- * `overflow: visible` 是刻意的：箭頭由內容區右緣再伸出約 18px（設計稿亦然，仍在面板
- * 之內）。SVG 預設裁掉視埠外的內容，那會把箭頭切掉一半。
- * `overflow: visible` is deliberate: the arrowhead overshoots the content box's right edge
- * by about 18px (the mock does too, still inside the panel). SVG clips to its viewport by
- * default, which would cut the arrowhead in half.
+ * 蛇形走線：鋪滿內容區、永遠在素材之下（DOM 順序在格子之前）。走線在最後一格結束，
+ * 所以它不會伸到內容區之外，也不需要 `overflow: visible`。
+ * The serpentine track: spans the content box and always sits under the art (its DOM order puts
+ * it before the cells). It ends on the last slot, so nothing reaches outside the box and
+ * `overflow: visible` is not needed.
  */
 .roster-track {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  overflow: visible;
   pointer-events: none;
 }
 
 .roster-track__route,
-.roster-track__dash,
 .roster-track__arrow {
   fill: none;
   stroke: var(--color-track);
@@ -58,20 +52,6 @@
 .roster-track__route {
   stroke-linejoin: miter;
   stroke-linecap: butt;
-}
-
-/*
- * 虛線段（使用者定案）：最後一隻方團團之後的走線 —— 「路還沒修到那裡」，與未解鎖灰格
- * 同一種語意。同一支筆、同一個顏色，只把線切成段並略為調暗，讀起來是「尚未啟用」。
- * The dashed tail (the user's decision): the track past the last dumpling — "the road is not
- * built that far yet", the same semantics as a locked grey tile. Same pen, same colour; the
- * line is merely broken and dimmed a touch so it reads as "not yet active".
- */
-.roster-track__dash {
-  stroke-linejoin: miter;
-  stroke-linecap: butt;
-  stroke-dasharray: 12 10;
-  opacity: 0.72;
 }
 
 /* 箭頭是開放 V 形，端點與尖端收圓比較乾淨。 */

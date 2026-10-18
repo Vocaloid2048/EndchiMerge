@@ -157,8 +157,8 @@ export function createMeltingList(options: MeltingListOptions): MeltingList {
  * 把蛇形走線畫成一張覆蓋整格網的 SVG；放在格子之前 append，所以永遠在素材之下。
  * The serpentine track as one SVG over the grid, appended before the cells so it stays under the art.
  *
- * `overflow: visible` 是必要的（箭頭比內容區右緣再突出約 18px）；`viewBox` 高度取實際格網高度，否則 `preserveAspectRatio="none"` 會垂直拉伸路徑。
- * `overflow: visible` is required (the arrow pokes ~18px past the right edge), and the `viewBox` height must be the real grid height or `preserveAspectRatio="none"` distorts the path.
+ * 走線在最後一格結束，所以 `viewBox` 只需覆蓋實際格網高度。
+ * The track ends on the last slot, so the `viewBox` only has to cover the real grid height.
  */
 function buildTrack(track: RosterTrack, gridHeight: number): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, 'svg');
@@ -172,26 +172,21 @@ function buildTrack(track: RosterTrack, gridHeight: number): SVGSVGElement {
 
   const { strokeWidth } = MELTING.track;
 
-  const path = document.createElementNS(SVG_NS, 'path');
-  path.classList.add('roster-track__route');
-  path.setAttribute('d', track.path);
-  path.setAttribute('stroke-width', String(strokeWidth));
-
   /*
-   * 虛線段：最後一隻方團團之後的走線 ——「路還沒修到那裡」。
-   * The dashed tail: the track past the last dumpling — "the road is not built that far yet".
+   * 走線與箭頭：兩條 path，都畫在格子之下。
+   * The track and its arrowhead: two paths, both under the cells.
    */
-  const tail = document.createElementNS(SVG_NS, 'path');
-  tail.classList.add('roster-track__dash');
-  tail.setAttribute('d', track.dash);
-  tail.setAttribute('stroke-width', String(strokeWidth));
+  const route = document.createElementNS(SVG_NS, 'path');
+  route.classList.add('roster-track__route');
+  route.setAttribute('d', track.path);
+  route.setAttribute('stroke-width', String(strokeWidth));
 
   const head = document.createElementNS(SVG_NS, 'path');
   head.classList.add('roster-track__arrow');
   head.setAttribute('d', track.arrow);
   head.setAttribute('stroke-width', String(strokeWidth));
 
-  svg.append(path, tail, head);
+  svg.append(route, head);
   return svg;
 }
 

@@ -5,6 +5,7 @@
 
 import type { ProfileRow, RankProbe, RequestRow, RunTokenRow, ScoreRow, Store } from './store.js';
 import { Binder, BOARD_PRIMARY_COLUMN, type BoardCategory, type Dialect } from './db/dialect.js';
+import { DEFAULT_RUN_MODE, isRunMode, type RunMode } from './modes.js';
 import type { Driver, Row } from './db/types.js';
 import { newUserTag } from './tokens.js';
 
@@ -103,7 +104,7 @@ export class SqlStore implements Store {
 
     const { rows } = await this.driver.query(
       `select run_id, device_id, display_name, score, duration_ms, merges, drops, max_combo,
-              version, verified, rejected,
+              version, verified, rejected, mode,
               ${this.dialect.epochMs('created_at')} as at_ms
        from scores where run_id = ${b.bind(runId)}`,
       b.params,
@@ -116,6 +117,7 @@ export class SqlStore implements Store {
       runId: asText(row['run_id']),
       deviceId: asText(row['device_id']),
       displayName: asText(row['display_name']),
+      mode: isRunMode(row['mode']) ? row['mode'] : DEFAULT_RUN_MODE,
       /* `scores` 沒有號這一欄（只有 `profiles` 有），所以讀回來的就是空的 —— 呼叫端要寫 profile 時才提議一個。
        * `scores` has no tag column (only `profiles` does), so a row read back carries none; a tag is offered only when a profile is written. */
       userTag: '',
@@ -184,7 +186,8 @@ export class SqlStore implements Store {
            max_combo = ${b.bind(row.maxCombo)},
            version = ${b.bind(row.version)},
            verified = ${b.bind(row.verified)},
-           rejected = ${b.bind(row.rejected)}
+           rejected = ${b.bind(row.rejected)},
+           mode = ${b.bind(row.mode)}
          where run_id = ${b.bind(row.runId)} and device_id = ${b.bind(row.deviceId)}`,
         b.params,
       );
@@ -212,6 +215,7 @@ export class SqlStore implements Store {
        * `atMs`; dropping it raises nothing and silently drifts the two stores apart.
        */
       this.dialect.ts(row.atMs),
+      row.mode,
     ]);
 
     /* Postgres 用 `returning` 的行數判斷、MySQL 用 `affectedRows`（見 `Dialect.insertScoreSignal`），兩者都必須原子。
@@ -220,12 +224,34 @@ export class SqlStore implements Store {
   }
 
   private async upsertProfile(tx: Driver, row: ScoreRow): Promise<void> {
-    const current = await this.loadProfile(tx, row.deviceId);
-    const displayName = row.displayName === '' ? (current?.displayName ?? '') : row.displayName;
-    const userTag = await this.resolveUserTag(tx, displayName, current?.userTag ?? '', row.userTag, row.deviceId);
+    /*
+     * 號與名字取自 `profiles`（跨模式的一份）：在傳統模式第一次提交時，這個模式的列還不存在，
+     * 若從那一列取名就會把玩家的號重抽一次 —— 改名不動號、也不該換模式就換號。
+     * The tag and name come from `profiles` (shared across modes): on a mode's first submission its
+     * row does not exist yet, and reading from it would re-roll the player's tag — a rename never
+     * changes the tag, and neither should a mode change.
+     */
+    const identity = await this.loadIdentity(tx, row.deviceId);
+    const displayName = row.displayName === '' ? (identity?.displayName ?? '') : row.displayName;
+    const userTag = await this.resolveUserTag(
+      tx,
+      displayName,
+      identity?.userTag ?? '',
+      row.userTag,
+      row.deviceId,
+    );
 
+    await tx.query(this.dialect.upsertIdentity(), [row.deviceId, row.displayName, userTag]);
+
+    /*
+     * 欄位順序與 `Dialect.upsertProfile()` 一致：`best_duration_ms`／`best_at` 排在 `best_score`
+     * 之前，MySQL 才是拿舊分數去比。
+     * The order matches `Dialect.upsertProfile()`: `best_duration_ms` / `best_at` come before
+     * `best_score`, which is what makes MySQL compare against the old score.
+     */
     await tx.query(this.dialect.upsertProfile(), [
       row.deviceId,
+      row.mode,
       row.displayName,
       userTag,
       row.score,
@@ -285,13 +311,14 @@ export class SqlStore implements Store {
   /* ── 玩家與榜 ──────────────────────────────────────────────────────────── */
 
   private profileColumns(): string {
-    return `device_id, display_name, user_tag, best_score, best_duration_ms, best_max_combo, best_merges,
+    return `device_id, mode, display_name, user_tag, best_score, best_duration_ms, best_max_combo, best_merges,
             case when best_at is null then null else ${this.dialect.epochMs('best_at')} end as best_at_ms`;
   }
 
   private toProfileRow(row: Row): ProfileRow {
     return {
       deviceId: asText(row['device_id']),
+      mode: isRunMode(row['mode']) ? row['mode'] : DEFAULT_RUN_MODE,
       displayName: asText(row['display_name']),
       userTag: asText(row['user_tag']),
       bestScore: this.dialect.readNumber(row['best_score']),
@@ -302,12 +329,36 @@ export class SqlStore implements Store {
     };
   }
 
-  /** 讀一列 profile；`upsertProfile` 要在**同一個交易**裡先看現況（號要沿用、名字要不動），所以驅動是參數。 */
-  private async loadProfile(driver: Driver, deviceId: string): Promise<ProfileRow | null> {
+  /** 讀一位玩家的**身份**（名字與號）；跨模式只有一份。 */
+  private async loadIdentity(
+    driver: Driver,
+    deviceId: string,
+  ): Promise<{ readonly displayName: string; readonly userTag: string } | null> {
     const b = new Binder(this.dialect);
 
     const { rows } = await driver.query(
-      `select ${this.profileColumns()} from profiles where device_id = ${b.bind(deviceId)}`,
+      `select display_name, user_tag from profiles where device_id = ${b.bind(deviceId)}`,
+      b.params,
+    );
+
+    const row = (rows as Row[])[0];
+
+    return row === undefined
+      ? null
+      : { displayName: asText(row['display_name']), userTag: asText(row['user_tag']) };
+  }
+
+  /** 讀一個模式的一列；`upsertProfile` 要在**同一個交易**裡先看現況，所以驅動是參數。 */
+  private async loadProfile(
+    driver: Driver,
+    deviceId: string,
+    mode: RunMode,
+  ): Promise<ProfileRow | null> {
+    const b = new Binder(this.dialect);
+
+    const { rows } = await driver.query(
+      `select ${this.profileColumns()} from profile_modes
+       where device_id = ${b.bind(deviceId)} and mode = ${b.bind(mode)}`,
       b.params,
     );
 
@@ -316,16 +367,21 @@ export class SqlStore implements Store {
     return row === undefined ? null : this.toProfileRow(row);
   }
 
-  async getProfile(deviceId: string): Promise<ProfileRow | null> {
-    return this.loadProfile(this.driver, deviceId);
+  async getProfile(deviceId: string, mode: RunMode = DEFAULT_RUN_MODE): Promise<ProfileRow | null> {
+    return this.loadProfile(this.driver, deviceId, mode);
   }
 
-  async topProfiles(category: BoardCategory, limit: number): Promise<ProfileRow[]> {
+  async topProfiles(
+    category: BoardCategory,
+    limit: number,
+    mode: RunMode | null = null,
+  ): Promise<ProfileRow[]> {
     const b = new Binder(this.dialect);
+    const filter = mode === null ? '' : ` and mode = ${b.bind(mode)}`;
 
     const { rows } = await this.driver.query(
-      `select ${this.profileColumns()} from profiles
-       where best_score > 0
+      `select ${this.profileColumns()} from profile_modes
+       where best_score > 0${filter}
        order by ${this.dialect.boardOrder(category)}
        limit ${b.bind(Math.max(0, limit))}`,
       b.params,
@@ -334,9 +390,22 @@ export class SqlStore implements Store {
     return (rows as Row[]).map((row) => this.toProfileRow(row));
   }
 
-  async countProfiles(): Promise<number> {
+  async countProfiles(mode: RunMode | null = null): Promise<number> {
+    const b = new Binder(this.dialect);
+    const filter = mode === null ? '' : ` and mode = ${b.bind(mode)}`;
+
     const { rows } = await this.driver.query(
-      `select ${this.dialect.countInt('count(*)')} as n from profiles where best_score > 0`,
+      `select ${this.dialect.countInt('count(*)')} as n from profile_modes where best_score > 0${filter}`,
+      b.params,
+    );
+
+    return this.dialect.readNumber((rows as Row[])[0]?.['n']);
+  }
+
+  async countPlayers(): Promise<number> {
+    const { rows } = await this.driver.query(
+      `select ${this.dialect.countInt('count(distinct device_id)')} as n
+       from profile_modes where best_score > 0`,
     );
 
     return this.dialect.readNumber((rows as Row[])[0]?.['n']);
@@ -359,6 +428,7 @@ export class SqlStore implements Store {
         : [{ column: 'best_score', value: probe.score, desc: true }]),
       { column: 'best_at', value: probe.atMs, desc: false, time: true },
       { column: 'device_id', value: probe.deviceId, desc: false },
+      { column: 'mode', value: probe.mode ?? DEFAULT_RUN_MODE, desc: false },
     ];
 
     const bind = (key: (typeof keys)[number]): string =>
@@ -388,12 +458,18 @@ export class SqlStore implements Store {
     return terms.join(' or ');
   }
 
-  async rankOf(probe: RankProbe, category: BoardCategory): Promise<number> {
+  async rankOf(
+    probe: RankProbe,
+    category: BoardCategory,
+    mode: RunMode | null = null,
+  ): Promise<number> {
     const b = new Binder(this.dialect);
+    const ahead = this.aheadOf(category, b, probe);
+    const filter = mode === null ? '' : ` and mode = ${b.bind(mode)}`;
 
     const { rows } = await this.driver.query(
-      `select ${this.dialect.countInt('count(*)')} as n from profiles
-       where best_score > 0 and (${this.aheadOf(category, b, probe)})`,
+      `select ${this.dialect.countInt('count(*)')} as n from profile_modes
+       where best_score > 0 and (${ahead})${filter}`,
       b.params,
     );
 

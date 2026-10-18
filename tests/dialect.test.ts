@@ -36,7 +36,7 @@ function placeholderCount(sql: string, dialect: Dialect): number {
 }
 
 function greaterCall(column: string): RegExp {
-  return new RegExp(`(?:greatest|max)\\(profiles\\.${column}\\b`, 'iu');
+  return new RegExp(`(?:greatest|max)\\(\\w+\\.${column}\\b`, 'iu');
 }
 
 /* ── 佔位符與參數 ─────────────────────────────────────────────────────────── */
@@ -150,7 +150,7 @@ describe('board order — 四個鍵的語意要一致 / the four keys mean the s
   });
 
   it('keeps the shared key list free of dialect syntax', () => {
-    expect(BOARD_ORDER_KEYS).toBe('best_score desc, best_at asc, device_id asc');
+    expect(BOARD_ORDER_KEYS).toBe('best_score desc, best_at asc, device_id asc, mode asc');
     expect(BOARD_ORDER_KEYS).not.toContain('nulls');
   });
 });
@@ -187,7 +187,9 @@ describe('writes — 形狀差異 / shape differences', () => {
 
   it('takes one placeholder per bound column, including the submission time', () => {
     for (const dialect of DIALECTS) {
-      expect(placeholderCount(dialect.insertScore(), dialect), dialect.name).toBe(12);
+      /* 12 個成績欄位 ＋ `mode`。 */
+      /* Twelve score columns plus `mode`. */
+      expect(placeholderCount(dialect.insertScore(), dialect), dialect.name).toBe(13);
       /* `scores.created_at` 是綁定值，不靠 DDL 預設值。
          `scores.created_at` is a bound value, not a DDL default. */
       expect(dialect.insertScore(), dialect.name).toContain('created_at');
@@ -240,11 +242,11 @@ describe('writes — 形狀差異 / shape differences', () => {
   });
 
   it('uses max() on SQLite and greatest() elsewhere', () => {
-    expect(sqliteDialect.upsertProfile()).toMatch(/max\(profiles\.best_score\b/iu);
+    expect(sqliteDialect.upsertProfile()).toMatch(/max\(profile_modes\.best_score\b/iu);
     expect(sqliteDialect.upsertProfile()).not.toMatch(/greatest/iu);
 
     for (const dialect of [postgresDialect, mysqlDialect]) {
-      expect(dialect.upsertProfile(), dialect.name).toMatch(/greatest\(profiles\.best_score\b/iu);
+      expect(dialect.upsertProfile(), dialect.name).toMatch(/greatest\(profile_modes\.best_score\b/iu);
     }
   });
 
@@ -276,6 +278,17 @@ describe('schema — 必須可重複執行 / it must be repeatable', () => {
             typeof dialect.isDuplicateColumnError === 'function';
 
           expect(native || classified, where).toBe(true);
+        } else if (flat.startsWith('insert')) {
+          /*
+           * 回填：重跑必須無害，所以每一句都要自帶「已存在就跳過」的寫法。
+           * A backfill must be harmless on a re-run, so every such statement says "skip if present".
+           */
+          const idempotent =
+            flat.includes('on conflict') ||
+            flat.includes('on duplicate key') ||
+            flat.includes('insert or ignore');
+
+          expect(idempotent, where).toBe(true);
         } else {
           expect(flat.startsWith('update'), where).toBe(true);
           expect(flat, where).toContain('where');
@@ -292,6 +305,7 @@ describe('schema — 必須可重複執行 / it must be repeatable', () => {
         .map((match) => match[1] ?? '');
 
     expect(tablesOf(postgresDialect).sort()).toEqual([
+      'profile_modes',
       'profiles',
       'requests',
       'run_tokens',
@@ -409,10 +423,10 @@ describe('schema.sql — 人看的那一份要和程式一致 / the human-readab
     expect(fromFile).toEqual(fromCode);
   });
 
-  it('actually contains the four tables', () => {
+  it('actually contains the five tables', () => {
     const text = readFileSync(new URL('../schema.sql', import.meta.url), 'utf8');
 
-    for (const table of ['profiles', 'scores', 'run_tokens', 'requests']) {
+    for (const table of ['profiles', 'profile_modes', 'scores', 'run_tokens', 'requests']) {
       expect(text).toContain(`create table if not exists ${table}`);
     }
   });

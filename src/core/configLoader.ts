@@ -115,6 +115,11 @@ export interface LoadConfigOptions {
   /** 配置檔的基底路徑；預設為 Vite 的 `BASE_URL`。
    * Base URL for the config files; defaults to Vite's `BASE_URL`. */
   baseUrl?: string;
+  /**
+   * 等級表檔案（相對於 `baseUrl`）；預設 `config/levels_new.json`。
+   * The level table file (relative to `baseUrl`); defaults to `config/levels_new.json`.
+   */
+  levelsFile?: string;
   /** 取代全域 `fetch`；測試用。
    * Replaces global `fetch`; for tests. */
   fetcher?: FetchLike;
@@ -122,6 +127,9 @@ export interface LoadConfigOptions {
    * Replaces `console.warn`; tests use it to assert degradation messages. */
   onWarn?: ConfigWarning;
 }
+
+/** 未指定模式時的等級表：新玩法。 */
+const DEFAULT_LEVELS_FILE = 'config/levels_new.json';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -274,6 +282,33 @@ function sanitizeLevel(raw: unknown, index: number, warn: ConfigWarning): LevelD
   };
 }
 
+/**
+ * 解析模式限定的技能名單；缺欄位＝不限（全部技能），格式錯也退回不限 —— 寧可多給技能，也不要開出一個沒有技能的模式。
+ * Parses the mode's skill roster; a missing key means "no restriction", and a malformed one falls back to
+ * the same — better too many skills than a mode with none.
+ */
+function sanitizeSkillIds(raw: unknown, warn: ConfigWarning): string[] | undefined {
+  if (raw === undefined) return undefined;
+
+  if (!Array.isArray(raw)) {
+    warn('levels.skillIds is not an array; every skill stays available.');
+    return undefined;
+  }
+
+  const ids: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry === 'string' && entry.trim() !== '') ids.push(entry.trim());
+    else warn(`levels.skillIds contains an invalid entry (${JSON.stringify(entry)}); ignored.`);
+  }
+
+  if (ids.length === 0) {
+    warn('levels.skillIds is empty; every skill stays available.');
+    return undefined;
+  }
+
+  return [...new Set(ids)];
+}
+
 function sanitizeLevels(raw: unknown, warn: ConfigWarning): LevelsConfig {
   if (!isRecord(raw)) {
     warn('levels.json could not be read; using the built-in level table.');
@@ -282,15 +317,17 @@ function sanitizeLevels(raw: unknown, warn: ConfigWarning): LevelsConfig {
 
   const settings = sanitizeSettings(raw.settings, warn);
   const rawLevels = raw.levels;
+  const skillIds = sanitizeSkillIds(raw.skillIds, warn);
+  const roster = skillIds === undefined ? {} : { skillIds };
 
   if (!Array.isArray(rawLevels) || rawLevels.length === 0) {
     warn('levels.levels is missing or empty; using the built-in level table.');
-    return { settings, levels: DEFAULT_LEVELS.map((level) => ({ ...level })) };
+    return { settings, levels: DEFAULT_LEVELS.map((level) => ({ ...level })), ...roster };
   }
 
   const levels = rawLevels.map((entry, index) => sanitizeLevel(entry, index, warn)).sort((a, b) => a.id - b.id);
 
-  return { settings, levels };
+  return { settings, levels, ...roster };
 }
 
 function sanitizeSp(raw: unknown, warn: ConfigWarning): SpSettings {
@@ -647,6 +684,38 @@ async function fetchJson(fetcher: FetchLike, url: string, warn: ConfigWarning): 
 }
 
 /**
+ * 依模式的 `skillIds` 收窄技能清單；沒有名單就原樣回傳。
+ * Narrows the skill list to the mode's `skillIds`; with no roster the list is returned untouched.
+ */
+function restrictSkills(
+  levels: LevelsConfig,
+  skills: SkillsConfig,
+  warn: ConfigWarning,
+): SkillsConfig {
+  const ids = levels.skillIds;
+  if (ids === undefined) return skills;
+
+  const wanted = new Set(ids);
+  const kept = skills.skills.filter((skill) => wanted.has(skill.id));
+
+  for (const id of ids) {
+    if (!skills.skills.some((skill) => skill.id === id)) {
+      warn(`levels.skillIds lists unknown skill "${id}"; ignored.`);
+    }
+  }
+
+  /* 一個都不認得時退回全部：模式少一個技能還能玩，沒有技能則整列都是空的。 */
+  /* Zero matches falls back to every skill: a mode missing one skill still plays, an empty one does not. */
+  if (kept.length === 0) {
+    warn('levels.skillIds matched no skill; every skill stays available.');
+
+    return skills;
+  }
+
+  return { ...skills, skills: kept };
+}
+
+/**
  * 載入全部配置：四份檔案並行抓取，各自獨立降級 —— 一份壞掉不影響其他三份。
  * Load every config file: the four fetches run in parallel and degrade independently, so one broken file does not take the rest down.
  */
@@ -656,14 +725,14 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<AllCo
   const fetcher: FetchLike = options.fetcher ?? ((input: string): Promise<Response> => fetch(input));
 
   const [levelsRaw, skillsRaw, containerRaw, brandingRaw] = await Promise.all([
-    fetchJson(fetcher, joinUrl(base, 'config/levels.json'), warn),
+    fetchJson(fetcher, joinUrl(base, options.levelsFile ?? DEFAULT_LEVELS_FILE), warn),
     fetchJson(fetcher, joinUrl(base, 'config/skills.json'), warn),
     fetchJson(fetcher, joinUrl(base, 'config/container.json'), warn),
     fetchJson(fetcher, joinUrl(base, 'config/branding.json'), warn),
   ]);
 
   const levels = sanitizeLevels(levelsRaw, warn);
-  const skills = sanitizeSkills(skillsRaw, warn);
+  const skills = restrictSkills(levels, sanitizeSkills(skillsRaw, warn), warn);
   const container = sanitizeContainer(containerRaw, warn);
 
   checkSkillUnlockability(skills, warn);

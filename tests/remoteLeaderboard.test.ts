@@ -446,7 +446,7 @@ describe('createRemoteLeaderboard — 讀榜 / reading the board', () => {
     await settle();
 
     expect(fetches()).toHaveLength(3);
-    expect(fetches()[0]?.url).toBe('/api/leaderboard?category=score&limit=20&deviceId=me');
+    expect(fetches()[0]?.url).toBe('/api/leaderboard?category=score&limit=20&deviceId=me&mode=all');
     expect(fetches().map((call) => new URL(`https://x${call.url}`).searchParams.get('category'))).toEqual([
       'score',
       'combo',

@@ -10,14 +10,15 @@
 import { MAX_RUN_MS, MIN_RUN_MS } from './env.js';
 
 /**
- * 三個上界常數，直接取自遊戲配置：最短投放間隔（`levels.json → settings.dropCooldownMs`）、
- * 最高級分數（`levels.json → levels[].score`，256）、倍率天花板（`COMBO_CURVE.cap + base`，10）。
+ * 三個上界常數，直接取自遊戲配置：最短投放間隔（`levels*.json → settings.dropCooldownMs`）、
+ * 最高級分數（兩份等級表最高級不同 —— 傳統 512、新玩法 262144 —— 取較寬的那個）、
+ * 倍率天花板（`COMBO_CURVE.cap + base`，10）。
  * Three upper bounds taken straight from the game config: the minimum drop interval
- * (`levels.json` → `settings.dropCooldownMs`), the top level's `score` (256), and the multiplier
- * ceiling (`combo.ts` → `COMBO_CURVE.cap + base`, i.e. 10).
+ * (`levels*.json` → `settings.dropCooldownMs`), the top level's `score` (the tables end at 512 and
+ * 262144 — the wider one wins), and the multiplier ceiling (`combo.ts` → `COMBO_CURVE.cap + base`, i.e. 10).
  */
 export const DROP_COOLDOWN_MS = 500;
-export const MAX_LEVEL_SCORE = 256;
+export const MAX_LEVEL_SCORE = 262_144;
 export const MAX_MULTIPLIER = 10;
 
 const DROP_SLACK = 2;

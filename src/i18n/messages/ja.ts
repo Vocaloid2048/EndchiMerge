@@ -32,6 +32,9 @@ export const ja: Messages = {
   'label.combo': 'コンボ',
   'label.skillList': 'スキル一覧',
   'label.meltingList': '図鑑',
+  'label.meltingHint': '別のモードで遊ぶには設定から切り替えてください。',
+  'mode.new': '新モード',
+  'mode.traditional': 'クラシック',
   'label.gameOver': 'ゲームオーバー',
   'label.newBest': '新記録',
   'label.best': 'ハイスコア',
@@ -75,6 +78,10 @@ export const ja: Messages = {
   'leaderboard.tab.score': '最高スコア',
   'leaderboard.tab.combo': 'COMBO 数',
   'leaderboard.tab.merges': '合成数',
+  'leaderboard.modeFilter': 'モード絞り込み',
+  'leaderboard.mode.all': 'すべて',
+  'leaderboard.mode.new': '新モード',
+  'leaderboard.mode.traditional': 'クラシック',
 
   'publish.name': '表示名',
   'publish.namePlaceholder': '名前を入力',
@@ -141,6 +148,17 @@ export const ja: Messages = {
 
   'settings.title': '設定',
   'settings.close': '設定を閉じる',
+  'settings.modes.heading': 'プレイモード',
+  'settings.modes.subtitle': '切り替えは新しいゲームから適用されます',
+  'settings.modes.newNote': '新しい顔ぶれと全スキルを使用。スコア上限は高めです。',
+  'settings.modes.traditionalNote': '公式の山団団と同じサイズで、最初の 4 スキルのみ使用します。',
+  'settings.modes.note':
+    '切り替えると現在のゲームはすぐ終了し、再読み込みされます。成績と図鑑の進捗はモードごとに別々に保存されるので、戻せば続きから再開できます。',
+  'modeConfirm.title': 'プレイモードを切り替えますか？',
+  'modeConfirm.message':
+    '「{mode}」への切り替えは次のゲームから適用されます。現在のゲームはすぐ終了し、再読み込みされます。',
+  'modeConfirm.confirm': '切り替えてやり直す',
+  'modeConfirm.confirmHold': '切り替え（{seconds}）',
   'settings.rules.heading': 'ゲームプレイ',
   'settings.rules.subtitle': 'ルールを変更すると、スコアはランキングに記録されません',
   'settings.rules.master': 'ゲームルールの変更を許可する',

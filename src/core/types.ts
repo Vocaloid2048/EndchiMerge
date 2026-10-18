@@ -133,6 +133,13 @@ export interface GameSettings {
 export interface LevelsConfig {
   settings: GameSettings;
   levels: LevelDef[];
+  /**
+   * 這個模式限定可用的技能 id；省略＝`skills.json` 的全部技能。
+   * 名單屬於模式而不是等級，但放在同一個檔案裡，載入模式只需抓一次。
+   * The skill ids this mode allows; omitted means every skill in `skills.json`. The roster belongs
+   * to the mode rather than the levels, but it lives in the same file so one fetch loads a mode.
+   */
+  skillIds?: string[];
 }
 
 /**

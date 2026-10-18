@@ -5,6 +5,7 @@
  */
 
 import type { BoardCategory } from './db/dialect.js';
+import { DEFAULT_RUN_MODE, type RunMode } from './modes.js';
 import { newUserTag } from './tokens.js';
 
 /** 重抽玩家號的次數上限：撞號本身罕見（四位數），上限只是不讓極端情況變成無窮迴圈。
@@ -47,6 +48,8 @@ export interface ScoreRow {
   readonly runId: string;
   readonly deviceId: string;
   readonly displayName: string;
+  /** 這一局是哪個模式；榜與 profile 都按它分開。 */
+  readonly mode: RunMode;
   /**
    * 要給 profile 的玩家號（**不是** `scores` 的欄位）：只有 `profiles` 帶號，這裡負責把它送過去。
    * The player tag offered to the profile — **not** a `scores` column; only `profiles` carries one.
@@ -64,11 +67,13 @@ export interface ScoreRow {
 }
 
 /**
- * 一位玩家一列；三個最大值各自獨立，與客戶端資料層同一個模型。
- * One row per player; the three maxima are independent, matching the client's data layer.
+ * 一位玩家在**一個模式**下的一列；三個最大值各自獨立，與客戶端資料層同一個模型。
+ * One row per player **per mode**; the three maxima are independent, matching the client's data layer.
  */
 export interface ProfileRow {
   readonly deviceId: string;
+  /** 這一列屬於哪個模式；同一位玩家每個模式各有一列。 */
+  readonly mode: RunMode;
   readonly displayName: string;
   /** 顯示用的四位數玩家號；`''` 代表這一列還沒拿到號（舊庫回填前）。**永遠不是身分**（那是 `deviceId`）。
    * The four-digit display tag; `''` means this row has none yet (an old database before the backfill). **Never identity** (that is `deviceId`). */
@@ -87,6 +92,8 @@ export interface ProfileRow {
  */
 export interface RankProbe {
   readonly deviceId: string;
+  /** 探針屬於哪個模式；「所有模式」的榜在決勝時用它。未提供時當新玩法。 */
+  readonly mode?: RunMode;
   readonly score: number;
   readonly maxCombo: number;
   readonly merges: number;
@@ -129,24 +136,34 @@ export interface Store {
    */
   updateScore(row: ScoreRow): Promise<void>;
 
-  getProfile(deviceId: string): Promise<ProfileRow | null>;
+  getProfile(deviceId: string, mode?: RunMode): Promise<ProfileRow | null>;
   /**
    * 某個分類的前 `limit` 名（只含 `bestScore > 0`）；分類必填、不設預設值，漏傳要直接報錯而不是安靜地填錯分頁。
+   * `mode` 給 `null`（預設）＝兩個模式一起列，每一列自帶自己的模式。
    * The top `limit` of one category (only `bestScore > 0`); the category is required with no default,
-   * so a forgotten argument fails loudly instead of quietly filling the wrong tab.
+   * so a forgotten argument fails loudly instead of quietly filling the wrong tab. `mode` of `null`
+   * (the default) lists both modes together, each row carrying its own.
    */
-  topProfiles(category: BoardCategory, limit: number): Promise<ProfileRow[]>;
+  topProfiles(category: BoardCategory, limit: number, mode?: RunMode | null): Promise<ProfileRow[]>;
   /**
-   * 榜上的玩家總數（`bestScore > 0` 的人數）。
-   * The number of players on the board (those with `bestScore > 0`).
+   * 榜上的列數（`bestScore > 0` 的列）；`mode` 為 `null` 時數兩個模式。
+   * The number of rows on the board (those with `bestScore > 0`); `null` counts both modes.
+   *
+   * ⚠️ 這是**列**數，不是人數 —— 同一人玩了兩個模式就有兩列。要人數用 `countPlayers()`。
+   * ⚠️ These are **rows**, not people: a player who tried both modes has two. Use `countPlayers()` for people.
    */
-  countProfiles(): Promise<number>;
+  countProfiles(mode?: RunMode | null): Promise<number>;
+  /**
+   * 榜上有幾位玩家（至少有一個模式留下成績的裝置數）。
+   * How many players are on the board (devices with a result in at least one mode).
+   */
+  countPlayers(): Promise<number>;
   /**
    * 某組成績在指定分類下的名次（1 起算），與 `topProfiles` 用完全相同的排序。
    * The 1-based rank of a set of numbers within the given category, using exactly the same ordering
    * as `topProfiles`.
    */
-  rankOf(probe: RankProbe, category: BoardCategory): Promise<number>;
+  rankOf(probe: RankProbe, category: BoardCategory, mode?: RunMode | null): Promise<number>;
 
   insertRequest(row: RequestRow): Promise<void>;
 }
@@ -187,10 +204,15 @@ export function compareProfiles(category: BoardCategory, a: ProfileRow, b: Profi
   if (left !== right) return left - right;
 
   /*
-   * 最後用 id 收尾：少了它，排序會隨插入順序而變。
-   * The id breaks remaining ties: without it, the order depends on insertion.
+   * 最後用 id 收尾：少了它，排序會隨插入順序而變。同一裝置在「所有模式」下有兩列，
+   * 所以再補一個模式鍵 —— 兩個模式的決勝鍵合起來才唯一。
+   * The id breaks remaining ties: without it, the order depends on insertion. A device has two rows
+   * under "all modes", so the mode joins the tail — together they are unique.
    */
-  return a.deviceId.localeCompare(b.deviceId);
+  const byId = a.deviceId.localeCompare(b.deviceId);
+  if (byId !== 0) return byId;
+
+  return (a.mode ?? DEFAULT_RUN_MODE).localeCompare(b.mode ?? DEFAULT_RUN_MODE);
 }
 
 /**
@@ -230,6 +252,7 @@ export async function resolveUserTag(opts: {
 export function applyProfileUpdate(existing: ProfileRow | null, score: ScoreRow, userTag: string): ProfileRow {
   return {
     deviceId: score.deviceId,
+    mode: score.mode,
     displayName: score.displayName === '' ? (existing?.displayName ?? '') : score.displayName,
     userTag,
     bestScore: Math.max(existing?.bestScore ?? 0, score.score),
@@ -247,8 +270,17 @@ export function applyProfileUpdate(existing: ProfileRow | null, score: ScoreRow,
 export class MemoryStore implements Store {
   private readonly tokens = new Map<string, RunTokenRow>();
   private readonly scores = new Map<string, ScoreRow>();
+  /** 一個模式一列：鍵是 `裝置|模式`。 */
   private readonly profiles = new Map<string, ProfileRow>();
   private readonly requests: RequestRow[] = [];
+
+  private static profileKey(deviceId: string, mode: RunMode): string {
+    return `${deviceId}|${mode}`;
+  }
+
+  private static matchesMode(row: ProfileRow, mode: RunMode | null): boolean {
+    return mode === null || row.mode === mode;
+  }
 
   async putRunToken(row: RunTokenRow): Promise<void> {
     this.tokens.set(row.runId, row);
@@ -320,7 +352,7 @@ export class MemoryStore implements Store {
   }
 
   private async mergeProfile(row: ScoreRow): Promise<void> {
-    const previous = this.profiles.get(row.deviceId) ?? null;
+    const previous = (await this.getProfile(row.deviceId, row.mode)) ?? null;
     const userTag = await resolveUserTag({
       displayName: row.displayName,
       current: previous?.userTag ?? '',
@@ -330,7 +362,7 @@ export class MemoryStore implements Store {
     });
     const updated = applyProfileUpdate(previous, row, userTag);
 
-    this.profiles.set(row.deviceId, updated);
+    this.profiles.set(MemoryStore.profileKey(row.deviceId, row.mode), updated);
   }
 
   /** 這個「名字＋號」是不是已經被**別的**裝置佔用。 */
@@ -344,27 +376,44 @@ export class MemoryStore implements Store {
     return false;
   }
 
-  async getProfile(deviceId: string): Promise<ProfileRow | null> {
-    return this.profiles.get(deviceId) ?? null;
+  async getProfile(deviceId: string, mode: RunMode = DEFAULT_RUN_MODE): Promise<ProfileRow | null> {
+    return this.profiles.get(MemoryStore.profileKey(deviceId, mode)) ?? null;
   }
 
-  async topProfiles(category: BoardCategory, limit: number): Promise<ProfileRow[]> {
+  async topProfiles(
+    category: BoardCategory,
+    limit: number,
+    mode: RunMode | null = null,
+  ): Promise<ProfileRow[]> {
     return [...this.profiles.values()]
-      .filter((row) => row.bestScore > 0)
+      .filter((row) => row.bestScore > 0 && MemoryStore.matchesMode(row, mode))
       .sort((a, b) => compareProfiles(category, a, b))
       .slice(0, Math.max(0, limit));
   }
 
-  async countProfiles(): Promise<number> {
+  async countProfiles(mode: RunMode | null = null): Promise<number> {
     let count = 0;
     for (const row of this.profiles.values()) {
-      if (row.bestScore > 0) count += 1;
+      if (row.bestScore > 0 && MemoryStore.matchesMode(row, mode)) count += 1;
     }
 
     return count;
   }
 
-  async rankOf(probe: RankProbe, category: BoardCategory): Promise<number> {
+  async countPlayers(): Promise<number> {
+    const devices = new Set<string>();
+    for (const row of this.profiles.values()) {
+      if (row.bestScore > 0) devices.add(row.deviceId);
+    }
+
+    return devices.size;
+  }
+
+  async rankOf(
+    probe: RankProbe,
+    category: BoardCategory,
+    mode: RunMode | null = null,
+  ): Promise<number> {
     /*
      * 把探針補成完整一列以複用 `compareProfiles`：名次與列序必然共用同一條排序。
      * The probe is completed into a full row to reuse `compareProfiles`: rank and row order
@@ -372,6 +421,7 @@ export class MemoryStore implements Store {
      */
     const probeRow: ProfileRow = {
       deviceId: probe.deviceId,
+      mode: probe.mode ?? DEFAULT_RUN_MODE,
       displayName: '',
       /* 名次只看數字，與號無關。 */
       userTag: '',
@@ -385,6 +435,7 @@ export class MemoryStore implements Store {
     let ahead = 0;
     for (const row of this.profiles.values()) {
       if (row.bestScore <= 0) continue;
+      if (!MemoryStore.matchesMode(row, mode)) continue;
       if (compareProfiles(category, row, probeRow) < 0) ahead += 1;
     }
 

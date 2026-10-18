@@ -34,6 +34,7 @@ describe('createPreferencesStore — 預設值 / defaults', () => {
     const store = createPreferencesStore({ storage: null, initialLocale: 'ja' });
 
     expect(store.locale).toBe('ja');
+    expect(store.mode).toBe('new');
     expect(store.rulesEnabled).toBe(false);
     expect(store.endless).toBe(false);
   });
@@ -159,6 +160,39 @@ describe('createPreferencesStore — 音樂靜音 / the music mute', () => {
 
     const store = createPreferencesStore({ storage, key: KEY });
     expect(store.musicMuted).toBe(false);
+  });
+});
+
+describe('createPreferencesStore — 模式 / play mode', () => {
+  it('round-trips the mode', () => {
+    const storage = new FakeStorage();
+
+    const first = createPreferencesStore({ storage, key: KEY });
+    first.setMode('traditional');
+
+    const second = createPreferencesStore({ storage, key: KEY });
+    expect(second.mode).toBe('traditional');
+  });
+
+  it('is not governed by the rules gate', () => {
+    const store = createPreferencesStore({ storage: null });
+
+    store.setMode('traditional');
+    store.setRulesEnabled(false);
+
+    /* 兩個模式各自上榜，所以模式不是「規則更改」，關掉總開關不該把它撥回新玩法。 */
+    /* Each mode has its own rows, so the mode is not a "rules change" and closing the gate must not flip it back. */
+    expect(store.mode).toBe('traditional');
+  });
+
+  it('reads a save without the field, or with a bad value, as the new mode', () => {
+    const missing = new FakeStorage();
+    missing.seed(KEY, JSON.stringify({ locale: 'en' }));
+    expect(createPreferencesStore({ storage: missing, key: KEY }).mode).toBe('new');
+
+    const bad = new FakeStorage();
+    bad.seed(KEY, JSON.stringify({ locale: 'en', mode: 'nonsense' }));
+    expect(createPreferencesStore({ storage: bad, key: KEY }).mode).toBe('new');
   });
 });
 

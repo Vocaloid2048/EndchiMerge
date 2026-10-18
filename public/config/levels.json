@@ -10,6 +10,8 @@
     "dropCooldownMs": 500
   },
 
+  "skillIds": ["discard", "protocol_float", "shake", "fate_swap"],
+
   "levels": [
     {
       "id": 1,
@@ -147,6 +149,20 @@
       "friction": 0.3,
       "frictionAir": 0.005,
       "score": 256,
+      "spawnWeight": 0,
+      "droppable": false,
+      "mergeResult": 11
+    },
+    {
+      "id": 11,
+      "name": "管理員",
+      "sprite": "character/管理員_img.webp",
+      "radius": 140,
+      "density": 0.001,
+      "restitution": 0.06,
+      "friction": 0.3,
+      "frictionAir": 0.005,
+      "score": 512,
       "spawnWeight": 0,
       "droppable": false,
       "mergeResult": null

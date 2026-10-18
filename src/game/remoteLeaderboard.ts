@@ -8,6 +8,13 @@
 
 import type { LocalStore, StorageBackend } from './localStore';
 import {
+  DEFAULT_MODE,
+  isModeId,
+  modeKeys,
+  type BoardMode,
+  type ModeId,
+} from './mode';
+import {
   createPlayerRecord,
   LEADERBOARD_CATEGORIES,
   LEADERBOARD_LIMIT,
@@ -84,6 +91,11 @@ export interface RemoteLeaderboardOptions {
    */
   version?: string;
   /**
+   * 這個頁面開局時的模式；提交與「我的最高分」都按它算（預設新玩法）。
+   * The mode this page started with; both the submission and "my best" follow it (default: the new mode).
+   */
+  mode?: ModeId;
+  /**
    * 注入 `fetch`；測試用。
    * Injects `fetch` (tests).
    */
@@ -104,6 +116,8 @@ interface ServerEntry {
   readonly name: string;
   /** 顯示用的四位數號；伺服器沒給或不合法時為空字串。 */
   readonly tag: string;
+  /** 這一列屬於哪個模式；伺服器沒給時當作新玩法。 */
+  readonly mode: ModeId;
   readonly score: number;
   readonly durationMs: number;
   readonly maxCombo: number;
@@ -163,6 +177,7 @@ function parseServerEntry(raw: unknown): ServerEntry | null {
     name: typeof record['name'] === 'string' ? record['name'] : '',
     /* 形狀不對就當沒有號 —— 它是拿來顯示的，寧可少顯示也不要印出垃圾。 */
     tag: typeof tag === 'string' && /^\d{4}$/u.test(tag) ? tag : '',
+    mode: isModeId(record['mode']) ? record['mode'] : DEFAULT_MODE,
     score: readCount(record['score']),
     durationMs: readCount(record['durationMs']),
     maxCombo: readCount(record['maxCombo']),
@@ -201,6 +216,7 @@ function toEntry(entry: ServerEntry): LeaderboardEntry {
     id: '',
     name: entry.name,
     tag: entry.tag,
+    mode: entry.mode,
     score: entry.score,
     durationMs: entry.durationMs,
     maxCombo: entry.maxCombo,
@@ -218,11 +234,12 @@ export function createRemoteLeaderboard(
   const limit = Math.max(1, Math.trunc(options.limit ?? LEADERBOARD_LIMIT));
   const version = options.version ?? '';
   const timeoutMs = Math.max(1, Math.trunc(options.timeoutMs ?? DEFAULT_TIMEOUT_MS));
+  const runMode = options.mode ?? DEFAULT_MODE;
 
   const player = createPlayerRecord({
     store: options.store,
     storage: options.storage,
-    keys: options.keys,
+    keys: { ...(options.keys ?? {}), profile: options.keys?.profile ?? modeKeys(runMode).profile },
     now: options.now,
     playerId: options.playerId,
     salt: options.salt,
@@ -236,10 +253,13 @@ export function createRemoteLeaderboard(
     console.warn('[leaderboard] fetch is unavailable; the board will stay empty');
   }
 
-  /** 各分類最近的榜。抓不到時不動它 —— 稍舊但真實的排名好過把榜清空。 */
-  const boards = new Map<LeaderboardCategory, BoardResponse>();
-  /** 正在抓的分類，避免同一個分類同時打好幾個請求。 */
-  const fetching = new Set<LeaderboardCategory>();
+  /** 各模式篩選 × 各分類最近的榜。抓不到時不動它 —— 稍舊但真實的排名好過把榜清空。 */
+  const boards = new Map<string, BoardResponse>();
+  /** 正在抓的「篩選 × 分類」，避免同一個組合同時打好幾個請求。 */
+  const fetching = new Set<string>();
+
+  /** 快取鍵：篩選與分類一起，不然換篩選會讀到另一個模式的榜。 */
+  const cacheKey = (mode: BoardMode, category: LeaderboardCategory): string => `${mode}|${category}`;
 
   /** 這一局的憑證；還沒鑄好或鑄失敗時是 `null`。 */
   let token: { runId: string; token: string } | null = null;
@@ -305,10 +325,11 @@ export function createRemoteLeaderboard(
 
   /* ── 抓榜 / fetching the board ──────────────────────────────────────────── */
 
-  async function fetchCategory(category: LeaderboardCategory): Promise<void> {
-    if (fetching.has(category)) return;
+  async function fetchCategory(category: LeaderboardCategory, mode: BoardMode): Promise<void> {
+    const key = cacheKey(mode, category);
+    if (fetching.has(key)) return;
 
-    fetching.add(category);
+    fetching.add(key);
 
     try {
       const query = new URLSearchParams({
@@ -316,6 +337,8 @@ export function createRemoteLeaderboard(
         limit: String(Math.min(limit, MAX_BOARD_LIMIT)),
         /* 帶上自己，回應才會附 `self`（名次與「超越多少百分比」都靠它）。 */
         deviceId: player.playerId,
+        /* 伺服器按這個篩選決定列哪幾列（`all` 就是兩個模式一起列）。 */
+        mode,
       });
 
       const { status, data } = await send(`/api/leaderboard?${query.toString()}`, { method: 'GET' });
@@ -324,17 +347,17 @@ export function createRemoteLeaderboard(
       const board = parseBoard(data);
       if (board === null) return;
 
-      boards.set(category, board);
+      boards.set(key, board);
       notify();
     } catch {
       /* 連不上（離線、逾時、CORS 被擋）：保留上一次的榜，不清空。 */
     } finally {
-      fetching.delete(category);
+      fetching.delete(key);
     }
   }
 
-  function refresh(): void {
-    for (const category of LEADERBOARD_CATEGORIES) void fetchCategory(category);
+  function refresh(mode: BoardMode = 'all'): void {
+    for (const category of LEADERBOARD_CATEGORIES) void fetchCategory(category, mode);
   }
 
   /**
@@ -348,9 +371,9 @@ export function createRemoteLeaderboard(
    * resolving `null` (the caller keeps the local value).
    */
   async function fetchOwnBest(): Promise<number | null> {
-    await fetchCategory('score');
+    await fetchCategory('score', runMode);
 
-    return boards.get('score')?.self?.score ?? null;
+    return boards.get(cacheKey(runMode, 'score'))?.self?.score ?? null;
   }
 
   /* ── 開局與提交 / starting a run and submitting it ──────────────────────── */
@@ -417,6 +440,9 @@ export function createRemoteLeaderboard(
       drops: Math.max(merges, Math.trunc(run.drops ?? 0)),
       maxCombo: Math.max(0, Math.trunc(run.maxCombo)),
       version,
+      /* 這一局是哪個模式：伺服器據此寫進 `scores.mode`，並更新那個模式的 profile。 */
+      /* Which mode this run belongs to: the server records it in `scores.mode` and updates that mode's profile. */
+      mode: run.mode ?? runMode,
     };
 
     uploading = true;
@@ -438,7 +464,7 @@ export function createRemoteLeaderboard(
           }
 
           settled(seq);
-          refresh();
+          refresh(runMode);
 
           return;
         }
@@ -514,11 +540,11 @@ export function createRemoteLeaderboard(
        * 快取裡自己那一列先改名字（樂觀更新）：伺服器要等下一次提交才會更新，下一次抓榜會蓋掉。
        * The cached row is renamed first (an optimistic update): the server's copy only changes on the next submission, and the next fetch overwrites it.
        */
-      for (const [category, board] of boards) {
+      for (const [key, board] of boards) {
         if (board.self === null) continue;
 
         const mine = board.self.rank;
-        boards.set(category, {
+        boards.set(key, {
           ...board,
           entries: board.entries.map((entry) => (entry.rank === mine ? { ...entry, name } : entry)),
           self: { ...board.self, name },
@@ -582,20 +608,26 @@ export function createRemoteLeaderboard(
 
     /*
      * 已經在抓了。`fetchCategory()` 在任何 `await` 之前就寫進 `fetching`，所以 `refresh()` 一回來就查得到。
-     * Already fetching. `fetchCategory()` adds the category before any `await`, so this is answerable the moment `refresh()` returns.
+     * Already fetching. `fetchCategory()` adds the entry before any `await`, so this is answerable the moment `refresh()` returns.
      */
-    isFetching(category: LeaderboardCategory): boolean {
-      return fetching.has(category);
+    isFetching(category: LeaderboardCategory, mode: BoardMode = 'all'): boolean {
+      return fetching.has(cacheKey(mode, category));
     },
 
-    snapshot(category: LeaderboardCategory, requested?: number): LeaderboardSnapshot {
+    snapshot(category: LeaderboardCategory, requested?: number, mode: BoardMode = 'all'): LeaderboardSnapshot {
       /*
        * 同意之前榜是空的 —— 與本機版同一條規則：不是「記了但不顯示」，而是還沒有東西被推上去。
        * Empty until consent, the same rule as the local build: not "recorded but hidden" — nothing has been pushed yet.
        */
       if (!player.sharing) return { category, entries: [], self: null };
 
-      const board = boards.get(category);
+      /*
+       * 快取按篩選分開：換篩選時先回空、等 `refresh(mode)` 回來才填，所以不會把「所有模式」的榜
+       * 當成「傳統模式」的榜畫出來。
+       * The cache is per filter: a new filter answers empty until `refresh(mode)` arrives, so an
+       * "all modes" board is never drawn under a single-mode filter.
+       */
+      const board = boards.get(cacheKey(mode, category));
       if (board === undefined) return { category, entries: [], self: null };
 
       const take = Math.max(1, Math.trunc(requested ?? limit));

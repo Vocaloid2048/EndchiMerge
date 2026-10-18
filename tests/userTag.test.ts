@@ -31,6 +31,7 @@ function row(deviceId: string, overrides: Partial<ScoreRow> = {}): ScoreRow {
     rejected: null,
     atMs: AT,
     ...overrides,
+    mode: overrides.mode ?? 'new',
   };
 }
 

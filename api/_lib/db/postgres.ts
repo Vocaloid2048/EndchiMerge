@@ -188,28 +188,38 @@ export const postgresDialect: Dialect = {
    */
   insertScore: () => `insert into scores (
        run_id, device_id, display_name, score, duration_ms, merges, drops, max_combo,
-       version, verified, rejected, created_at
-     ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::timestamptz)
+       version, verified, rejected, created_at, mode
+     ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::timestamptz, $13)
      on conflict (run_id) do nothing
      returning run_id`,
 
   insertScoreSignal: 'rows',
 
-  upsertProfile: () => `insert into profiles (
-       device_id, display_name, user_tag, best_score, best_duration_ms, best_max_combo, best_merges,
-       best_at, created_at, updated_at
-     ) values ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, now(), now())
+  /* 身份與成績分開：改名只碰 `profiles`，模式成績只碰 `profile_modes`。 */
+  /* Identity is separate from the scores: a rename touches `profiles`, a mode's best touches `profile_modes`. */
+  upsertIdentity: () => `insert into profiles (device_id, display_name, user_tag)
+     values ($1, $2, $3)
      on conflict (device_id) do update set
        display_name = case when excluded.display_name = ''
                            then profiles.display_name else excluded.display_name end,
        user_tag = excluded.user_tag,
-       best_duration_ms = case when excluded.best_score > profiles.best_score
-                               then excluded.best_duration_ms else profiles.best_duration_ms end,
-       best_at = case when excluded.best_score > profiles.best_score
-                      then excluded.best_at else profiles.best_at end,
-       best_score = greatest(profiles.best_score, excluded.best_score),
-       best_max_combo = greatest(profiles.best_max_combo, excluded.best_max_combo),
-       best_merges = greatest(profiles.best_merges, excluded.best_merges),
+       updated_at = now()`,
+
+  upsertProfile: () => `insert into profile_modes (
+       device_id, mode, display_name, user_tag, best_score, best_duration_ms, best_max_combo,
+       best_merges, best_at, created_at, updated_at
+     ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz, now(), now())
+     on conflict (device_id, mode) do update set
+       display_name = case when excluded.display_name = ''
+                           then profile_modes.display_name else excluded.display_name end,
+       user_tag = excluded.user_tag,
+       best_duration_ms = case when excluded.best_score > profile_modes.best_score
+                               then excluded.best_duration_ms else profile_modes.best_duration_ms end,
+       best_at = case when excluded.best_score > profile_modes.best_score
+                      then excluded.best_at else profile_modes.best_at end,
+       best_score = greatest(profile_modes.best_score, excluded.best_score),
+       best_max_combo = greatest(profile_modes.best_max_combo, excluded.best_max_combo),
+       best_merges = greatest(profile_modes.best_merges, excluded.best_merges),
        updated_at = now()`,
 
   schema: () => [
@@ -229,6 +239,29 @@ export const postgresDialect: Dialect = {
     `create index if not exists profiles_best_score_idx
        on profiles (best_score desc, best_at asc)`,
     /*
+     * 模式化的成績表：一位玩家在每個模式各一列。身份（名字與號）留在 `profiles`，所以改名只碰一處。
+     * `profiles.best_*` 是舊版的欄位，升上來的資料由下面的回填搬進這裡，之後不再由程式寫入。
+     * The per-mode score table: one row per player per mode. Identity (name and tag) stays in
+     * `profiles`, so a rename touches one place. The `profiles.best_*` columns are the previous
+     * shape; the backfill below moves them here, and nothing writes them afterwards.
+     */
+    `create table if not exists profile_modes (
+       device_id        text        not null,
+       mode             text        not null default 'new',
+       display_name     text        not null default '',
+       user_tag         varchar(4)  not null default '',
+       best_score       integer     not null default 0,
+       best_max_combo   integer     not null default 0,
+       best_merges      integer     not null default 0,
+       best_duration_ms integer     not null default 0,
+       best_at          timestamptz,
+       created_at       timestamptz not null default now(),
+       updated_at       timestamptz not null default now(),
+       primary key (device_id, mode)
+     )`,
+    `create index if not exists profile_modes_board_idx
+       on profile_modes (mode, best_score desc, best_at asc)`,
+    /*
      * ⚠️ `scores.device_id` **刻意不是**外鍵：`saveScore` 先寫 `scores` 才寫 `profiles`，且被退回的局（`verified = false`）不建 profile，兩者都會被外鍵擋掉。
      * ⚠️ `scores.device_id` is **deliberately not** a foreign key: `saveScore` writes `scores` before `profiles`, and a rejected run (`verified = false`) creates no profile — both would be rejected by it.
      */
@@ -244,6 +277,7 @@ export const postgresDialect: Dialect = {
        version      text        not null default '',
        verified     boolean     not null default true,
        rejected     text,
+       mode         text        not null default 'new',
        created_at   timestamptz not null default now()
      )`,
     `create index if not exists scores_device_idx on scores (device_id, created_at desc)`,
@@ -283,6 +317,20 @@ export const postgresDialect: Dialect = {
      * through its own `where`. */
     `alter table profiles add column if not exists user_tag varchar(4) not null default ''`,
     `update profiles set user_tag = lpad((floor(random() * 9999) + 1)::int::text, 4, '0') where user_tag = ''`,
+
+    /* 模式：`scores` 補欄位；舊庫的成績回填成「新玩法」一列。`on conflict do nothing` 讓重跑無害。
+     * Mode: `scores` gains the column, and an old database's scores are backfilled as the new mode.
+     * `on conflict do nothing` makes a re-run harmless. */
+    `alter table scores add column if not exists mode text not null default 'new'`,
+    `insert into profile_modes (
+       device_id, mode, display_name, user_tag, best_score, best_duration_ms, best_max_combo,
+       best_merges, best_at
+     )
+     select p.device_id, 'new', p.display_name, p.user_tag, p.best_score, p.best_duration_ms,
+            p.best_max_combo, p.best_merges, p.best_at
+     from profiles p
+     where p.best_score > 0
+     on conflict (device_id, mode) do nothing`,
   ],
 
   /* PG 的「欄位」錯誤：42703 不存在、42701 重複；上面的語句全走原生 `if exists`／`if not exists`，這兩個成員只是把缺口補齊。

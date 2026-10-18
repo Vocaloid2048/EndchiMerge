@@ -85,8 +85,14 @@ export interface Dialect {
    */
   readonly insertScoreSignal: 'rows' | 'affected';
   /**
-   * 寫入或更新一位玩家的歷史最大值。
-   * Write or refresh a player's historical maxima.
+   * 寫入或更新玩家的身份（顯示名與玩家號）。身份是**跨模式**的一份，所以它與 `upsertProfile()` 分開。
+   * Writes or refreshes a player's identity (display name and tag). Identity is **shared across
+   * modes**, which is why it is separate from `upsertProfile()`.
+   */
+  upsertIdentity(): string;
+  /**
+   * 寫入或更新一位玩家在**一個模式**下的歷史最大值（`profile_modes` 一列）。
+   * Write or refresh a player's historical maxima for **one mode** (one `profile_modes` row).
    *
    * ⚠️ MySQL 的 `on duplicate key update` **由左至右**求值，所以 `best_score` 必須排在 `best_duration_ms`／`best_at` **之後**。
    * ⚠️ MySQL's `on duplicate key update` evaluates **left to right**, so `best_score` must come **after** `best_duration_ms` / `best_at`.
@@ -214,12 +220,13 @@ export const BOARD_PRIMARY_COLUMN: Readonly<Record<BoardCategory, string>> = {
  * 組成榜的排序鍵，各方言只差「時間怎麼排空的」那一段。
  * Builds the board's sort keys; dialects differ only in how the time column sorts nulls.
  *
- * 分類欄之後接**分數**（同組合數時高分在前），再以時間與 id 決勝。
- * After the category column comes **score** (higher score first on an equal combo), then time and id as tie-breakers.
+ * 分類欄之後接**分數**（同組合數時高分在前），再以時間、id 與模式決勝。
+ * After the category column comes **score** (higher score first on an equal combo), then time, id
+ * and mode as tie-breakers.
  */
 export function boardOrderKeys(category: BoardCategory, timeOrder: string): string {
   const primary = `${BOARD_PRIMARY_COLUMN[category]} desc`;
-  const tail = `${timeOrder}, device_id asc`;
+  const tail = `${timeOrder}, device_id asc, mode asc`;
 
   return category === 'score' ? `${primary}, ${tail}` : `${primary}, best_score desc, ${tail}`;
 }
@@ -228,7 +235,7 @@ export function boardOrderKeys(category: BoardCategory, timeOrder: string): stri
  * 榜的排序鍵（分數分類的**語意**版本，不含方言寫法，也不該被 `nulls last` 或 `is null` 汙染）。
  * The board's sort keys — the score category's **semantics**, free of dialect spelling and of `nulls last` / `is null`.
  */
-export const BOARD_ORDER_KEYS = 'best_score desc, best_at asc, device_id asc';
+export const BOARD_ORDER_KEYS = 'best_score desc, best_at asc, device_id asc, mode asc';
 
 /**
  * 從連線字串猜方言（沒有明講 `DB_DIALECT` 時），認不出來就當 Postgres。

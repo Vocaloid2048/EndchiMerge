@@ -31,6 +31,9 @@ export const zhHant = {
    * MELTING LIST is the compendium, so the displayed text follows that name.
    */
   'label.meltingList': '圖鑑',
+  'label.meltingHint': '想玩不同模式？請到設定切換。',
+  'mode.new': '新玩法',
+  'mode.traditional': '傳統模式',
   'label.gameOver': '遊戲結束',
   'label.newBest': '新紀錄',
   'label.best': '最高紀錄',
@@ -85,6 +88,10 @@ export const zhHant = {
   'leaderboard.tab.score': '最高分數',
   'leaderboard.tab.combo': 'COMBO 數',
   'leaderboard.tab.merges': '合成數',
+  'leaderboard.modeFilter': '模式篩選',
+  'leaderboard.mode.all': '所有模式',
+  'leaderboard.mode.new': '新玩法',
+  'leaderboard.mode.traditional': '傳統模式',
 
   /* ── 發布欄位 / Publish fields ─────────────────────────────────── */
   'publish.name': '顯示名稱',
@@ -156,6 +163,16 @@ export const zhHant = {
   /* ── 設定彈窗 / Settings popup ─────────────────────────────────── */
   'settings.title': '設定',
   'settings.close': '關閉設定',
+  'settings.modes.heading': '玩法模式',
+  'settings.modes.subtitle': '切換後需要開新一局才會套用',
+  'settings.modes.newNote': '使用新的方團團陣容與全部技能，分數上限較高。',
+  'settings.modes.traditionalNote': '參照官方山團團的大小，只保留最初的 4 個技能。',
+  'settings.modes.note':
+    '切換會立即結束目前這一局並重新載入；兩個模式的成績與圖鑑進度各自記錄，切換回來會接回原本的進度。',
+  'modeConfirm.title': '切換玩法模式？',
+  'modeConfirm.message': '切換到「{mode}」後需要開新一局才會套用：目前這一局會立即結束並重新載入。',
+  'modeConfirm.confirm': '切換並重新開始',
+  'modeConfirm.confirmHold': '切換（{seconds}）',
   'settings.rules.heading': '遊戲玩法',
   'settings.rules.subtitle': '修改規則後，成績不會記錄在排行榜',
   'settings.rules.master': '允許更改遊戲規則',

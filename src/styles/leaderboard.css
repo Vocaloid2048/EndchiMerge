@@ -45,7 +45,7 @@
 
 .leaderboard__header {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr auto auto;
   align-items: end;
   gap: 4px 24px;
 }
@@ -66,7 +66,7 @@
 
 .leaderboard__close {
   grid-row: 1 / span 2;
-  grid-column: 2;
+  grid-column: 3;
   width: 56px;
   height: 56px;
   border: 0;
@@ -120,6 +120,43 @@
   outline-offset: 3px;
 }
 
+/* ── 模式篩選 ──────────────────────────────────────────────────────── */
+
+/* 放在標題列右側、關閉鍵之前；與分頁同一套膠囊語言，但小一號，免得分頁被搶走焦點。 */
+/* Sits at the header's right, before the close button; the same capsule language as the tabs,
+   one size down so the tabs keep the attention. */
+.leaderboard__modes {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  align-self: center;
+  display: flex;
+  gap: 8px;
+}
+
+.leaderboard__mode-filter {
+  padding: 8px 20px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-fg-muted);
+  font-family: inherit;
+  font-size: 19px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.leaderboard__mode-filter--active {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+  color: var(--color-fg);
+}
+
+.leaderboard__mode-filter:focus-visible {
+  outline: 3px solid var(--color-fg);
+  outline-offset: 3px;
+}
+
 /* ── 榜身 ──────────────────────────────────────────────────────────── */
 
 /*
@@ -145,11 +182,18 @@
 }
 
 /* 名次／名稱／該分類數值／用時／記錄時間；刻意沒有第二個分數欄（見 `ui/leaderboard.ts`）。 */
+/*
+ * 欄寬：名次與三個數值欄先收到「內容剛好放得下」，剩下的全部給名字。
+ * 之前三個數值欄偏寬，名字只剩不到 200px（三四個字就被裁成 `夜…`），而 tag 與分數之間卻空出一大截。
+ * Column widths: the rank and the three numeric columns shrink to just fit their content, and every
+ * remaining pixel goes to the name. The numeric columns used to be wide enough to squeeze the name
+ * under 200px (three characters truncated to `夜…`) while leaving a canyon between the tag and the score.
+ */
 .leaderboard__row {
   display: grid;
-  grid-template-columns: 96px minmax(0, 1fr) 190px 130px 210px;
+  grid-template-columns: 72px minmax(0, 1fr) 104px 104px 190px;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   padding: 14px 20px;
   border-radius: 14px;
   font-size: 24px;
@@ -175,6 +219,24 @@
   align-items: baseline;
   gap: 6px;
   min-width: 0;
+}
+
+/*
+ * 名字可以用盡整欄：名字與號靠左並排，模式標記推到這一欄的右端。
+ * 名字一長，中間的空隙自然收掉；名字短，空隙落在名字與號之間（可讀成兩段），而不是落在號與分數之間。
+ * The name may use the whole column: name and tag sit on the left while the mode badge is pushed to
+ * the column's right end. A long name closes the gap by itself; a short one leaves the breathing
+ * room between the name and the tag (readable as two sub-columns) instead of between the tag and the score.
+ */
+.leaderboard__mode {
+  margin-left: auto;
+  padding: 2px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-fg-dim);
+  font-size: 16px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
 /*
@@ -228,6 +290,9 @@
   color: var(--color-fg-muted);
   font-size: 22px;
   text-align: right;
+  /* 日期只能在一行：欄寬一旦收窄，`2026/10/17` 與 `21:23` 會折成兩行，整列高度就跟著跳。 */
+  /* The date stays on one line: a narrower column would break `2026/10/17` from `21:23` and make that row taller than its neighbours. */
+  white-space: nowrap;
 }
 
 .leaderboard__empty {

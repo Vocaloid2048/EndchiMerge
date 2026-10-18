@@ -1,6 +1,6 @@
 /**
- * 蛇形佈局的單元測試：S 形走位、設計稿 19 格的唯一缺口、單一連續走線。
- * Unit tests for the serpentine layout: the S-shaped walk, the 19-slot gap, and one track.
+ * 蛇形佈局的單元測試：S 形走位、設計稿 19 格的唯一缺口、單一連續走線、走線在最後一格結束。
+ * Unit tests for the serpentine layout: the S-shaped walk, the 19-slot gap, one continuous track, and the track ending on the last slot.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -18,8 +18,7 @@ import { MELTING } from '../src/core/design';
 
 /** 設計稿的格網：4 欄 × 5 列。 */
 const { cols: COLS, rows: ROWS, cellWidth: CW, cellHeight: CH } = MELTING;
-const { laneOverhang, exitInset, cornerRadius, strokeWidth, arrowLength, arrowHalfWidth } =
-  MELTING.track;
+const { laneOverhang, cornerRadius, strokeWidth, arrowLength, arrowHalfWidth } = MELTING.track;
 
 /** 4 欄格網在內容區裡的置中偏移。 */
 const OFFSET_4 = gridOffsetX(COLS);
@@ -230,26 +229,18 @@ describe('走線 / the track', () => {
     }
   });
 
-  it('stops the solid run at the last slot and hands the rest to the dashed tail', () => {
+  it('stops the track on the last slot, with nothing past it', () => {
     const track = computeRosterLayout({ count: 19 }).track;
     const lastSlotX = OFFSET_4 + 2 * CW + CW / 2;
-    const exitY = ROWS * CH - exitInset;
 
     expect(parsePath(track?.path ?? '').at(-1)).toEqual({ cmd: 'L', args: [lastSlotX, rowCentre(4)] });
-    expect(track?.dash).toBe(
-      [`M ${String(lastSlotX)} ${String(rowCentre(4))}`, `L ${String(RIGHT_LANE_4)} ${String(rowCentre(4))}`, `L ${String(RIGHT_LANE_4)} ${String(exitY)}`].join(' '),
-    );
   });
 
-  it('dashes only the descent when the chain fills the grid', () => {
+  it('also stops on the last slot when the chain fills the grid', () => {
     const track = computeRosterLayout({ count: 20 }).track;
     const lastSlotX = OFFSET_4 + 3 * CW + CW / 2;
-    const exitY = ROWS * CH - exitInset;
 
     expect(parsePath(track?.path ?? '').at(-1)).toEqual({ cmd: 'L', args: [lastSlotX, rowCentre(4)] });
-    expect(track?.dash).toBe(
-      [`M ${String(lastSlotX)} ${String(rowCentre(4))}`, `L ${String(RIGHT_LANE_4)} ${String(rowCentre(4))}`, `L ${String(RIGHT_LANE_4)} ${String(exitY)}`].join(' '),
-    );
   });
 
   it('locks the whole 4-column route to the centred, widened geometry', () => {
@@ -283,47 +274,69 @@ describe('走線 / the track', () => {
 
   it('draws a single-row chain without any turn', () => {
     const track = computeRosterLayout({ count: 4, cols: 4, rows: 1 }).track;
-    const exitY = 1 * CH - exitInset;
     const lastSlotX = OFFSET_4 + 3 * CW + CW / 2;
 
     expect(parsePath(track?.path ?? '').filter((c) => c.cmd === 'A')).toHaveLength(0);
     expect(track?.path).toBe(
       [`M ${String(LEFT_LANE_4)} 47.2`, `L ${String(lastSlotX)} 47.2`].join(' '),
     );
-    expect(track?.dash).toBe(
-      [`M ${String(lastSlotX)} 47.2`, `L ${String(RIGHT_LANE_4)} 47.2`, `L ${String(RIGHT_LANE_4)} ${String(exitY)}`].join(' '),
-    );
   });
 
-  it('places the arrowhead with its tip on the end of the dashed tail', () => {
-    const exitY = ROWS * CH - exitInset;
+  it('places the arrowhead with its tip on the last slot centre', () => {
+    const lastSlotX = OFFSET_4 + 2 * CW + CW / 2;
     const commands = parsePath(computeRosterLayout({ count: 19 }).track?.arrow ?? '');
 
     expect(commands).toEqual([
-      { cmd: 'M', args: [RIGHT_LANE_4 - arrowHalfWidth, exitY - arrowLength] },
-      { cmd: 'L', args: [RIGHT_LANE_4, exitY] },
-      { cmd: 'L', args: [RIGHT_LANE_4 + arrowHalfWidth, exitY - arrowLength] },
+      { cmd: 'M', args: [lastSlotX - arrowLength, rowCentre(4) - arrowHalfWidth] },
+      { cmd: 'L', args: [lastSlotX, rowCentre(4)] },
+      { cmd: 'L', args: [lastSlotX - arrowLength, rowCentre(4) + arrowHalfWidth] },
     ]);
   });
 
-  it('points the arrow down, not up or sideways', () => {
+  it('points the arrow along the last row, rightward on an even row', () => {
     const commands = parsePath(computeRosterLayout({ count: 19 }).track?.arrow ?? '');
-    const [, middle, last] = commands;
+    const [start, tip] = commands;
 
-    expect(middle.args[1]).toBeGreaterThan(last.args[1]);
-    expect(middle.args[0]).toBe(last.args[0] - arrowHalfWidth);
+    expect(tip.args[0]).toBeGreaterThan(start.args[0]);
+    expect(tip.args[1]).toBe(rowCentre(4));
   });
 
-  it('lets the arrow overshoot the content edge like the mock, still inside the panel', () => {
-    /*
-     * 走道外拓後箭翼伸過內容區右緣，但整支箭頭仍在 435 寬的面板內。
-     * With widened lanes the wings overshoot the content box, yet the arrow stays inside the
-     * 435-wide panel.
-     */
-    const right = RIGHT_LANE_4 + arrowHalfWidth;
+  it('mirrors the arrow when the chain ends on a leftward row', () => {
+    /* 7 格落在 2 欄 5 列：最後一格在奇數列，該列由右至左走，箭頭因此向左。 */
+    /* Seven slots on 2 columns × 5 rows: the last one sits on an odd (leftward) row, so the arrow points left. */
+    const layout = computeRosterLayout({ count: 7 });
+    const last = layout.slots.at(-1);
+    expect(last?.row).toBe(3);
 
-    expect(right).toBeGreaterThan(MELTING.content.width);
-    expect(right + MELTING.content.x).toBeLessThan(435);
+    const centre = cellCentre(last!.col, last!.row, layout.offsetX);
+    const commands = parsePath(layout.track?.arrow ?? '');
+    /* 路徑字串會把浮點尾巴砍掉，所以比較前用同一把尺。 */
+    /* The path string trims float tails, so the comparison uses the same ruler. */
+    const round = (value: number): number => Number(value.toFixed(3));
+    const actual = commands.map((command) => ({
+      cmd: command.cmd,
+      args: command.args.map(round),
+    }));
+
+    expect(actual).toEqual([
+      { cmd: 'M', args: [round(centre.x + arrowLength), round(centre.y - arrowHalfWidth)] },
+      { cmd: 'L', args: [round(centre.x), round(centre.y)] },
+      { cmd: 'L', args: [round(centre.x + arrowLength), round(centre.y + arrowHalfWidth)] },
+    ]);
+  });
+
+  it('keeps the whole arrowhead inside the last cell, never past it', () => {
+    /*
+     * 箭翼向後張開 20.2，尖端在最一格的中心 —— 整支箭頭都在那一格之內，不會伸到格網外。
+     * The wings reach back 20.2 from the last slot's centre, so the arrowhead stays inside that
+     * cell and never reaches outside the grid.
+     */
+    const lastSlotX = OFFSET_4 + 2 * CW + CW / 2;
+    const leftmost = lastSlotX - arrowLength;
+
+    expect(leftmost).toBeGreaterThan(OFFSET_4 + 2 * CW);
+    expect(leftmost + arrowLength).toBe(lastSlotX);
+    expect(RIGHT_LANE_4).toBeGreaterThanOrEqual(OFFSET_4 + COLS * CW);
   });
 
   it('uses the mock’s stroke weight of 5', () => {

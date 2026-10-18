@@ -117,6 +117,7 @@ describe('EdgeOne Makers cloud-functions — KV 路徑真的通 / the KV path re
       deviceId: 'seed-device',
       displayName: '阿爺',
       userTag: '',
+      mode: 'new',
       score: 1234,
       durationMs: 60_000,
       merges: 10,

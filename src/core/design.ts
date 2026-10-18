@@ -100,9 +100,10 @@ export const MELTING = {
    * 左右走道貼著格網左右緣再各向外伸 `laneOverhang`，整個 S 比格網寬且左右對稱。
    * The serpentine track parameters: a row-major S walk with the used columns centred in the content box and both lanes reaching `laneOverhang` beyond the grid — wider than the grid and always symmetric.
    *
-   * 最後一隻方團團之後的走線以虛線呈現（「路還沒修到那裡」，與未解鎖的灰格同一語意）；
-   * 走線是一條畫在素材之下的連續線，不是每格一段短線。
-   * The track past the last dumpling is dashed ("the road is not built that far yet", matching a locked grey tile); the path is one continuous line drawn under the art, not a tick per cell.
+   * 走線在**最後一格**結束：箭頭收在那一格的中心，不再往格網外延伸；線是一條畫在素材之下的
+   * 連續線，不是每格一段短線。
+   * The track ends at the **last slot**: the arrowhead stops on that cell's centre and nothing
+   * reaches past the grid. It is one continuous line drawn under the art, not a tick per cell.
    */
   track: {
     /**
@@ -110,11 +111,6 @@ export const MELTING = {
      * How far each lane reaches beyond the grid's edges, in content coordinates; the S is wider than the grid because of it.
      */
     laneOverhang: 8,
-    /**
-     * 出欄線距格網底緣的內縮。
-     * The exit line's inset from the grid's bottom edge.
-     */
-    exitInset: 3,
     /**
      * 轉彎圓角；沿用設計稿 `vectorData.styleOverrideTable` 的 `cornerRadius`。
      * The corner fillet, matching the mock's `vectorData.styleOverrideTable` `cornerRadius`.

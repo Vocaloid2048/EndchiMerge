@@ -1,6 +1,6 @@
 /**
- * MELTING LIST 的蛇形佈局：橫向蛇形（S 形）走法，格網置中、走道外拓，最後一隻之後以虛線呈現。
- * Serpentine layout for the MELTING LIST: a row-major S walk, centred grid with outward lanes, dashed past the last dumpling.
+ * MELTING LIST 的蛇形佈局：橫向蛇形（S 形）走法，格網置中、走道外拓，走線在最後一格結束。
+ * Serpentine layout for the MELTING LIST: a row-major S walk, centred grid with outward lanes, the track ending on the last slot.
  *
  * 這裡只有幾何，不碰 DOM：座標單位是設計稿像素，原點在內容區左上角。
  * Pure geometry, no DOM, in design pixels with the origin at the content box's top-left.
@@ -32,18 +32,15 @@ export interface RosterSlot {
  */
 export interface RosterTrack {
   /**
-   * 實線段的 SVG `d`（內容區座標）：由起點一路到最後一個槽位的中心。
-   * The solid run's SVG `d` (content-box coordinates): from the start to the last slot's centre.
+   * 走線的 SVG `d`（內容區座標）：由起點一路到**最後一格的中心**，不再往外延伸。
+   * The track's SVG `d` (content-box coordinates): from the start to the **last slot's centre**,
+   * with nothing reaching past it.
    */
   path: string;
   /**
-   * 虛線段的 SVG `d`：最後一個槽位之後的走線 —— 「最後一隻之後是未知的路」。
-   * The dashed tail's SVG `d`: the track past the last slot — "past the last dumpling the road is unknown".
-   */
-  dash: string;
-  /**
-   * 箭頭的 SVG `d`：開放 V 形，尖端落在虛線段終點。
-   * The arrow's SVG `d`: an open V whose tip lands on the dashed tail's end.
+   * 箭頭的 SVG `d`：開放 V 形，尖端落在最後一格的中心、指向那一格的走法方向。
+   * The arrow's SVG `d`: an open V whose tip lands on the last slot's centre, pointing the way
+   * that row walks.
    */
   arrow: string;
   /**
@@ -177,9 +174,9 @@ function num(value: number): string {
 }
 
 /**
- * 組出走線：一律通過列中心，轉彎是兩個 32 圓角的 U-turn；
- * 實線只走到最後一個槽位的中心，之後（含箭頭）全是虛線段 —— 幾何仍是一筆畫，只是畫成兩條 path。
- * Builds the track: always through row centres, turns as two 32-radius fillets; the solid run stops at the last slot's centre and everything past it (arrow included) is dashed — still one stroke, drawn as two paths.
+ * 組出走線：一律通過列中心，轉彎是兩個 32 圓角的 U-turn，最後停在**最後一格的中心**並以箭頭收尾。
+ * Builds the track: always through row centres, turns as two 32-radius fillets, ending on the
+ * **last slot's centre** with an arrowhead.
  *
  * SVG 的 sweep-flag 通則：往右走是 1、往左走是 0；同一個 U-turn 的兩個圓角一定同向。
  * The SVG sweep rule: rightward ＝ 1, leftward ＝ 0; both fillets of one U-turn share a direction.
@@ -192,61 +189,60 @@ function buildTrack(
   if (cols < 1) return null;
 
   const pitch = MELTING.cellWidth;
-  const { cornerRadius, arrowLength, arrowHalfWidth, exitInset } = MELTING.track;
+  const { cornerRadius, arrowLength, arrowHalfWidth } = MELTING.track;
   const { leftLane, rightLane } = trackLanes(cols);
   const gridLeft = gridOffsetX(cols);
 
-  /* 出欄線 y：格網底緣內縮（設計稿直行版出欄線 364 ＝ 內容區右緣 367 − 3 的鏡像）。 */
-  const exitY = rows * MELTING.cellHeight - exitInset;
-
   /* 圓角半徑不能吃掉整個欄距，否則同一組 U-turn 的兩個圓角會互相穿過。 */
   const radius = Math.min(cornerRadius, pitch / 2 - 1);
+
+  /*
+   * 最後一格的**中心**：走線到此為止，箭頭也收在這裡 —— 再往外就是「超過最後一位」，
+   * 那正是要拿掉的東西。箭翼向後張開 20.2，整支箭頭仍然落在最後一格之內。
+   * The last slot's **centre**: the track stops here and so does the arrowhead — anything further
+   * would run past the last entry, which is exactly what this removes. The wings reach back 20.2,
+   * so the whole arrowhead stays inside that cell.
+   */
+  const rightward = last.row % 2 === 0;
+  const tipX = gridLeft + last.col * pitch + pitch / 2;
+  const tipY = rowCentre(last.row);
 
   const parts: string[] = [`M ${num(leftLane)} ${num(rowCentre(0))}`];
 
   for (let row = 0; row <= last.row; row += 1) {
     const y = rowCentre(row);
-    const rightward = row % 2 === 0;
-    const lane = rightward ? rightLane : leftLane;
+    const rowRightward = row % 2 === 0;
+    const lane = rowRightward ? rightLane : leftLane;
 
-    /* 最後一列只走到最後一個槽位的中心；之後是虛線段。 */
+    /* 最後一列只走到最後一格的中心：走線與箭頭都在那裡結束。 */
+    /* The last row walks only as far as the last slot's centre; the track and its arrow end there. */
     if (row === last.row) {
-      parts.push(`L ${num(gridLeft + last.col * pitch + pitch / 2)} ${num(y)}`);
+      parts.push(`L ${num(tipX)} ${num(y)}`);
       break;
     }
 
     const nextY = rowCentre(row + 1);
-    const sweep = rightward ? 1 : 0;
+    const sweep = rowRightward ? 1 : 0;
     const arc = `A ${num(radius)} ${num(radius)} 0 0 ${String(sweep)}`;
 
     /* 水平段收在圓角起點，再沿走道落到下一列、轉回頭。 */
-    parts.push(`L ${num(rightward ? lane - radius : lane + radius)} ${num(y)}`);
+    parts.push(`L ${num(rowRightward ? lane - radius : lane + radius)} ${num(y)}`);
     parts.push(`${arc} ${num(lane)} ${num(y + radius)}`);
     parts.push(`L ${num(lane)} ${num(nextY - radius)}`);
-    parts.push(`${arc} ${num(rightward ? lane - radius : lane + radius)} ${num(nextY)}`);
+    parts.push(`${arc} ${num(rowRightward ? lane - radius : lane + radius)} ${num(nextY)}`);
   }
 
-  /*
-   * 虛線段：由最後一個槽位的中心繼續沿最後一列走到出欄走道，直落出欄線。
-   * The dashed tail: from the last slot's centre, along the last row to the exit lane, then straight down to the exit line.
-   */
-  const endLane = last.row % 2 === 0 ? rightLane : leftLane;
-  const lastX = gridLeft + last.col * pitch + pitch / 2;
-  const dash = [
-    `M ${num(lastX)} ${num(rowCentre(last.row))}`,
-    `L ${num(endLane)} ${num(rowCentre(last.row))}`,
-    `L ${num(endLane)} ${num(exitY)}`,
-  ].join(' ');
-
+  /* 箭翼向後張開：尖端就是走線終點，所以整支箭頭都不會越過最後一格。 */
+  /* The wings open backwards from the tip, so the whole arrowhead stays inside the last slot. */
+  const back = rightward ? -arrowLength : arrowLength;
   const arrow = [
-    `M ${num(endLane - arrowHalfWidth)} ${num(exitY - arrowLength)}`,
-    `L ${num(endLane)} ${num(exitY)}`,
-    `L ${num(endLane + arrowHalfWidth)} ${num(exitY - arrowLength)}`,
+    `M ${num(tipX + back)} ${num(tipY - arrowHalfWidth)}`,
+    `L ${num(tipX)} ${num(tipY)}`,
+    `L ${num(tipX + back)} ${num(tipY + arrowHalfWidth)}`,
   ].join(' ');
 
   return {
     path: parts.join(' '),
-    dash,
     arrow,
     rowCentres: Array.from({ length: rows }, (_, row) => rowCentre(row)),
   };
@@ -275,8 +271,9 @@ export function computeRosterLayout(options: RosterOptions): RosterLayout {
   }
 
   /*
-   * 實線／虛線的分界在最後一個槽位（＝合成鏈的終點）：之後的走線以虛線呈現。
-   * The solid/dashed boundary sits on the last slot (the chain's end): the track past it is dashed.
+   * 走線在最後一個槽位收尾：鏈的終點就是路的終點，不再往格網外延伸。
+   * The track ends on the last slot: the chain's end is the road's end, and nothing reaches past
+   * the grid.
    */
   const last = slots.at(-1) ?? { index: 0, col: 0, row: 0 };
 

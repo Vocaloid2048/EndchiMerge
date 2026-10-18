@@ -1,15 +1,21 @@
 /**
- * 玩家偏好設定：語系、規則變更總開關、無盡模式與音樂靜音；只做讀寫與通知，不含遊戲規則。
- * Player preferences — locale, the rules master gate, endless mode and the music mute; read/write/notify only.
+ * 玩家偏好設定：語系、玩法模式、規則變更總開關、無盡模式與音樂靜音；只做讀寫與通知，不含遊戲規則。
+ * Player preferences — locale, play mode, the rules master gate, endless mode and the music mute; read/write/notify only.
  */
 
 import { STORAGE_KEYS } from '../core/constants';
 import { detectBrowserLocale, isLocale, type Locale } from '../i18n/locale';
 import { createLocalStore, type LocalStore, type StorageBackend } from './localStore';
+import { DEFAULT_MODE, isModeId, type ModeId } from './mode';
 
 /** 偏好的完整內容。 */
 export interface Preferences {
   locale: Locale;
+  /**
+   * 玩法模式；切換後要重新載入（＝開新一局）才會套用。
+   * The play mode; a change only takes effect after a reload (= a new run).
+   */
+  mode: ModeId;
   /**
    * 規則變更總開關；開啟期間的成績一律不記入排行榜。
    * The rules master gate; while it is on, nothing is recorded on the leaderboard.
@@ -52,10 +58,12 @@ export interface PreferencesOptions {
 
 export interface PreferencesStore {
   readonly locale: Locale;
+  readonly mode: ModeId;
   readonly rulesEnabled: boolean;
   readonly endless: boolean;
   readonly musicMuted: boolean;
   setLocale(locale: Locale): void;
+  setMode(mode: ModeId): void;
   setRulesEnabled(on: boolean): void;
   setEndless(on: boolean): void;
   setMusicMuted(muted: boolean): void;
@@ -77,6 +85,7 @@ function toBool(value: unknown): boolean {
 function parsePreferences(text: string | null, fallbackLocale: Locale): Preferences {
   const fallback: Preferences = {
     locale: fallbackLocale,
+    mode: DEFAULT_MODE,
     rulesEnabled: false,
     endless: false,
     musicMuted: false,
@@ -89,10 +98,12 @@ function parsePreferences(text: string | null, fallbackLocale: Locale): Preferen
 
     const candidate = parsed as Record<string, unknown>;
     const locale = isLocale(candidate['locale']) ? candidate['locale'] : fallbackLocale;
+    const mode = isModeId(candidate['mode']) ? candidate['mode'] : DEFAULT_MODE;
     const rulesEnabled = toBool(candidate['rulesEnabled']);
 
     return {
       locale,
+      mode,
       rulesEnabled,
       endless: rulesEnabled && toBool(candidate['endless']),
       musicMuted: toBool(candidate['musicMuted']),
@@ -118,6 +129,7 @@ export function createPreferencesStore(options: PreferencesOptions = {}): Prefer
   const update = (next: Preferences): void => {
     if (
       next.locale === state.locale &&
+      next.mode === state.mode &&
       next.rulesEnabled === state.rulesEnabled &&
       next.endless === state.endless &&
       next.musicMuted === state.musicMuted
@@ -135,6 +147,10 @@ export function createPreferencesStore(options: PreferencesOptions = {}): Prefer
       return state.locale;
     },
 
+    get mode(): ModeId {
+      return state.mode;
+    },
+
     get rulesEnabled(): boolean {
       return state.rulesEnabled;
     },
@@ -150,6 +166,16 @@ export function createPreferencesStore(options: PreferencesOptions = {}): Prefer
     setLocale(locale: Locale): void {
       if (!isLocale(locale)) return;
       update({ ...state, locale });
+    },
+
+    /*
+     * 模式與規則無關：兩個模式的成績各自上榜，所以它不受總開關管制（受管制的話傳統模式永遠不能上榜）。
+     * The mode is unrelated to the rules: each mode has its own board rows, so the master gate does
+     * not govern it — otherwise the traditional mode could never be ranked.
+     */
+    setMode(mode: ModeId): void {
+      if (!isModeId(mode)) return;
+      update({ ...state, mode });
     },
 
     setRulesEnabled(on: boolean): void {

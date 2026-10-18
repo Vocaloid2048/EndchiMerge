@@ -273,7 +273,15 @@ function buildMeltingList(): HTMLElement {
   const title = el('h2', 'panel__title');
   i18nText(title, 'label.meltingList');
 
-  appendChildren(panel, title, body);
+  /*
+   * 標題下方那行提示：圖鑑展示的是**當前模式**的合成鏈，想換一套就到設定切換。
+   * The line under the title: the roster shows the **current mode's** chain, and another one is a
+   * settings trip away.
+   */
+  const hint = el('p', 'melting__hint');
+  i18nText(hint, 'label.meltingHint');
+
+  appendChildren(panel, title, hint, body);
   return panel;
 }
 

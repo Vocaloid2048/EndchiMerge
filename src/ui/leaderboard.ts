@@ -14,6 +14,7 @@
 
 import type { LeaderboardCategory, LeaderboardEntry, LeaderboardSource } from '../game/leaderboard';
 import { LEADERBOARD_CATEGORIES, LEADERBOARD_LIMIT } from '../game/leaderboard';
+import { BOARD_MODES, boardModeLabelKey, type BoardMode } from '../game/mode';
 import { i18n, i18nAriaLabel, i18nText, i18nTitle, t, type MessageKey } from '../i18n';
 import { appendChildren, el } from './dom';
 import { formatDuration } from './duration';
@@ -103,6 +104,13 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
   const { source } = options;
 
   let category: LeaderboardCategory = LEADERBOARD_CATEGORIES[0]!;
+  /*
+   * 榜的模式篩選（右上角）：預設「所有模式」，兩個模式各佔自己的列並在列上標示。
+   * 切換只影響這一面榜，不會改動玩家正在玩的模式。
+   * The board's mode filter (top right): "all modes" by default, each row labelled with its mode.
+   * Switching only changes this view — never the mode the player is in.
+   */
+  let mode: BoardMode = 'all';
 
   const root = el('section', 'leaderboard');
   root.hidden = true;
@@ -120,8 +128,36 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
   closeButton.type = 'button';
   i18nAriaLabel(closeButton, 'leaderboard.close');
 
+  /* ── 模式篩選（右上角）───────────────────────────────────────────── */
+
+  const modeFilters = el('div', 'leaderboard__modes');
+  modeFilters.setAttribute('role', 'group');
+  i18nAriaLabel(modeFilters, 'leaderboard.modeFilter');
+
+  const modeButtons = new Map<BoardMode, HTMLButtonElement>();
+
+  for (const item of BOARD_MODES) {
+    const button = el('button', 'leaderboard__mode-filter');
+    button.type = 'button';
+    button.setAttribute('aria-pressed', 'false');
+    i18nText(button, boardModeLabelKey(item));
+
+    button.addEventListener('click', (): void => {
+      if (mode === item) return;
+
+      mode = item;
+      /* 換篩選先抓一次：快取是空的，不抓好版會顯示「還沒有紀錄」。 */
+      /* A filter change fetches once: the cache for it is empty, and without this the board would read "no records yet". */
+      source.refresh?.(mode);
+      render();
+    });
+
+    modeButtons.set(item, button);
+    modeFilters.append(button);
+  }
+
   const header = el('header', 'leaderboard__header');
-  appendChildren(header, title, subtitle, closeButton);
+  appendChildren(header, title, subtitle, modeFilters, closeButton);
 
   /* ── 分頁 ──────────────────────────────────────────────────────────── */
 
@@ -191,11 +227,17 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
   }
 
   function renderList(): void {
-    const snapshot = source.snapshot(category);
+    const snapshot = source.snapshot(category, undefined, mode);
 
     for (const [id, button] of tabButtons) {
       button.classList.toggle('leaderboard__tab--active', id === category);
       button.setAttribute('aria-selected', id === category ? 'true' : 'false');
+    }
+
+    for (const [id, button] of modeButtons) {
+      const active = id === mode;
+      button.classList.toggle('leaderboard__mode-filter--active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
     }
 
     /*
@@ -207,7 +249,7 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
      * sharing is on (with it off `snapshot()` always answers empty), and the category is actually
      * being fetched (the local build has no such member, so `?.` yields false forever).
      */
-    const fetching = source.sharing && (source.isFetching?.(category) ?? false);
+    const fetching = source.sharing && (source.isFetching?.(category, mode) ?? false);
 
     if (snapshot.entries.length === 0 && fetching) {
       list.replaceChildren(renderLoading());
@@ -249,6 +291,14 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
       if (entry.name !== '' && entry.tag !== undefined && entry.tag !== '') {
         appendChildren(who, el('span', 'leaderboard__tag', `#${entry.tag}`));
       }
+
+      /*
+       * 模式標記：一位玩家在每個模式各有一列，所以每一列都要說得出自己是哪一個模式。
+       * The mode badge: one row per player per mode, so every row has to say which mode it is.
+       */
+      const badge = el('span', 'leaderboard__mode');
+      i18nText(badge, boardModeLabelKey(entry.mode ?? 'new'));
+      appendChildren(who, badge);
       const value = el('span', 'leaderboard__value', primaryValue(entry, category));
       /*
        * 時長（`HH:mm:ss`）貼在該分類數值的右邊，回答「這個數字是跑了多久打出來的」。
@@ -339,7 +389,7 @@ export function createLeaderboard(options: LeaderboardOptions): LeaderboardView 
      * 的快取 —— 少了這一行，另一台裝置刷新的成績要等重開分頁才看得到。
      * Fetches the board once on open (an optional member, server build only): `snapshot()` is synchronous and reads the last cache — without this, a score set on another device would not show until the tab was reopened.
      */
-    source.refresh?.();
+    source.refresh?.(mode);
 
     render();
     root.hidden = false;

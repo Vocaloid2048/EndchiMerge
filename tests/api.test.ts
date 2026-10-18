@@ -41,6 +41,9 @@ const VERSION = '0.1.0';
 
 const GOOD_RUN = { score: 900, merges: 30, drops: 40, maxCombo: 5, durationMs: 60_000 };
 
+/** 剛好越過上界的分數：合成數 × 最高級分數 × 倍率天花板，再加 1（跟著配置走，不寫死數字）。 */
+const ABSURD_SCORE = GOOD_RUN.merges * MAX_LEVEL_SCORE * MAX_MULTIPLIER + 1;
+
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
     databaseUrl: 'postgresql://user:pass@host/db',
@@ -119,6 +122,7 @@ async function submitRun(
   started: StartBody,
   run: RunNumbers,
   deviceId = DEVICE,
+  mode?: string,
 ): Promise<{ status: number; body: VerdictBody }> {
   const result = await handleScore(
     request('POST', {
@@ -132,6 +136,7 @@ async function submitRun(
       durationMs: run.durationMs,
       displayName: '阿爺',
       version: VERSION,
+      ...(mode === undefined ? {} : { mode }),
     }),
     deps,
   );
@@ -195,16 +200,26 @@ describe('readConfig — 環境變數 / environment variables', () => {
 
 describe('limits — 上界與配置同步 / the bounds track the game config', () => {
   it('matches dropCooldownMs, the top level score and the multiplier ceiling', () => {
-    const levels = JSON.parse(
-      readFileSync(new URL('../public/config/levels.json', import.meta.url), 'utf8'),
-    ) as { settings: { dropCooldownMs: number }; levels: { score: number }[] };
+    /*
+     * 兩個模式（新玩法／傳統）各有自己的等級表；上界取兩邊最高的那一級，寧可寬也不要誤退正常高分。
+     * Each mode has its own level table; the bound takes the highest level across both — a looser
+     * bound is better than rejecting an honest high score.
+     */
+    const tables = ['levels_new.json', 'levels.json'].map(
+      (file) =>
+        JSON.parse(
+          readFileSync(new URL(`../public/config/${file}`, import.meta.url), 'utf8'),
+        ) as { settings: { dropCooldownMs: number }; levels: { score: number }[] },
+    );
     const combo = readFileSync(new URL('../src/game/combo.ts', import.meta.url), 'utf8');
 
     const cap = Number(/cap:\s*(\d+)/.exec(combo)?.[1]);
     const base = Number(/base:\s*(\d+)/.exec(combo)?.[1]);
 
-    expect(DROP_COOLDOWN_MS).toBe(levels.settings.dropCooldownMs);
-    expect(MAX_LEVEL_SCORE).toBe(Math.max(...levels.levels.map((level) => level.score)));
+    for (const levels of tables) {
+      expect(DROP_COOLDOWN_MS).toBe(levels.settings.dropCooldownMs);
+    }
+    expect(MAX_LEVEL_SCORE).toBe(Math.max(...tables.flatMap((levels) => levels.levels.map((level) => level.score))));
     expect(MAX_MULTIPLIER).toBe(cap + base);
   });
 
@@ -492,7 +507,7 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
     const started = await startRun(deps);
     advance(GOOD_RUN.durationMs);
 
-    const result = await submitRun(deps, started, { ...GOOD_RUN, score: 9_000_000 });
+    const result = await submitRun(deps, started, { ...GOOD_RUN, score: ABSURD_SCORE });
     expect(result.body).toMatchObject({ verified: false, reason: 'score_above_ceiling' });
     expect(await store.getScore(started.runId)).not.toBeNull();
     expect(((await board(deps)).body as { total: number }).total).toBe(0);
@@ -562,7 +577,7 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
     expect(early.body.best.score).toBe(900);
 
     advance(1_000);
-    const bogus = await submitRun(deps, started, { ...GOOD_RUN, score: 9_000_000 });
+    const bogus = await submitRun(deps, started, { ...GOOD_RUN, score: ABSURD_SCORE });
 
     expect(bogus.body.verified).toBe(false);
     expect(bogus.body.best.score).toBe(900);
@@ -584,7 +599,7 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
     const { deps, advance } = makeDeps();
 
     for (let index = 0; index < 20; index += 1) {
-      const submitted = await play(deps, advance, { ...GOOD_RUN, score: 9_000_000 });
+      const submitted = await play(deps, advance, { ...GOOD_RUN, score: ABSURD_SCORE });
       expect(submitted.status).toBe(200);
     }
 
@@ -752,12 +767,100 @@ describe('handlers — 開局、提交與榜 / start, submit and the board', () 
   });
 });
 
+/* ── 模式 / Modes ─────────────────────────────────────────────────────────── */
+
+describe('modes — 每個模式各自一列 / one row per mode', () => {
+  const RUN = { score: 100, merges: 5, drops: 8, maxCombo: 2, durationMs: 60_000 };
+
+  interface BoardBody {
+    total: number;
+    entries: { name: string; mode: string; score: number; rank: number }[];
+    self: { mode: string; score: number } | null;
+  }
+
+  async function playMode(
+    deps: Deps,
+    advance: (ms: number) => void,
+    mode: string,
+    run: RunNumbers,
+  ): Promise<void> {
+    const started = await startRun(deps);
+    advance(run.durationMs);
+
+    const result = await submitRun(deps, started, run, DEVICE, mode);
+    expect(result.body.verified).toBe(true);
+  }
+
+  it('keeps the same device in one row per mode', async () => {
+    const { deps, store, advance } = makeDeps();
+
+    await playMode(deps, advance, 'new', GOOD_RUN);
+    await playMode(deps, advance, 'traditional', RUN);
+
+    expect((await store.getProfile(DEVICE, 'new'))?.bestScore).toBe(GOOD_RUN.score);
+    expect((await store.getProfile(DEVICE, 'traditional'))?.bestScore).toBe(RUN.score);
+    expect(await store.countProfiles()).toBe(2);
+    expect(await store.countProfiles('traditional')).toBe(1);
+    /* 兩列、一位玩家：健康檢查報的是人數，不是列數。 */
+    /* Two rows, one player: the health check reports people, not rows. */
+    expect(await store.countPlayers()).toBe(1);
+  });
+
+  it('lists both rows under "all" and one under a single mode', async () => {
+    const { deps, advance } = makeDeps();
+
+    await playMode(deps, advance, 'new', GOOD_RUN);
+    await playMode(deps, advance, 'traditional', RUN);
+
+    const all = (await board(deps, 'category=score&mode=all')).body as BoardBody;
+    expect(all.total).toBe(2);
+    expect(all.entries.map((entry) => entry.mode)).toEqual(['new', 'traditional']);
+    expect(all.entries.map((entry) => entry.score)).toEqual([GOOD_RUN.score, RUN.score]);
+
+    const traditional = (await board(deps, 'category=score&mode=traditional')).body as BoardBody;
+    expect(traditional.total).toBe(1);
+    expect(traditional.entries[0]).toMatchObject({ mode: 'traditional', score: RUN.score });
+
+    const fresh = (await board(deps, 'category=score&mode=new')).body as BoardBody;
+    expect(fresh.total).toBe(1);
+    expect(fresh.entries[0]).toMatchObject({ mode: 'new', score: GOOD_RUN.score });
+  });
+
+  it('reports the player’s own row for the mode it was asked about', async () => {
+    const { deps, advance } = makeDeps();
+
+    await playMode(deps, advance, 'new', GOOD_RUN);
+    await playMode(deps, advance, 'traditional', RUN);
+
+    const traditional = (
+      await board(deps, `category=score&mode=traditional&deviceId=${DEVICE}`)
+    ).body as BoardBody;
+
+    expect(traditional.self).toMatchObject({ mode: 'traditional', score: RUN.score, rank: 1 });
+  });
+
+  it('treats an absent or unknown mode as the new mode', async () => {
+    const { deps, store, advance } = makeDeps();
+
+    const started = await startRun(deps);
+    advance(GOOD_RUN.durationMs);
+    await submitRun(deps, started, GOOD_RUN);
+
+    expect((await store.getProfile(DEVICE, 'new'))?.bestScore).toBe(GOOD_RUN.score);
+    expect(await store.getProfile(DEVICE, 'traditional')).toBeNull();
+
+    await playMode(deps, advance, 'nonsense', { ...RUN, score: 50 });
+    expect((await store.getProfile(DEVICE, 'new'))?.bestScore).toBe(GOOD_RUN.score);
+    expect(await store.getProfile(DEVICE, 'traditional')).toBeNull();
+  });
+});
+
 class BrokenStore extends MemoryStore {
   constructor(private readonly failure: unknown) {
     super();
   }
 
-  override async countProfiles(): Promise<number> {
+  override async countPlayers(): Promise<number> {
     throw this.failure;
   }
 }

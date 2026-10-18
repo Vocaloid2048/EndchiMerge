@@ -5,6 +5,29 @@
 
 ---
 
+## 0. 玩法模式（新玩法／傳統模式）
+
+一個模式 = **一份等級表 ＋ 一份技能名單**，兩者寫在同一個檔案裡（`levels*.json`），所以載入一個模式
+只需要抓一次。
+
+| 模式 | 等級表 | 技能 | 備註 |
+| --- | --- | --- | --- |
+| `new`（新玩法，預設） | `public/config/levels_new.json` | `skills.json` 全部 | 沒有 `skillIds` 欄位＝不限 |
+| `traditional`（傳統模式） | `public/config/levels.json` | 檔案內 `skillIds` 指定的四個 | 參照官方山團團大小；保留最初的 4 個技能 |
+
+傳統模式的 `skillIds` 是 `discard`、`protocol_float`、`shake`、`fate_swap` —— 那是**新增六個技能
+之前**的那一組，不是 `skills.json` 的前四個（檔案按費用排序，前四個已經不是它們）。
+
+- 模式記在偏好（`endchimerge:mode`），**切換後要重新載入**才會套用：等級表與技能名單在開站時只抓
+  一次並寫進 `GameSession`，換表等於換一份配置。設定頁的切換因此是一個 5 秒鎖定的確認對話框，
+  確認後先上載這一局、再寫偏好、最後重新載入。
+- 模式**不受**「允許更改遊戲規則」總開關管制：兩個模式各自上榜，若受管制則傳統模式永遠不能上榜。
+- 最高分（BEST TRY）、本機紀錄與**圖鑑解鎖進度**都按模式分開存放：兩條合成鏈長度不同（20 對 11），
+  進度互不相通；切換回來接回原本那一份，不會清零。
+- 排行榜是同一個榜加模式篩選（所有／新玩法／傳統），每一位玩家在每個模式各佔一列，列上標示模式。
+
+---
+
 ## 1. 模組分工
 
 | 檔案                             | 責任                                                       |
@@ -303,7 +326,7 @@ landingTop(x) = 最高的一片落面（同欄已入堆顆粒的頂緣，否則�
 
 ### 5.1 規則
 
-- **解鎖條件**：該等級**首次被合成出來**。解鎖後永久保留，**跨局不重設**。
+- **解鎖條件**：該等級**首次被合成出來**。解鎖後永久保留，**跨局不重設**（但只在同一個模式內成立）。
 - **鏈首一律解鎖**：`baseline` 是編號最小的等級，否則開局完全沒有東西可掉。
 - **生成池同步過濾**：進池需要同時滿足
   ```
@@ -311,9 +334,11 @@ landingTop(x) = 最高的一片落面（同欄已入堆顆粒的頂緣，否則�
   ```
   所以**即使 `levels.json` 標了 `droppable: true`，未解鎖的等級也不會出現在掉落佇列**。  
   開局只有 Lv1 解鎖 ⇒ 初始只會掉 Lv1；每合出一級，那一級才加入池。
-- **儲存鍵**：`endchimerge:unlocks`（JSON 陣列）、`endchimerge:high-score`。  
-  儲存體是**可注入**的（`ProgressStorage`），無痕模式或關閉 cookie 時 `localStorage`  
-  光是存取就拋錯，此時退回「只活在記憶體裡」；讀寫一律包 try/catch，壞掉的存檔視為空。
+- **儲存鍵按模式分開**：新玩法用 `endchimerge:unlocks`／`endchimerge:high-score`，傳統模式用
+  `endchimerge:unlocks:traditional`／`endchimerge:high-score:traditional`。兩個模式各記各的，
+  所以切換回來會接回原本的進度，而不是共用一份或清零。儲存體是**可注入**的（`ProgressStorage`），
+  無痕模式或關閉 cookie 時 `localStorage` 光是存取就拋錯，此時退回「只活在記憶體裡」；讀寫一律包
+  try/catch，壞掉的存檔視為空。
 
 ### 5.2 圖鑑 ＝ MELTING LIST
 
@@ -544,9 +569,9 @@ landingTop(x) = 最高的一片落面（同欄已入堆顆粒的頂緣，否則�
 | -------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
 | 溢位線在頂緣上方多高     | `container.json → overflowAboveRim`                                                   | `30`                                                            |
 | 投放點在頂緣上方多高     | `container.json → dropAboveRim`                                                       | `40`（**必須大於上一項**）                                               |
-| 溢位寬限秒數         | `levels.json → settings.overflowGraceMs`                                              | `5000`                                                          |
-| 投放冷卻           | `levels.json → settings.dropCooldownMs`                                               | `500`                                                           |
-| 合成冷卻           | `levels.json → settings.mergeCooldownMs`                                              | `100`                                                           |
+| 溢位寬限秒數         | `levels*.json → settings.overflowGraceMs`                                              | `5000`                                                          |
+| 投放冷卻           | `levels*.json → settings.dropCooldownMs`                                               | `500`                                                           |
+| 合成冷卻           | `levels*.json → settings.mergeCooldownMs`                                              | `100`                                                           |
 | 近接合成的邊緣間隙容差    | `src/core/constants.ts → MERGE_OUTLINE_GAP`                                           | `4`                                                             |
 | 合成後推開鄰居的力度     | `src/core/constants.ts → MERGE_PUSH_FACTOR / MERGE_PUSH_SPEED / MERGE_PUSH_MAX_DEPTH` | `1.15 / 0.05 / 12`                                              |
 | 合成後找支撐的吸附上限    | `src/core/constants.ts → MERGE_SETTLE_MAX_DROP`                                       | `80`                                                            |
@@ -569,5 +594,5 @@ landingTop(x) = 最高的一片落面（同欄已入堆顆粒的頂緣，否則�
 | 命運互換的周邊擾動      | `skills.json → skills[].params.disturbance`                                           | `6`                                                             |
 | 溢位紅線與警戒區樣式     | `src/render/stage.ts → OVERFLOW_STYLE`                                                | 見 `rendering.md`                                                |
 | 技能選取標示的樣式      | `src/render/stage.ts → SELECTION_STYLE`                                               | 見 `rendering.md`                                                |
-| 哪一級可被生成        | `levels.json → levels[].droppable / spawnWeight`                                      | `droppable`：Lv1–5、Lv7；`spawnWeight`：`20 / 25 / 25 / 15 / 15`（其餘 `0`） |
-| 各級分數           | `levels.json → levels[].score`                                                        | `0, 1, 2, 4, … 256`                                             |
+| 哪一級可被生成        | `levels*.json → levels[].droppable / spawnWeight`                                      | `droppable`：Lv1–5、Lv7；`spawnWeight`：`20 / 25 / 25 / 15 / 15`（其餘 `0`） |
+| 各級分數           | `levels*.json → levels[].score`                                                        | `0, 1, 2, 4, … 512`                                             |

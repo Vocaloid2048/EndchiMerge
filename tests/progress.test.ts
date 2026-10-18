@@ -4,6 +4,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { STORAGE_KEYS } from '../src/core/constants';
+import { modeKeys } from '../src/game/mode';
 import { createProgressStore } from '../src/game/progress';
 import type { StorageBackend } from '../src/game/localStore';
 
@@ -155,5 +157,52 @@ describe('createProgressStore — 最高分 / high score', () => {
     const store = createProgressStore({ storage: null });
 
     expect(store.recordScore(12.9)).toBe(12);
+  });
+});
+
+describe('createProgressStore — 模式之間不互通 / per-mode progress', () => {
+  it('keeps each mode’s unlocks apart and restores them on switch-back', () => {
+    const storage = new FakeStorage();
+    const modern = createProgressStore({
+      baseline: [1],
+      storage,
+      keys: { unlocks: modeKeys('new').unlocks },
+    });
+
+    modern.unlock(7);
+
+    const classic = createProgressStore({
+      baseline: [1],
+      storage,
+      keys: { unlocks: modeKeys('traditional').unlocks },
+    });
+
+    expect(classic.has(7)).toBe(false);
+    classic.unlock(3);
+
+    const backToModern = createProgressStore({
+      baseline: [1],
+      storage,
+      keys: { unlocks: modeKeys('new').unlocks },
+    });
+    expect(backToModern.has(3)).toBe(false);
+    expect(backToModern.has(7)).toBe(true);
+
+    const backToClassic = createProgressStore({
+      baseline: [1],
+      storage,
+      keys: { unlocks: modeKeys('traditional').unlocks },
+    });
+    expect(backToClassic.has(7)).toBe(false);
+    expect(backToClassic.has(3)).toBe(true);
+  });
+
+  it('leaves the new mode on the unsuffixed keys so existing saves survive', () => {
+    expect(modeKeys('new')).toEqual({
+      profile: STORAGE_KEYS.profile,
+      highScore: STORAGE_KEYS.highScore,
+      unlocks: STORAGE_KEYS.unlocks,
+    });
+    expect(modeKeys('traditional').unlocks).toBe(`${STORAGE_KEYS.unlocks}:traditional`);
   });
 });

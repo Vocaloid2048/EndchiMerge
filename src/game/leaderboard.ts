@@ -74,6 +74,7 @@
 import { STORAGE_KEYS } from '../core/constants';
 import { open, seal } from '../core/integrity';
 import { createLocalStore, type LocalStore, type StorageBackend } from './localStore';
+import { DEFAULT_MODE, isModeId, modeFilterValue, modeKeys, type BoardMode, type ModeId } from './mode';
 
 /** 榜單分類。 */
 export type LeaderboardCategory = 'score' | 'combo' | 'merges';
@@ -111,6 +112,16 @@ export interface LeaderboardEntry {
   /** 顯示用的四位數號（`夜芷冰#0001` 的後半）。同名的人靠它分開；本機榜沒有它就留空。
    * 永遠不是身分 —— 身分是 `id`，所以改名不換號。 */
   tag?: string;
+  /**
+   * 這一列屬於哪個模式。一位玩家在每個模式各有一列 —— 兩個模式的分數尺度不同，硬合成一列會讓
+   * 傳統模式的成績永遠被新玩法蓋住。
+   * The mode this row belongs to. One row per player **per mode**: the two modes score on different
+   * scales, and folding them into one row would leave the traditional numbers buried forever.
+   *
+   * 舊存檔沒有這一欄，讀不到時當作新玩法。
+   * Saves written before this field existed read as the new mode.
+   */
+  mode?: ModeId;
   /** 歷史最高分。 */
   score: number;
   /**
@@ -169,6 +180,11 @@ export interface LeaderboardRun {
    * `GameSession.dropCount` counts *down*.
    */
   drops?: number;
+  /**
+   * 這一局是哪個模式；未提供時視為新玩法。
+   * Which mode this run belongs to; omitted means the new mode.
+   */
+  mode?: ModeId;
   /** 覆寫時間戳；未提供時用時鐘。測試用。 */
   at?: number;
 }
@@ -280,26 +296,31 @@ export interface LeaderboardSource {
    * 讀取某一分類的前 N 名與自己的名次。
    * Read one category's top N plus the player's own rank.
    *
+   * `mode` 是榜上的模式篩選（預設 `'all'`）：一位玩家每個模式各有一列，所以「所有模式」會看到
+   * 同一人兩列、各帶自己的模式標記。
+   * `mode` is the board's filter (default `'all'`): one row per player per mode, so "all modes"
+   * shows the same player twice with each row carrying its own mode.
+   *
    * **同步**，而且實作因此一定讀的是手上已有的東西（本機版是存檔，伺服器版是上一次抓回來的
    * 快取）。要伺服器版去拿新的，呼叫 `refresh()`。
    * **Synchronous**, so an implementation necessarily reads what it already has (storage in the
    * local build, the last fetch in the server build). To make the server build fetch, call
    * `refresh()`.
    */
-  snapshot(category: LeaderboardCategory, limit?: number): LeaderboardSnapshot;
+  snapshot(category: LeaderboardCategory, limit?: number, mode?: BoardMode): LeaderboardSnapshot;
   /** 訂閱變更（刷新、上載、改名、切換分享）；回傳取消訂閱的函式。 */
   subscribe(listener: () => void): () => void;
   /**
    * 去拿一次最新的榜（選填）。
    * Fetch the board once (optional).
    *
-   * 只有**伺服器版**需要它 —— 見 `snapshot()` 為什麼一定是快取。UI 在榜面開啟時呼叫它一次，
-   * 所以「開啟榜 → 看到最新的」成立，而不必輪詢。
+   * 只有**伺服器版**需要它 —— 見 `snapshot()` 為什麼一定是快取。UI 在榜面開啟時、以及換篩選時
+   * 各呼叫一次，所以「開啟榜 → 看到最新的」成立，而不必輪詢。
    * Only the **server build** needs this — see why `snapshot()` must be a cache. The UI calls it
-   * once when the board opens, which is what makes "open the board, see current standings" true
-   * without polling.
+   * once when the board opens and once per filter change, which is what makes "open the board,
+   * see current standings" true without polling.
    */
-  refresh?(): void;
+  refresh?(mode?: BoardMode): void;
   /**
    * 這個分類正在抓新的榜嗎（選填）。
    * Whether this category is being fetched right now (optional).
@@ -315,7 +336,7 @@ export interface LeaderboardSource {
    * 本機版不提供：它沒有東西要等。
    * The local build does not provide it: it has nothing to wait for.
    */
-  isFetching?(category: LeaderboardCategory): boolean;
+  isFetching?(category: LeaderboardCategory, mode?: BoardMode): boolean;
   /**
    * 開一局（選填）。
    * Start a run (optional).
@@ -464,6 +485,11 @@ export interface PlayerRecord {
 export interface LocalLeaderboardOptions extends PlayerRecordOptions {
   /** 顯示名次數；預設 `LEADERBOARD_LIMIT`。 */
   limit?: number;
+  /**
+   * 這個榜實例代表哪個模式；`record()` 寫入的列會帶上它（預設新玩法）。
+   * Which mode this board instance speaks for; rows written by `record()` carry it (default: the new mode).
+   */
+  mode?: ModeId;
 }
 
 /**
@@ -538,8 +564,18 @@ function parseEntry(raw: unknown): LeaderboardEntry | null {
 
   const name = typeof candidate['name'] === 'string' ? candidate['name'] : '';
 
-  /* 時長是後加的欄位：舊紀錄讀不到就補 0，而不是讓整筆紀錄失效。 */
-  return { id, name, score, durationMs: toCount(candidate['durationMs']) ?? 0, maxCombo, merges, at };
+  /* 時長是後加的欄位：舊紀錄讀不到就補 0，而不是讓整筆紀錄失效。模式同理，舊紀錄當作新玩法。 */
+  /* The duration is a later field: an old record reads it as 0 instead of being dropped. The mode works the same way — old rows are the new mode. */
+  return {
+    id,
+    name,
+    mode: isModeId(candidate['mode']) ? candidate['mode'] : DEFAULT_MODE,
+    score,
+    durationMs: toCount(candidate['durationMs']) ?? 0,
+    maxCombo,
+    merges,
+    at,
+  };
 }
 
 /** 解析紀錄陣列；壞掉一律當作空的。 */
@@ -690,13 +726,24 @@ function capEntries(
 
   for (const category of LEADERBOARD_CATEGORIES) {
     const top = [...entries].sort((a, b) => compareBy(category, a, b)).slice(0, limit);
-    for (const entry of top) kept.set(entry.id, entry);
+    for (const entry of top) kept.set(rowKey(entry), entry);
   }
 
-  const mine = entries.find((entry) => entry.id === keepId);
-  if (mine !== undefined) kept.set(mine.id, mine);
+  /*
+   * 自己那一筆**無條件保留**：一個人在每個模式各有一列，所以這裡保留他所有的列。
+   * The player's own rows are kept **unconditionally**: one row per mode, so every row of theirs stays.
+   */
+  for (const entry of entries) {
+    if (entry.id === keepId) kept.set(rowKey(entry), entry);
+  }
 
   return [...kept.values()];
+}
+
+/** 榜上那一列的識別：裝置 × 模式。 */
+/** A board row's identity: device × mode. */
+function rowKey(entry: LeaderboardEntry): string {
+  return `${entry.id}|${entry.mode ?? DEFAULT_MODE}`;
 }
 
 /** 鑄一個玩家識別碼。 */
@@ -907,6 +954,7 @@ export function createPlayerRecord(options: PlayerRecordOptions = {}): PlayerRec
 
 export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): LeaderboardSource {
   const limit = Math.max(1, Math.trunc(options.limit ?? LEADERBOARD_LIMIT));
+  const mode = options.mode ?? DEFAULT_MODE;
 
   /** 榜身。只有下面那個 `push()` 會動它。 */
   let entries: LeaderboardEntry[] = [];
@@ -933,7 +981,7 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
   const player = createPlayerRecord({
     store: options.store,
     storage: options.storage,
-    keys: options.keys,
+    keys: { ...(options.keys ?? {}), profile: options.keys?.profile ?? modeKeys(mode).profile },
     now: options.now,
     playerId: options.playerId,
     salt: options.salt,
@@ -1015,6 +1063,7 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
     const row: LeaderboardEntry = {
       id: profile.playerId,
       name: player.displayName,
+      mode,
       score: profile.score,
       durationMs: profile.durationMs,
       maxCombo: profile.maxCombo,
@@ -1022,7 +1071,7 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
       at: profile.at,
     };
 
-    const index = entries.findIndex((entry) => entry.id === profile.playerId);
+    const index = entries.findIndex((entry) => rowKey(entry) === rowKey(row));
     const updated =
       index >= 0 ? entries.map((entry, at) => (at === index ? row : entry)) : [...entries, row];
 
@@ -1120,8 +1169,9 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
 
     sync,
 
-    snapshot(category: LeaderboardCategory, requested?: number): LeaderboardSnapshot {
+    snapshot(category: LeaderboardCategory, requested?: number, filter?: BoardMode): LeaderboardSnapshot {
       const take = Math.max(1, Math.trunc(requested ?? limit));
+      const wanted = modeFilterValue(filter ?? 'all');
 
       /*
        * 同意之前榜是空的。這一條同時是「同意後立刻看得到自己」的原因：`setSharing(true)`
@@ -1129,11 +1179,18 @@ export function createLocalLeaderboard(options: LocalLeaderboardOptions = {}): L
        * Empty until consent. It is also why consenting shows the player himself immediately:
        * `setSharing(true)` syncs before it notifies.
        */
-      const visible = player.sharing ? entries : [];
+      const visible = player.sharing
+        ? entries.filter((entry) => wanted === null || (entry.mode ?? DEFAULT_MODE) === wanted)
+        : [];
       const sorted = [...visible].sort((a, b) => compareBy(category, a, b));
       const top = sorted.slice(0, take);
 
-      const rank = sorted.findIndex((entry) => entry.id === player.playerId);
+      /* 「自己」永遠指這個裝置在**這個模式**的那一列；篩選到單一模式時就跟著那個模式。 */
+      /* "Self" is always this device's row for **this mode**, following the filter when it names one. */
+      const mineMode = wanted ?? mode;
+      const rank = sorted.findIndex(
+        (entry) => entry.id === player.playerId && (entry.mode ?? DEFAULT_MODE) === mineMode,
+      );
       const mine = rank < 0 ? undefined : sorted[rank];
 
       /* 自己不在榜上（未同意、或還沒上載過）時 `self` 是 `null`。 */

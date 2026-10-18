@@ -263,6 +263,52 @@
   opacity: 0.4;
 }
 
+/* ── 玩法模式 ──────────────────────────────────────────────────────── */
+
+.settings__modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.settings__mode {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.settings__mode:hover {
+  border-color: var(--color-fg-dim);
+}
+
+/* 選中的那一張用強調色描邊：兩個模式是互斥的，選中狀態要比 radio 圓點更明顯。 */
+.settings__mode:has(.settings__language-input:checked) {
+  border-color: var(--color-accent);
+}
+
+.settings__mode-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings__mode-name {
+  font-size: 23px;
+  letter-spacing: 0.04em;
+}
+
+.settings__mode-note {
+  color: var(--color-fg-dim);
+  font-size: 18px;
+  line-height: 1.5;
+}
+
 /* ── 語言 ──────────────────────────────────────────────────────────── */
 
 .settings__languages {
