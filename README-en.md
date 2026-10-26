@@ -36,6 +36,15 @@ Please note: this project is not affiliated with Hypergryph or Gryphline. *Endch
 
 This project is completely free, with no in-app purchases and no ads, and is not monetised in any form. Without 夜芷冰's consent, the “方團團” (Endchi) assets may not be used for commercial profit or for any purpose that damages the reputation of any party (for assets contributed by other community members, please obtain their consent first).
 
+## <span style="color:#569CD6">🗂️ Game menu</span>
+
+The site opens on a menu: one tile per game (art above, name below). Press a tile to enter; the back button at the game's top-left corner returns here.
+
+- `?game=merge` opens EndchiMerge directly; no parameter means the menu. Switching always reloads — the level table, the physics world and the leaderboard token are built only at the moment a game is entered.
+- Backing out of a started run (at least one drop) asks first, with the confirm button locked for five seconds; a run with no drop leaves at once. Cancelling stays in the run with its state intact.
+- Games that are not out yet (City Blocks, Match Three) are marked "Coming soon" and disabled on the menu.
+- Adding a game means one row in `src/game/gameCatalog.ts` plus one boot branch in `src/main.ts`; see `docs/menu.md`.
+
 ## <span style="color:#569CD6">🎮 How to play</span>
 Click the dumpling hanging above or press Space to drop it! When two identical dumplings touch, they merge into the next level — the goal is to unlock higher levels and rack up a higher score.
 
