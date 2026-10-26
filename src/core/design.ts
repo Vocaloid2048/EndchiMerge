@@ -37,8 +37,11 @@ export const LAYOUT_RECTS = {
   /** ⑤ SKILL LIST 面板（`1408:2694`）。 */
   skill: { x: 64, y: 375, width: 435, height: 641 },
   /**
-   * 返回鍵（`1408:2092`）：與 SCORE 面板完全重疊，設計稿本身看不到它；只作紀錄，不渲染。
-   * Back button: its rect sits exactly under the SCORE panel, so the mock never renders it; recorded, not drawn.
+   * 返回選單（`1408:2092`）：與 SCORE 面板共用左上角，設計稿的 z-order 把它壓在面板之下而看不見。
+   * 現在改為畫在面板之上（見 `ui/layout.ts`），座標本身照設計稿不變。
+   * Back to the menu (`1408:2092`): it shares the SCORE panel's top-left corner and the mock's
+   * z-order buries it under the panel. It is now drawn above the panel (see `ui/layout.ts`); the
+   * rectangle itself stays exactly as designed.
    */
   back: { x: 64, y: 64, width: 128, height: 128 },
   /** ⑥ 容器（`1408:2110`，含透視偏移的完整包圍盒）。 */

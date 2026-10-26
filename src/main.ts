@@ -17,6 +17,7 @@ import { i18n } from './i18n';
 import { SpriteLoader } from './render/spriteLoader';
 import { buildSilhouetteCache } from './render/silhouetteLoader';
 import { Viewport } from './render/viewport';
+import { attachBackToMenu } from './ui/backToMenu';
 import { hook } from './ui/dom';
 import { createGameOver, type GameOverView } from './ui/gameOver';
 import { createHelp, type HelpView } from './ui/help';
@@ -30,8 +31,7 @@ import { createMusicToggle, type MusicToggle } from './ui/music';
 import { createNotice } from './ui/notice';
 import { createPublishPrompt, type PublishPromptView } from './ui/publishPrompt';
 import { attachRestartConfirm } from './ui/restartButton';
-import { attachStageScale } from './ui/scale';
-import { createSettings, type SettingsView } from './ui/settings';
+import { attachStageScale } from './ui/scale';import { createSettings, type SettingsView } from './ui/settings';
 import { createSkillBar, type SkillBar } from './ui/skillBar';
 import { createSkillGuide } from './ui/skillGuide';
 import { createSkillHint, type SkillHint } from './ui/skillHint';
@@ -562,6 +562,22 @@ async function bootGame(options: {
   window.addEventListener('pagehide', syncRun);
   document.addEventListener('visibilitychange', (): void => {
     if (document.visibilityState === 'hidden') syncRun();
+  });
+
+  /*
+   * 返回選單（版面左上角）：先記錄並上載這一局，再回到不帶 `?game=` 的路徑 —— 那條路徑就是選單。
+   * 上一頁的歷史紀錄不歸我們管，所以只用 `assign()` 而不是 `back()`。
+   * Back to the menu (top-left of the layout): record and upload the run, then go to the path with
+   * no `?game=` — that path is the menu. The history stack is not ours to drive, so `assign()` is
+   * used rather than `back()`.
+   */
+  attachBackToMenu({
+    button: layout.chrome.back,
+    onLeave: (): void => {
+      recordRun();
+      syncRun();
+      window.location.assign(window.location.pathname);
+    },
   });
 
   /**

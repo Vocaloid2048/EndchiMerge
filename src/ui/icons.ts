@@ -55,6 +55,11 @@ export const ICON_NAMES = [
    * The skill bar's fallback glyph: the help icon stands in when no id matches.
    */
   'help',
+  /**
+   * 「返回選單」的左向箭頭（常駐介面，不屬於技能欄或工具列）。
+   * The back-to-menu chevron (chrome, not part of the skill bar or the toolbar).
+   */
+  'back',
 ] as const;
 export type IconName = (typeof ICON_NAMES)[number];
 
@@ -103,6 +108,9 @@ const ICON_PATHS: Record<IconName, string> = {
   /* 技能說明：圓圈裡的一個 i。 */
   /* Skill guide: an "i" inside a circle. */
   info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5"/><path d="M12 7.8v0.1"/>',
+  /* 返回選單：單一左向箭頭。 */
+  /* Back to menu: one left chevron. */
+  back: '<path d="M14.5 5.5L8 12l6.5 6.5"/>',
 };
 
 /**

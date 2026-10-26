@@ -47,6 +47,11 @@ export interface Layout {
      * The music toggle, separate from the toolbar capsule.
      */
     music: HTMLButtonElement;
+    /**
+     * 返回選單；設計稿的 `return_btn` 本來被 SCORE 面板蓋住，這裡畫在面板之上。
+     * Back to the menu; the mock's `return_btn` sits under the SCORE panel and is drawn above it here.
+     */
+    back: HTMLButtonElement;
   };
   /**
    * 非官方聲明的宿主；內容由配置載入後填入。
@@ -156,6 +161,21 @@ function buildToolbar(): HTMLElement {
   }
 
   return nav;
+}
+
+/**
+ * 返回選單：設計稿的 `return_btn` 與 SCORE 面板完全重疊、被面板的 z-order 壓住，這裡把它畫在面板之上。
+ * Back to the menu: the mock's `return_btn` overlaps the SCORE panel exactly and is buried by it;
+ * here it is drawn above the panel instead.
+ */
+function buildBackButton(): HTMLButtonElement {
+  const back = el('button', 'panel panel--pill back');
+  back.type = 'button';
+  back.dataset['action'] = 'back';
+  i18nAriaLabel(back, 'chrome.back');
+  back.append(createIcon('back'));
+
+  return back;
 }
 
 /**
@@ -299,6 +319,7 @@ export function createLayout(host: HTMLElement): Layout {
   const root = el('div', 'layout');
 
   const score = buildScoreCard();
+  const back = buildBackButton();
   const toolbar = buildToolbar();
   const music = buildMusicButton();
   const next = buildNextCard();
@@ -308,6 +329,7 @@ export function createLayout(host: HTMLElement): Layout {
   const melting = buildMeltingList();
 
   place(score, LAYOUT_RECTS.score);
+  place(back, LAYOUT_RECTS.back);
   place(toolbar, LAYOUT_RECTS.toolGroup);
   place(music, LAYOUT_RECTS.music);
   place(next, LAYOUT_RECTS.next);
@@ -317,16 +339,16 @@ export function createLayout(host: HTMLElement): Layout {
   place(melting, LAYOUT_RECTS.melting);
 
   /*
-   * 設計稿把返回鍵放在 (64,64)，與 SCORE 面板完全重疊而看不到；照設計稿不渲染，
-   * 座標仍留在 `LAYOUT_RECTS.back` 作紀錄。
-   * The mock puts the back button at (64,64), fully under the SCORE panel and never visible; it is not drawn, and its rect stays in `LAYOUT_RECTS.back` as a record.
+   * 返回鍵刻意排在 SCORE 之後：同一個堆疊層裡後者在上，它才不會被面板蓋回設計稿那個「看不見」的狀態。
+   * The back button is appended after the SCORE card on purpose: within one stacking context the
+   * later sibling paints on top, so it cannot fall back to the mock's invisible state.
    */
 
   /* 非官方聲明：放在安全區之下的下緣留白，不佔任何 UI 空間。 */
   const notice = el('footer', 'layout__notice');
   notice.dataset['hook'] = 'notice';
 
-  appendChildren(root, score, toolbar, music, next, combo, skill, container, melting, notice);
+  appendChildren(root, score, back, toolbar, music, next, combo, skill, container, melting, notice);
   stage.append(root);
   host.append(stage);
 
@@ -358,7 +380,7 @@ export function createLayout(host: HTMLElement): Layout {
     root,
     stage,
     regions: { score, toolbar, next, combo, skill, container, melting },
-    chrome: { music },
+    chrome: { music, back },
     notice,
     setContainerMargin,
   };

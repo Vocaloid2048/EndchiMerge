@@ -298,6 +298,42 @@
 }
 
 /*
+ * 返回選單（`1408:2092`，128×128）：設計稿把它放在 SCORE 面板的同一個左上角、被面板壓住，
+ * 這裡畫在面板之上才看得見。圖示比工具列大一級，與音樂鍵同一個視覺重量。
+ * Back to the menu (`1408:2092`, 128×128): the mock puts it in the SCORE panel's top-left corner
+ * and buries it under the panel; it is drawn above instead so it can be seen. The glyph is a size
+ * up from the toolbar, matching the music key.
+ */
+.back {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--color-fg);
+  cursor: pointer;
+}
+
+.back .icon {
+  width: 56px;
+  height: 56px;
+}
+
+/*
+ * hover 與 focus 只動邊框與亮度，不位移也不縮放：面板已經在等比縮放的畫布內，
+ * 再加一層 transform 會與倍率相乘，位置便對不上相鄰的 SCORE 面板。
+ * Hover and focus touch the border and brightness only — no movement, no scaling: the panel is
+ * already inside the scaled canvas, and a second transform would multiply with the factor.
+ */
+.back:hover {
+  border-color: var(--color-fg);
+  filter: brightness(1.15);
+}
+
+.back:focus-visible {
+  outline: 4px solid var(--color-accent);
+  outline-offset: 4px;
+}
+
+/*
  * 靜音（`aria-pressed="true"`）：圖示轉淡，並斜著劃一道槓。
  * Muted (`aria-pressed="true"`): the glyph dims and a slash is drawn across it.
  *
