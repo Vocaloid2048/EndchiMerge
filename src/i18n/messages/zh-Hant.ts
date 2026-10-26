@@ -234,6 +234,16 @@ export const zhHant = {
     '請注意：本專案與鷹角網絡（Hypergryph）及 Gryphline 無關。《方團團大作戰》僅為一款由粉絲自行開發之網頁遊戲，本遊戲中使用的素材均由 夜芷冰 及 社群協作者 製作，所有角色名稱與相關美術版權歸原權利人所有。本專案原始碼版權歸夜芷冰擁有。',
   'help.copyright.body2':
     '本專案完全免費、不含內購與廣告，亦不以任何形式營利。未經夜芷冰同意，「方團團」素材不得用作商業盈利或其他有損害任一方聲譽的用途（由其他社群協作者提供的素材，請先自行徵得其同意再使用）。',
+  /* ── 遊戲選單與返回 / Game menu and back ──────────────────────── */
+  'menu.title': '選擇遊戲',
+  'menu.planned': '即將推出',
+  'game.merge.name': '團圓大作戰',
+  'game.citybloxx.name': '城市方塊',
+  'game.match3.name': '消消樂',
+  'chrome.back': '返回選單',
+  'back.title': '返回選單？',
+  'back.message': '這一局已經開始，返回前會先記錄目前的分數。',
+  'back.confirm': '返回選單',
   'mobile.rotateTitle': '請把裝置橫放',
   'mobile.rotateBody': '容器與技能列只在橫向放得下；橫放之後會自動進入全螢幕。',
   'mobile.landscape': '橫向並全螢幕',
