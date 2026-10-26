@@ -16,6 +16,7 @@
     "sign": "node scripts/sign-assets.mjs public/assets/character",
     "sign:check": "node scripts/sign-assets.mjs --check public/assets/character",
     "sprite": "python scripts/build-character-image.py",
+    "menu-art": "python scripts/build-menu-art.py",
     "prepare": "node scripts/install-git-hooks.mjs"
   },
   "devDependencies": {

@@ -1,6 +1,6 @@
 # 遊戲選單與返回路徑
 
-選單把《團圓大作戰》包成一個模組：開站先見選單，選遊戲才載入該遊戲；遊戲畫面左上角的返回鍵回到選單。
+選單把《方團團大作戰》包成一個模組：開站先見選單，選遊戲才載入該遊戲；遊戲畫面左上角的返回鍵回到選單。
 The menu wraps EndchiMerge as one module: the site opens on the menu, a game loads only once it is chosen,
 and the back button at the game's top-left corner returns here.
 
@@ -48,7 +48,9 @@ The menu only decides which page is shown.
 `src/ui/menu.ts` ＋ `src/styles/menu.css`，幾何全部來自 `src/core/design.ts` 的 `MENU_RECTS`
 （三格各 320×380、間距 72、置中於 1920×1080 畫布）。
 
-- 一格＝圖示（`public/assets/menu/<id>.svg`）＋ 遊戲名；整個格子是一顆 `<button>`，手機縮到三成後仍有 ~110px。
+- 一格＝圖示（`public/assets/menu/<id>.webp`）＋ 遊戲名；整個格子是一顆 `<button>`，手機縮到三成後仍有 ~110px。
+  圖示不是手畫的 SVG，而是由 `npm run menu-art`（`scripts/build-menu-art.py`）把角色圖合成出來的
+  512×512 透明 WebP：每個角色先按 alpha 邊界裁掉留白，所以「同一個 size」等於同樣的**視覺**大小。
 - `planned` 的遊戲：`disabled`、不透明度 0.45、右上角「即將推出」角標。
 - 缺圖只降級成虛線框 —— `public/assets/menu/` 整份刪掉，選單照樣可用（與 `public/assets/sprites/` 同一個原則）。
 - 選單**只**抓 `config/branding.json`（`loadBranding()`），不為了一行聲明載入等級表、技能與容器。
@@ -77,7 +79,8 @@ z-order 壓住、從不渲染。現在照原座標畫在面板**之上**（DOM �
 
 ## 5. 加入一個新遊戲
 
-1. 畫好圖示放 `public/assets/menu/<id>.svg`（正方形 viewBox，白色描邊）。
+1. 在 `scripts/build-menu-art.py` 的 `LAYOUTS` 加一個 `icon_id` 與它的疊法，執行 `npm run menu-art` 產生
+   `public/assets/menu/<id>.webp`（需要 Pillow）。
 2. `src/game/gameCatalog.ts`：`GameId` 加 id、`GAME_CATALOG` 加一筆，`status` 由 `'planned'` 改 `'playable'`。
 3. 五個語系字典各加 `game.<id>.name`（漏一個 `tsc` 就紅）。
 4. `src/main.ts` 加該遊戲的啟動函式，並在 `bootGame()` 的分流處按 `route.id` 分派（現時只有 `'merge'`）。

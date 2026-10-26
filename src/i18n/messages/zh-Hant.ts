@@ -237,9 +237,9 @@ export const zhHant = {
   /* ── 遊戲選單與返回 / Game menu and back ──────────────────────── */
   'menu.title': '選擇遊戲',
   'menu.planned': '即將推出',
-  'game.merge.name': '團圓大作戰',
-  'game.citybloxx.name': '城市方塊',
-  'game.match3.name': '消消樂',
+  'game.merge.name': '方團團大作戰',
+  'game.citybloxx.name': '團團方城市',
+  'game.match3.name': '三團成行',
   'chrome.back': '返回選單',
   'back.title': '返回選單？',
   'back.message': '這一局已經開始，返回前會先記錄目前的分數。',

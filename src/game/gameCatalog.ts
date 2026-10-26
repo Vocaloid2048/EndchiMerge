@@ -35,9 +35,9 @@ export interface GameEntry {
  * The display names deliberately avoid third-party titles (`citybloxx` / `match3` are code identifiers only).
  */
 export const GAME_CATALOG: readonly GameEntry[] = [
-  { id: 'merge', nameKey: 'game.merge.name', art: 'assets/menu/merge.svg', status: 'playable' },
-  { id: 'citybloxx', nameKey: 'game.citybloxx.name', art: 'assets/menu/citybloxx.svg', status: 'planned' },
-  { id: 'match3', nameKey: 'game.match3.name', art: 'assets/menu/match3.svg', status: 'planned' },
+  { id: 'merge', nameKey: 'game.merge.name', art: 'assets/menu/merge.webp', status: 'playable' },
+  { id: 'citybloxx', nameKey: 'game.citybloxx.name', art: 'assets/menu/citybloxx.webp', status: 'planned' },
+  { id: 'match3', nameKey: 'game.match3.name', art: 'assets/menu/match3.webp', status: 'planned' },
 ];
 
 /** 型別警衛：字串是不是目錄內的 id。 */
