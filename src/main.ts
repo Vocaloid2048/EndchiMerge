@@ -565,14 +565,20 @@ async function bootGame(options: {
   });
 
   /*
-   * 返回選單（版面左上角）：先記錄並上載這一局，再回到不帶 `?game=` 的路徑 —— 那條路徑就是選單。
-   * 上一頁的歷史紀錄不歸我們管，所以只用 `assign()` 而不是 `back()`。
-   * Back to the menu (top-left of the layout): record and upload the run, then go to the path with
-   * no `?game=` — that path is the menu. The history stack is not ours to drive, so `assign()` is
-   * used rather than `back()`.
+   * 返回選單（版面左上角）：未開局直接回去；已開局先彈確認，確認鈕鎖五秒（與切換模式同一個門檻）。
+   * 「開局」由這個遊戲自己定義：合成玩法是「投放過至少一顆」—— 分數、合成數都只可能出現在它之後。
+   * 確認後先記錄並上載，再回到不帶 `?game=` 的路徑 —— 那條路徑就是選單。上一頁的歷史紀錄
+   * 不歸我們管，所以只用 `assign()` 而不是 `back()`。
+   * Back to the menu (top-left of the layout): an untouched run leaves at once; a started one gets a
+   * confirmation locked for five seconds (the same bar as a mode switch). "Started" is the game's
+   * own definition: the merge game counts drops, since scores and merges cannot precede the first
+   * one. On confirmation the run is recorded and uploaded, then the path with no `?game=` — the
+   * menu — is assigned. The history stack is not ours to drive, so `assign()` rather than `back()`.
    */
   attachBackToMenu({
     button: layout.chrome.back,
+    host: layout.root,
+    hasStarted: (): boolean => session.totalDrops > 0,
     onLeave: (): void => {
       recordRun();
       syncRun();
