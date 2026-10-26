@@ -5,7 +5,7 @@
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { loadConfig, type FetchLike } from '../src/core/configLoader';
+import { loadBranding, loadConfig, type FetchLike } from '../src/core/configLoader';
 
 /**
  * 以檔名（`levels.json` 等）為 key 的假檔案系統。
@@ -396,5 +396,33 @@ describe('public/config — 兩個模式的技能名單 / each mode’s skill ro
     for (const id of read('levels.json')['skillIds'] as string[]) {
       expect(known.has(id), id).toBe(true);
     }
+  });
+});
+
+describe('loadBranding — 選單專用 / menu-only', () => {
+  it('fetches the branding file and nothing else', async () => {
+    const asked: string[] = [];
+    const fetcher: FetchLike = async (input: string): Promise<Response> => {
+      asked.push(input);
+      return new Response(input.endsWith('branding.json') ? VALID_BRANDING : '', { status: 200 });
+    };
+
+    const branding = await loadBranding({ ...OPTIONS, fetcher });
+
+    expect(branding.gameName).toBe('X');
+    expect(asked).toHaveLength(1);
+  });
+
+  /*
+   * 聲明是法定緩衝：連檔案都拿不到時，仍必須有內建預設的那一份。
+   * The notice is a legal buffer: even with no file at all, the built-in default must survive.
+   */
+  it('keeps the built-in notice when the file is missing', async () => {
+    const { warn } = collectWarnings();
+    const branding = await loadBranding({ ...OPTIONS, fetcher: makeFetcher({}), onWarn: warn });
+
+    expect(branding.noticeZh.length).toBeGreaterThan(0);
+    expect(branding.notice.length).toBeGreaterThan(0);
+    expect(branding.gameName.length).toBeGreaterThan(0);
   });
 });

@@ -746,3 +746,20 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<AllCo
     branding: sanitizeBranding(brandingRaw, warn),
   };
 }
+
+/**
+ * 只載入品牌資訊（選單用）：名稱與非官方聲明，不碰等級表、技能與容器。
+ * Loads branding alone (for the menu): the names and the unofficial notice, touching neither the levels, the skills nor the container.
+ *
+ * 選單不建遊戲，所以不該為了顯示一行聲明而抓三份用不到的配置；路徑仍走同一個 `loadConfig` 的檔案佈局。
+ * The menu does not build the game, so it must not fetch three unused configs just to show one line of notice; the path follows the same layout as `loadConfig`.
+ */
+export async function loadBranding(options: LoadConfigOptions = {}): Promise<BrandingConfig> {
+  const warn: ConfigWarning = options.onWarn ?? ((message: string): void => console.warn(`[config] ${message}`));
+  const base = options.baseUrl ?? import.meta.env.BASE_URL;
+  const fetcher: FetchLike = options.fetcher ?? ((input: string): Promise<Response> => fetch(input));
+
+  const raw = await fetchJson(fetcher, joinUrl(base, 'config/branding.json'), warn);
+
+  return sanitizeBranding(raw, warn);
+}
