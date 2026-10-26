@@ -1,11 +1,13 @@
 import './styles/main.css';
 import { attachDropInput } from './core/input';
-import { loadConfig } from './core/configLoader';
+import { loadBranding, loadConfig } from './core/configLoader';
 import { resolveLocalizedName } from './core/localizedName';
+import { gameHref, parseRoute } from './core/route';
 import type { AllConfig } from './core/types';
+import { GAME_CATALOG } from './game/gameCatalog';
 import { FrameLoop } from './game/loop';
 import type { LeaderboardSource } from './game/leaderboard';
-import { createLocalStore } from './game/localStore';
+import { createLocalStore, type LocalStore } from './game/localStore';
 import { modeDefinition, modeKeys, type ModeId } from './game/mode';
 import { createPreferencesStore, type PreferencesStore } from './game/preferences';
 import { createProgressStore, type ProgressStore } from './game/progress';
@@ -22,6 +24,7 @@ import { Hud } from './ui/hud';
 import { createLayout, type Layout } from './ui/layout';
 import { createLeaderboard, type LeaderboardView } from './ui/leaderboard';
 import { createMeltingList, type MeltingList } from './ui/meltingList';
+import { createMenu } from './ui/menu';
 import { createMobileGate, type MobileGate } from './ui/mobileGate';
 import { createMusicToggle, type MusicToggle } from './ui/music';
 import { createNotice } from './ui/notice';
@@ -35,9 +38,9 @@ import { createSkillHint, type SkillHint } from './ui/skillHint';
 import { createSpMeter, type SpMeter } from './ui/spMeter';
 
 /**
- * 應用程式入口：只做組裝 —— 載入配置與素材、建立版面與視埠，再串起各模組，不含任何遊戲邏輯。
- * Application entry point: pure assembly — it loads config and assets, builds the layout and the
- * viewport, and wires the modules together; no game logic lives here.
+ * 應用程式入口：只做分流 —— 選單，或某一個遊戲。共用層（儲存、偏好、語系、手機把關）在此建一次。
+ * Application entry point: routing only — the menu, or one game. Shared layers (storage,
+ * preferences, locale, mobile gate) are built once here.
  */
 
 /**
@@ -95,17 +98,81 @@ async function bootstrap(): Promise<void> {
   i18n.setLocale(preferences.locale);
   i18n.setDocumentLang();
 
+  /*
+   * 手機把關要掛在**畫布外**：它得用真實像素蓋滿整個視窗，而不是跟著 1920×1080 一起縮到三成。
+   * 選單與遊戲共用同一個 —— 兩邊都會被手機的直向擋下來。
+   * The mobile gate mounts **outside the canvas**: it has to fill the viewport in real pixels rather
+   * than shrink to a third along with the 1920×1080 stage. The menu and the game share one: both
+   * get stopped by a portrait phone.
+   */
+  const mobileGate = createMobileGate({ host });
+
+  /*
+   * 分流：`?game=` 決定進哪一個遊戲，沒有參數（或指向未推出的遊戲）就是選單。切換一律重新載入
+   * —— 等級表、物理世界與排行榜憑證都只在進入遊戲的那一刻才建立，選單不預先付這筆成本。
+   * Routing: `?game=` picks a game; no parameter (or a planned game) means the menu. Switching always
+   * reloads: the level table, the physics world and the leaderboard token are built only when a game
+   * is entered, so the menu does not pay for them.
+   */
+  const route = parseRoute(window.location.search);
+
+  if (route.kind === 'menu') {
+    await bootMenu({ host });
+
+    return;
+  }
+
+  await bootGame({ host, preferences, localStore, mobileGate });
+}
+
+/**
+ * 選單畫面：只抓品牌資訊（名稱與非官方聲明），不建等級表、素材、物理或排行榜。
+ * The menu screen: it fetches branding only (names and the unofficial notice) — no levels, assets,
+ * physics or leaderboard.
+ *
+ * @param options 宿主節點 / The host element.
+ */
+async function bootMenu(options: { host: HTMLElement }): Promise<void> {
+  const branding = await loadBranding();
+
+  document.title = `${branding.gameName} ${branding.gameNameZh}`;
+
+  const menu = createMenu({
+    host: options.host,
+    games: GAME_CATALOG,
+    onSelect: (id): void => {
+      /* 重新載入等同「開新的一局」：憑證在進入遊戲那一刻才鑄，宣稱時長才對得上。
+         A reload is a new run: the token is minted on entry, so the claimed duration lines up. */
+      window.location.assign(gameHref(id));
+    },
+  });
+
+  /* 非官方聲明在選單與遊戲都要在（法定緩衝），兩邊共用同一個建立器。
+     The unofficial notice belongs on the menu as much as in the game (a legal buffer); both use
+     the same builder. */
+  menu.notice.append(createNotice({ zh: branding.noticeZh, en: branding.notice }));
+}
+
+/**
+ * 遊戲畫面：目前的完整裝配（版面 → 配置 → 素材 → 物理 → HUD → 排行榜 → 迴圈）。
+ * The game screen: the full assembly as it stands (layout → config → assets → physics → HUD →
+ * leaderboard → loop).
+ *
+ * @param options 宿主、偏好與手機把關（後兩者由 `bootstrap()` 建立後傳入） / Host, preferences and
+ *   the mobile gate, the latter two built by `bootstrap()`.
+ */
+async function bootGame(options: {
+  host: HTMLElement;
+  preferences: PreferencesStore;
+  localStore: LocalStore;
+  mobileGate: MobileGate;
+}): Promise<void> {
+  const { host, preferences, localStore, mobileGate } = options;
+
   /* 先建版面：即使配置或素材全部失敗，玩家至少看得到骨架與非官方聲明。
      Build the layout first: even if all config/assets fail, the player still sees the skeleton and
      the notice. */
   const layout = createLayout(host);
-
-  /*
-   * 手機把關要掛在**畫布外**：它得用真實像素蓋滿整個視窗，而不是跟著 1920×1080 一起縮到三成。
-   * The mobile gate mounts **outside the canvas**: it has to fill the viewport in real pixels rather
-   * than shrink to a third along with the 1920×1080 stage.
-   */
-  const mobileGate = createMobileGate({ host });
 
   /*
    * 背景音樂：默認播放，音符鍵靜音。它不屬於任何區域，所以與配置、素材、物理都無關 ——

@@ -59,8 +59,25 @@ export const LAYOUT_RECTS = {
 } as const satisfies Record<string, Rect>;
 
 /**
- * 供 `ui/layout.ts` 定位用的區域鍵（不含只作紀錄的 `back`）。
- * Region keys for `ui/layout.ts` (excluding the record-only `back`).
+ * 選單畫面的幾何：標題、圖示表與格子尺寸，同樣是 1920×1080 畫布上的絕對座標。
+ * Menu geometry: the title, the tile table and the tile size — absolute coordinates on the same 1920×1080 canvas.
+ *
+ * 表是「圖示在上、遊戲名在下」，一格 320×380：手機把畫布縮到三成後仍有 ~110px，是可靠的觸控目標。
+ * The table is art above and name below, one tile 320×380: even at a third of the scale on a phone
+ * that is ~110px, a reliable tap target.
+ */
+export const MENU_RECTS = {
+  /** 標題：安全框內整行，字級與對齊由 `styles/menu.css` 決定。 */
+  title: { x: SAFE_INSET, y: 112, width: DESIGN_WIDTH - SAFE_INSET * 2, height: 72 } satisfies Rect,
+  /** 三格並排：3 × 320 ＋ 2 × 72 ＝ 1104，置中 ⇒ x ＝ (1920 − 1104) / 2 ＝ 408。 */
+  grid: { x: 408, y: 300, width: 1104, height: 380 } satisfies Rect,
+  tile: { width: 320, height: 380 },
+  gap: 72,
+} as const;
+
+/**
+ * 供 `ui/layout.ts` 定位用的區域鍵（不含 `back`：它是常駐介面而非七個區域之一）。
+ * Region keys for `ui/layout.ts` (excluding `back`, which is chrome rather than one of the seven regions).
  */
 export type LayoutKey = Exclude<keyof typeof LAYOUT_RECTS, 'back'>;
 
